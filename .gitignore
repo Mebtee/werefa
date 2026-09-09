@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+coverage/
+
+# Compiled / generated
+*.tsbuildinfo
+apps/api/src/generated/
+
+# Prisma
+packages/db/prisma/*.db
+packages/db/prisma/generated/
+
+# Environment / secrets — NEVER commit real credentials
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# Local data (docker volumes mounted outside repo, kept here only if misconfigured)
+.local/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Playwright report
+test-results/
+playwright-report/

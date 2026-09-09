@@ -1,0 +1,36 @@
+{
+  "name": "@werefa/db",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Prisma schema, migrations, RLS bootstrap and tenant-scoped DB access (Werefa)",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",
+    "db:generate": "npx prisma generate --schema prisma/schema.prisma",
+    "db:migrate": "tsx src/run-migrate.ts",
+    "db:roles": "tsx src/bootstrap-roles.ts",
+    "db:rls": "tsx src/bootstrap-rls.ts",
+    "db:test:setup": "tsx src/test-setup.ts",
+    "test": "vitest run test",
+    "test:unit": "vitest run test"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.6.0",
+    "@types/pg": "^8.11.10",
+    "pg": "^8.13.0",
+    "prisma": "^6.1.0",
+    "tsx": "^4.23.13",
+    "typescript": "^5.5.4",
+    "vitest": "^2.1.1",
+    "wait-on": "^9.1.0"
+  }
+}

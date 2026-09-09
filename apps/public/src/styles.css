@@ -1,0 +1,300 @@
+:root {
+  font-family:
+    system-ui,
+    -apple-system,
+    Segoe UI,
+    Roboto,
+    sans-serif;
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: #f4f6f9;
+}
+
+.container {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+.site-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.9rem 1.2rem;
+  background: #1a3555;
+  color: #fff;
+}
+
+.site-header .brand {
+  font-weight: 700;
+  color: #fff;
+  text-decoration: none;
+  font-size: 1.1rem;
+}
+
+.site-header .ghost {
+  color: #cfd9e6;
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.site-footer {
+  text-align: center;
+  padding: 1.5rem;
+  font-size: 0.85rem;
+}
+
+.card {
+  max-width: 40rem;
+  margin: 2rem auto;
+  padding: 2rem;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 12%);
+}
+
+h1 {
+  margin-top: 0;
+}
+
+.muted {
+  color: #5f6b7c;
+}
+
+.small {
+  font-size: 0.85rem;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.button {
+  display: inline-block;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  background: #1a73e8;
+  color: #fff;
+  text-decoration: none;
+}
+
+.button.secondary {
+  background: #e8eef7;
+  color: #1a3555;
+}
+
+.pill {
+  padding: 0.25rem 0.75rem;
+  border-radius: 999px;
+  background: #eceff3;
+  font-size: 0.85rem;
+}
+
+.pill.warn {
+  background: #fdeeca;
+  color: #7a4a00;
+}
+
+.business-page {
+  overflow: hidden;
+  max-width: 44rem;
+}
+
+.business-page .cover {
+  width: calc(100% + 4rem);
+  margin: -2rem -2rem 0;
+  height: 11rem;
+  object-fit: cover;
+  display: block;
+}
+
+.business-head {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  margin: 1.2rem 0;
+}
+
+.business-head .logo {
+  width: 6.5rem;
+  height: 6.5rem;
+  border-radius: 10px;
+  object-fit: cover;
+  border: 1px solid #e2e8f0;
+}
+
+.business-head .logo.placeholder {
+  display: grid;
+  place-items: center;
+  background: #f1f5fb;
+  color: #5f6b7c;
+  font-size: 0.8rem;
+  border: 1px dashed #c6d4e4;
+}
+
+.business-head h1 {
+  margin: 0;
+}
+
+.notice {
+  background: #fdeeca;
+  border-radius: 8px;
+  padding: 0.7rem 1rem;
+  color: #7a4a00;
+}
+
+.contact {
+  display: grid;
+  grid-template-columns: 8rem 1fr;
+  gap: 0.4rem 1rem;
+  margin: 1.2rem 0;
+}
+
+.contact dt {
+  font-weight: 600;
+  color: #5f6b7c;
+}
+
+.contact dd {
+  margin: 0;
+}
+
+code {
+  background: #eceff3;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+}
+
+.booking {
+  text-align: left;
+}
+
+.booking h2 {
+  margin-top: 0;
+}
+
+.catalog-item {
+  padding: 0.6rem 0;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.catalog-item.selected {
+  background: #f7faff;
+  border-radius: 8px;
+  padding: 0.6rem;
+}
+
+label {
+  font-weight: 600;
+}
+
+label.service-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+label.variation,
+label.addon,
+.field-grid label {
+  display: grid;
+  gap: 0.3rem;
+  margin-bottom: 0.9rem;
+  font-weight: 600;
+}
+
+label.addon {
+  display: inline-flex;
+  grid-template-columns: none;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.3rem 1rem 0.3rem 0;
+  font-weight: 500;
+}
+
+input[type='text'],
+input[type='datetime-local'],
+input[type='tel'],
+select,
+textarea {
+  padding: 0.5rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid #c6d4e4;
+  font-size: 1rem;
+  font-family: inherit;
+  background: #fff;
+  color: inherit;
+}
+
+input[type='file'] {
+  font-size: 0.9rem;
+}
+
+select:focus,
+textarea:focus,
+input:focus {
+  outline: 2px solid #cfdff6;
+  border-color: #1a73e8;
+}
+
+button {
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem 1rem;
+  margin: 1rem 0;
+}
+
+.field-grid .span-2 {
+  grid-column: 1 / -1;
+}
+
+.booking-totals {
+  margin: 0.6rem 0;
+}
+
+.notice.ok {
+  background: #e6f4ea;
+  color: #1e6042;
+}
+
+.alert {
+  color: #b3261e;
+}
+
+.booking-summary {
+  grid-template-columns: 8rem 1fr;
+}
+
+.booking.success {
+  text-align: center;
+}
+
+.booking.success .contact {
+  text-align: left;
+}
+
+.booking.success .notice {
+  text-align: left;
+}

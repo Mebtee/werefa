@@ -1,0 +1,807 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  Owner
+  Admin
+  SuperAdmin
+}
+
+model User {
+  id                 String    @id @default(uuid()) @db.Uuid
+  email              String    @unique @db.Citext
+  passwordHash       String    @map("password_hash") @db.VarChar(255)
+  role               UserRole  @default(Owner)
+  isEmailVerified    Boolean   @default(false) @map("is_email_verified")
+  isLockedUntil      DateTime? @map("is_locked_until")
+  failedLoginCount   Int       @default(0) @map("failed_login_count")
+  disabledAt         DateTime? @map("disabled_at")
+  twoFactorSecretEnc String?   @map("two_factor_secret_enc")
+  twoFactorEnabledAt DateTime? @map("two_factor_enabled_at")
+  recoveryEmail      String?   @map("recovery_email") @db.Citext
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  sessions             Session[]
+  businessOwnerships   BusinessOwner[]
+  securityEvents       SecurityEvent[]
+  passwordResetTokens  PasswordResetToken[]
+  recoveryTokens       RecoveryToken[]
+
+  @@map("user")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash") @db.Char(64)
+  createdAt DateTime  @default(now()) @map("created_at")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+
+  user      User      @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("password_reset_token")
+}
+
+model RecoveryToken {
+  id                String    @id @default(uuid()) @db.Uuid
+  superAdminUserId  String    @map("super_admin_user_id") @db.Uuid
+  codeHash          String    @unique @map("code_hash") @db.Char(64)
+  createdAt         DateTime  @default(now()) @map("created_at")
+  expiresAt         DateTime  @map("expires_at")
+  usedAt            DateTime? @map("used_at")
+
+  superAdminUser    User      @relation(fields: [superAdminUserId], references: [id])
+
+  @@index([superAdminUserId])
+  @@map("recovery_token")
+}
+
+model Session {
+  id                String    @id @default(uuid()) @db.Uuid
+  userId            String    @map("user_id") @db.Uuid
+  tokenHash         String    @unique @map("token_hash") @db.Char(64)
+  issuedAt          DateTime  @default(now()) @map("issued_at")
+  expiresAt         DateTime  @map("expires_at")
+  ip                String?   @db.Inet
+  deviceFingerprint String?   @map("device_fingerprint")
+  recognizedDevice  Boolean   @default(false) @map("recognized_device")
+  activeBusinessId  String?   @map("active_business_id") @db.Uuid
+  revokedAt         DateTime? @map("revoked_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  user              User      @relation(fields: [userId], references: [id])
+  activeBusiness    Business? @relation("BusinessActiveSession", fields: [activeBusinessId], references: [id])
+
+  @@index([userId])
+  @@index([activeBusinessId])
+  @@map("session")
+}
+
+model Business {
+  id           String    @id @default(uuid()) @db.Uuid
+  publicSlug   String    @unique @map("public_slug") @db.Citext
+  name         String
+
+  // Business-category (REQ-215). Stored as a plain string validated in the
+  // application against the current allowlist {"Salon & Barber","Other"} so the
+  // set can grow later without a schema/enum migration (REQ-003/004).
+  category     String?   @map("category") @db.VarChar(50)
+
+  // Business profile (REQ-209/210/211/213).
+  description  String?   @db.Text
+  phone        String?   @map("phone")
+  contactEmail String?   @map("contact_email") @db.Citext
+  address      String?   @map("address")
+  latitude     Decimal?  @db.Decimal(9, 6)
+  longitude    Decimal?  @db.Decimal(9, 6)
+  googleMapsLink    String? @map("google_maps_link")
+  openStreetMapLink String? @map("open_street_map_link")
+
+  // Media (REQ-208): exactly one logo and one cover photo, referenced by
+  // business-scoped object-storage keys. MIME is captured so the media-serving
+  // endpoint can replay the correct content type.
+  logoKey      String?   @map("logo_key")
+  logoMime     String?   @map("logo_mime")
+  coverKey     String?   @map("cover_key")
+  coverMime    String?   @map("cover_mime")
+
+  // Lifecycle (REQ-216) + pause (REQ-143..149, REQ-153..157).
+  deactivatedAt DateTime? @map("deactivated_at")
+  isPaused      Boolean   @default(false) @map("is_paused")
+  pausedUntil   DateTime? @map("paused_until") // null when paused indefinitely
+  pauseMessage  String?   @map("pause_message")
+  trialEndsAt   DateTime? @map("trial_ends_at") // REQ-006/128 30-day free trial
+
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  owners      BusinessOwner[]
+  sessions    Session[]       @relation("BusinessActiveSession")
+  securityEvents SecurityEvent[]
+  services      Service[]
+  serviceVariations ServiceVariation[]
+  addOns        AddOn[]
+  bookings      Booking[]
+  bookingServiceItems BookingServiceItem[]
+  bookingStatusHistory BookingStatusHistory[]
+  payments      Payment[]
+  paymentStatusHistory PaymentStatusHistory[]
+  paymentRejectionEvents PaymentRejectionEvent[]
+  paymentProofs PaymentProof[]
+  slotLocks     SlotLock[]
+  resubmissionVerifications ResubmissionVerification[]
+  notifications Notification[]
+  notificationDeliveries NotificationDelivery[]
+  telegramConnections TelegramConnection[]
+  scheduleVersions ScheduleVersion[]
+  workingPeriods WorkingPeriod[]
+  specialDates   SpecialDate[]
+  specialDatePeriods SpecialDatePeriod[]
+  blockedPeriods BlockedPeriod[]
+  scheduleConflicts ScheduleConflict[]
+  scheduleExceptions ScheduleException[]
+
+  @@map("business")
+}
+
+model BusinessOwner {
+  businessId String   @map("business_id") @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  business   Business @relation(fields: [businessId], references: [id])
+  user       User     @relation(fields: [userId], references: [id])
+
+  @@id([businessId, userId])
+  @@map("business_owner")
+}
+
+/**
+ * Service catalog (Domain 8 — Services/Pricing, Prompt 10).
+ *
+ * Tenancy: every row carries the owning `business_id` (shared-schema
+ * multi-tenancy, doc 04) and is RLS-scoped by it. Prices are integer minor
+ * units (base_price_minor / *_delta_minor as BIGINT — money is never float,
+ * REQ-071) and durations are whole minutes (base_duration_minutes, REQ-226).
+ *
+ * Lifecycle is exactly active/deactivated (`is_active`), REQ-081; deactivation
+ * (REQ-078) retains the row + historical references (REQ-080) while hiding it
+ * from new selection and the public catalog (REQ-079). Hard delete (REQ-077)
+ * is refused by the service layer when future bookings exist (boundary seam)
+ * and cascades to this service's variations/add-ons.
+ *
+ * `service_variation`: options with a signed price/duration delta relative to
+ *   the parent service's base (REQ-072). Effective totals
+ *   (base + delta) are validated at the app layer and must stay
+ *   >= 0 minor / >= 1 minute.
+ * `add_on`: additive deltas to price and/or duration (REQ-073), both >= 0
+ *   (REQ-073 AC1: increases the booking value by the configured values).
+ */
+model Service {
+  id                 String   @id @default(uuid()) @db.Uuid
+  businessId         String   @map("business_id") @db.Uuid
+  name               String
+  basePriceMinor     BigInt   @default(0) @map("base_price_minor")
+  baseDurationMinutes Int     @map("base_duration_minutes")
+  isActive           Boolean  @default(true) @map("is_active")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  business   Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  variations ServiceVariation[]
+  addOns     AddOn[]
+  bookingItems BookingServiceItem[]
+
+  @@unique([businessId, name])
+  @@index([businessId, isActive])
+  @@map("service")
+}
+
+model ServiceVariation {
+  id                  String   @id @default(uuid()) @db.Uuid
+  serviceId           String   @map("service_id") @db.Uuid
+  businessId          String   @map("business_id") @db.Uuid
+  name                String
+  priceDeltaMinor     BigInt   @default(0) @map("price_delta_minor")
+  durationDeltaMinutes Int     @default(0) @map("duration_delta_minutes")
+  isActive            Boolean  @default(true) @map("is_active")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  service  Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([serviceId, name])
+  @@index([businessId])
+  @@map("service_variation")
+}
+
+model AddOn {
+  id                  String   @id @default(uuid()) @db.Uuid
+  serviceId           String   @map("service_id") @db.Uuid
+  businessId          String   @map("business_id") @db.Uuid
+  name                String
+  priceDeltaMinor     BigInt   @default(0) @map("price_delta_minor")
+  durationDeltaMinutes Int     @default(0) @map("duration_delta_minutes")
+  isActive            Boolean  @default(true) @map("is_active")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  service  Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([serviceId, name])
+  @@index([businessId])
+  @@map("add_on")
+}
+
+model SecurityEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  // Business/tenant scope for audited business-management events (doc 04 §11,
+  // doc 22). Platform events unrelated to a tenant leave this null.
+  businessId String? @map("business_id") @db.Uuid
+  type      String
+  ip        String?  @db.Inet
+  device    String?
+  browser   String?
+  result    String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user      User?    @relation(fields: [userId], references: [id])
+  business  Business? @relation(fields: [businessId], references: [id])
+
+  @@index([userId])
+  @@index([businessId])
+  @@index([createdAt])
+  @@map("security_event")
+}
+
+// ===========================================================================
+// Booking & Payment domain (Prompt 11 — Domain 5/6/10/11).
+//
+// Tenancy: every row carries the owning `business_id` (shared-schema
+// multi-tenancy, doc 04) and is RLS-scoped by it (policies in rls.sql).
+//
+// Booking status (six values, doc 07 §3 / doc 09 §2) and PAYMENT status
+// (PENDING/ACCEPTED/REJECTED only, doc 09 §3) are deliberately SEPARATE
+// enums/columns — never collapsed (REQ-100).
+// ===========================================================================
+
+model Booking {
+  id           String   @id @default(uuid()) @db.Uuid
+  businessId   String   @map("business_id") @db.Uuid
+  customerName String   @map("customer_name")
+  customerPhone String  @map("customer_phone")
+  note         String?  @db.Text
+  startAt      DateTime @map("start_at")
+  endAt        DateTime @map("end_at")
+  // Denormalized slot date used by the slot_lock identity + overlap queries.
+  slotDate     DateTime @map("slot_date") @db.Date
+  status       BookingStatus @default(PAYMENT_PENDING)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  business       Business            @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  serviceItems   BookingServiceItem[]
+  statusHistory  BookingStatusHistory[]
+  payment        Payment?
+  slotLocks      SlotLock[]
+  verifications  ResubmissionVerification[]
+  notifications  Notification[]
+  telegramConnection TelegramConnection?
+  scheduleExceptions ScheduleException[]
+  scheduleConflicts ScheduleConflict[]
+
+  @@index([businessId, startAt])
+  @@index([businessId, status])
+  @@map("booking")
+}
+
+enum BookingStatus {
+  PAYMENT_PENDING
+  CONFIRMED
+  REJECTED
+  COMPLETED
+  NO_SHOW
+  CANCELLED
+}
+
+enum PaymentMethod {
+  BANK_TRANSFER
+  TELEBIRR_MOBILE_MONEY
+}
+
+enum PaymentStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+enum SlotLockStatus {
+  LOCKED
+  ALLOCATED
+  RELEASED
+}
+
+enum ActorType {
+  OWNER
+  ADMIN
+  SUPER_ADMIN
+  SYSTEM
+}
+
+/// Historical service snapshot per booking (REQ-074/075/076/080): immutable,
+/// written once inside the booking transaction and never mutated. `serviceId`
+/// is nullable + SET NULL on service delete: snapshots (name/price/duration)
+/// keep the record replayable without a live catalog reference (REQ-077 only
+/// blocks deletion while *future* bookings exist, never for past bookings).
+model BookingServiceItem {
+  id              String   @id @default(uuid()) @db.Uuid
+  bookingId       String   @map("booking_id") @db.Uuid
+  businessId      String   @map("business_id") @db.Uuid
+  serviceId       String?  @map("service_id") @db.Uuid
+  nameSnapshot    String   @map("name_snapshot")
+  unitPriceMinor  BigInt   @map("unit_price_minor")
+  durationMinutes Int      @map("duration_minutes")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  booking  Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  service  Service? @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+
+  @@index([bookingId])
+  @@index([businessId])
+  @@index([serviceId])
+  @@map("booking_service_item")
+}
+
+model BookingStatusHistory {
+  id          String     @id @default(uuid()) @db.Uuid
+  bookingId   String     @map("booking_id") @db.Uuid
+  businessId  String     @map("business_id") @db.Uuid
+  fromStatus  BookingStatus @map("from_status")
+  toStatus    BookingStatus @map("to_status")
+  actorType   ActorType  @map("actor_type")
+  actorUserId String?    @map("actor_user_id") @db.Uuid
+  reason      String?
+  occurredAt  DateTime   @default(now()) @map("occurred_at")
+
+  booking  Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId])
+  @@index([businessId, occurredAt])
+  @@map("booking_status_history")
+}
+
+model Payment {
+  id           String        @id @default(uuid()) @db.Uuid
+  businessId   String        @map("business_id") @db.Uuid
+  bookingId    String        @unique @map("booking_id") @db.Uuid
+  status       PaymentStatus @default(PENDING)
+  method       PaymentMethod
+  prepaidMinor BigInt        @default(0) @map("prepaid_minor")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  booking          Booking               @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  business         Business              @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  proofs           PaymentProof[]
+  statusHistory    PaymentStatusHistory[]
+  rejectionEvents  PaymentRejectionEvent[]
+
+  @@index([businessId])
+  @@index([businessId, status])
+  @@map("payment")
+}
+
+model PaymentStatusHistory {
+  id          String        @id @default(uuid()) @db.Uuid
+  paymentId   String        @map("payment_id") @db.Uuid
+  businessId  String        @map("business_id") @db.Uuid
+  fromStatus  PaymentStatus @map("from_status")
+  toStatus    PaymentStatus @map("to_status")
+  actorType   ActorType     @map("actor_type")
+  actorUserId String?       @map("actor_user_id") @db.Uuid
+  occurredAt  DateTime      @default(now()) @map("occurred_at")
+
+  payment  Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId])
+  @@index([businessId])
+  @@map("payment_status_history")
+}
+
+/// Rejection reason for a payment proof (mandatory per REQ-68/124). Stored
+/// separately from payment status (which stays REJECTED) and delivered via the
+/// rejection notification event.
+model PaymentRejectionEvent {
+  id           String   @id @default(uuid()) @db.Uuid
+  paymentId    String   @map("payment_id") @db.Uuid
+  businessId   String   @map("business_id") @db.Uuid
+  reason       String
+  createdByUserId String? @map("created_by_user_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  payment  Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId])
+  @@map("payment_rejection_event")
+}
+
+model PaymentProof {
+  id              String    @id @default(uuid()) @db.Uuid
+  paymentId       String    @map("payment_id") @db.Uuid
+  businessId      String    @map("business_id") @db.Uuid
+  fileObjectId    String?   @map("file_object_id") @db.Uuid
+  storageKey      String    @map("storage_key")
+  mime            String
+  sizeBytes       Int     @map("size_bytes")
+  submissionKey   String    @unique @map("submission_key")
+  replacedByProofId String? @map("replaced_by_proof_id") @db.Uuid
+  submittedAt     DateTime  @default(now()) @map("submitted_at")
+
+  payment  Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId])
+  @@index([businessId])
+  @@index([submissionKey])
+  @@map("payment_proof")
+}
+
+model SlotLock {
+  id         String         @id @default(uuid()) @db.Uuid
+  businessId String         @map("business_id") @db.Uuid
+  bookingId  String?        @map("booking_id") @db.Uuid
+  slotDate   DateTime       @map("slot_date") @db.Date
+  startAt    DateTime       @map("start_at")
+  endAt      DateTime       @map("end_at")
+  status     SlotLockStatus @default(LOCKED)
+  createdAt  DateTime       @default(now()) @map("created_at")
+  releasedAt DateTime?      @map("released_at")
+  releasedBy String?        @map("released_by")
+  releasedByUserId String?  @map("released_by_user_id") @db.Uuid
+
+  booking  Booking? @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, slotDate])
+  @@map("slot_lock")
+}
+
+/// One-time, expiring, phone-scoped, hashed resubmission verification code
+/// (architecture doc 08 §9 / doc 07 `resubmission_verification`). Single-use.
+model ResubmissionVerification {
+  id        String   @id @default(uuid()) @db.Uuid
+  bookingId String   @map("booking_id") @db.Uuid
+  businessId String  @map("business_id") @db.Uuid
+  phone     String
+  codeHash  String   @map("code_hash") @db.Char(64)
+  purpose   String   @default("BOOKING_RESUBMISSION")
+  createdAt DateTime @default(now()) @map("created_at")
+  expiresAt DateTime @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  attempts  Int      @default(0)
+
+  booking  Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId])
+  @@index([businessId])
+  @@map("resubmission_verification")
+}
+
+/// Notification/outbox row (doc 13): a durable, business-scoped domain event
+/// that later notification processing turns into delivery. Booking
+/// transactions WRITE these rows but never depend on external delivery.
+model Notification {
+  id           String              @id @default(uuid()) @db.Uuid
+  businessId   String?             @map("business_id") @db.Uuid
+  bookingId    String?             @map("booking_id") @db.Uuid
+  type         String
+  tenantScope  String              @default("BOOKING") @map("tenant_scope")
+  payload      Json?
+  createdAt    DateTime            @default(now()) @map("created_at")
+
+  booking  Booking? @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  business Business? @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  deliveries NotificationDelivery[]
+
+  @@index([businessId])
+  @@index([bookingId])
+  @@index([type])
+  @@map("notification")
+}
+
+// ===========================================================================
+// Notifications & Telegram domain (PROMPT 13 — Domains 7/16, docs 12/13/17).
+//
+// Tenancy: delivery + connection rows carry the owning `business_id`
+// (shared-schema multi-tenancy, doc 04) and are RLS-scoped by it (policies in
+// rls.sql). `telegram_update` is platform-level (dedup only, no tenant scope)
+// and left OPEN (like `security_event`).
+//
+// Delivery pipeline (doc 13 §3/§4): booking transactions write `notification`
+// outbox rows only; `notification_delivery` rows are the durable send-intent
+// for one recipient × channel, produced later by the fan-out sweep from the
+// SAME business-scoped notification. `idempotency_key` is UNIQUE so reruns of
+// the fan-out / a worker are no-ops. Status PENDING → SENDING → SENT |
+// FAILED(retryable) | DEAD_LETTERED | SUPPRESSED (recipient not connected /
+// channel unavailable). `attempts` + `next_attempt_at` drive the bounded
+// exponential retry by the `notification-retry` sweep (doc 17). Provider calls
+// never touch booking or payment state.
+//
+// Telegram connection (doc 12 §3/§4, REQ-056): zero-or-one chat bound to one
+// booking; booking works fine without it. PENDING carries a one-time, expiring,
+// sha256-hashed, non-guessable connect token (issued only after the customer
+// proves the booking phone). ACTIVE is set with `chat_id` by the webhook.
+// REVOKED = disconnected; EXPIRED = token never used in time. Each booking has
+// at most one row (unique booking_id); a chat links to at most one connection.
+// ===========================================================================
+
+enum NotificationChannel {
+  EMAIL
+  TELEGRAM
+}
+
+enum NotificationDeliveryStatus {
+  PENDING
+  SENDING
+  SENT
+  FAILED
+  DEAD_LETTERED
+  SUPPRESSED
+}
+
+enum TelegramConnectionStatus {
+  PENDING
+  ACTIVE
+  REVOKED
+  EXPIRED
+}
+
+/// Telegram chat + one-time connect token for a single booking (see block
+/// comment above). `connectTokenExpiresAt` PENDING-only; one-time invalidation
+/// clears the token fields the moment the chat is bound.
+model TelegramConnection {
+  id                    String                  @id @default(uuid()) @db.Uuid
+  businessId            String                  @map("business_id") @db.Uuid
+  bookingId             String                  @map("booking_id") @db.Uuid
+  status                TelegramConnectionStatus @default(PENDING)
+  connectTokenHash      String?                 @map("connect_token_hash") @db.Char(64)
+  connectTokenExpiresAt DateTime?               @map("connect_token_expires_at")
+  chatId                BigInt?                 @map("chat_id")
+  createdAt             DateTime                @default(now()) @map("created_at")
+  updatedAt             DateTime                @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  booking  Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@unique([bookingId])
+  @@unique([chatId])
+  @@index([businessId])
+  @@index([status])
+  @@map("telegram_connection")
+}
+
+/// Durable send intent for a single recipient × channel (doc 13 §3/§4).
+model NotificationDelivery {
+  id             String                   @id @default(uuid()) @db.Uuid
+  notificationId String                   @map("notification_id") @db.Uuid
+  businessId     String                   @map("business_id") @db.Uuid
+  channel        NotificationChannel
+  recipient      String
+  status         NotificationDeliveryStatus @default(PENDING)
+  idempotencyKey String                   @map("idempotency_key")
+  attempts       Int                      @default(0)
+  nextAttemptAt  DateTime?                @map("next_attempt_at")
+  sentAt         DateTime?                @map("sent_at")
+  lastError      String?                  @map("last_error")
+  createdAt      DateTime                 @default(now()) @map("created_at")
+  updatedAt      DateTime                 @updatedAt @map("updated_at")
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  business     Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([idempotencyKey])
+  @@index([status, nextAttemptAt])
+  @@index([businessId])
+  @@index([notificationId, channel])
+  @@map("notification_delivery")
+}
+
+/// Telegram webhook update dedup marker (doc 12 §5): at-most-once processing.
+/// Platform-level (no tenant scope, no RLS).
+model TelegramUpdate {
+  id        String   @id @default(uuid()) @db.Uuid
+  updateId  BigInt   @unique @map("update_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("telegram_update")
+}
+
+// ===========================================================================
+// Scheduling Management domain (PROMPT 12 — Domains 12/13/16, docs 10/13/21).
+//
+// Tenancy: every row carries the owning `business_id` (shared-schema
+// multi-tenancy, doc 04) and is RLS-scoped by it (policies in rls.sql).
+//
+// Concurrency: schedule saves/activations and slot availability run under the
+// SAME `pg_advisory_xact_lock(hashtext(business_id::text))` (doc 10 §8), so a
+// save cannot interleave a booking creation.
+//
+// Semantics: at most ONE ACTIVE version per business (partial unique index in
+// the migration); multiple PENDING allowed while paused (REQ-152); resume
+// activates the LATEST pending. day_of_week 0 = Sunday (JS). Minutes-of-day in
+// [0,1440). All instants minute-precision (REQ-226); calendar days are local
+// dates as UTC-midnight instants under the fixed UTC+3 offset (doc 10 §2).
+// No ACTIVE version => legacy all-day availability (doc 10 §2/§8). Exceptions
+// NEVER make a time generally bookable.
+// ===========================================================================
+
+enum ScheduleVersionStatus {
+  ACTIVE
+  PENDING
+  SUPERSEDED
+}
+
+enum ScheduleConflictStatus {
+  OPEN
+  RESOLVED_KEPT
+}
+
+model ScheduleVersion {
+  id                     String                @id @default(uuid()) @db.Uuid
+  businessId             String                @map("business_id") @db.Uuid
+  status                 ScheduleVersionStatus
+  actorType              ActorType             @map("actor_type")
+  actorUserId            String?               @map("actor_user_id") @db.Uuid
+  reason                 String?
+  bookingIntervalMinutes Int                   @default(30) @map("booking_interval_minutes")
+  createdAt              DateTime              @default(now()) @map("created_at")
+  updatedAt              DateTime              @updatedAt @map("updated_at")
+
+  business           Business             @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  workingPeriods     WorkingPeriod[]
+  specialDates       SpecialDate[]
+  specialDatePeriods SpecialDatePeriod[]
+  blockedPeriods     BlockedPeriod[]
+  conflicts          ScheduleConflict[]
+  exceptions         ScheduleException[]
+
+  @@index([businessId, status])
+  @@index([businessId, createdAt])
+  @@map("schedule_version")
+}
+
+/// Weekly working hours for a schedule version (REQ-082/083).
+model WorkingPeriod {
+  id                String   @id @default(uuid()) @db.Uuid
+  scheduleVersionId String   @map("schedule_version_id") @db.Uuid
+  businessId        String   @map("business_id") @db.Uuid
+  dayOfWeek         Int      @map("day_of_week")
+  startMinutes      Int      @map("start_minutes")
+  endMinutes        Int      @map("end_minutes")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  scheduleVersion ScheduleVersion @relation(fields: [scheduleVersionId], references: [id], onDelete: Cascade)
+  business        Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([scheduleVersionId])
+  @@index([businessId])
+  @@map("working_period")
+}
+
+/// Date-specific override that supersedes weekly hours for that day
+/// (REQ-085/086). `isClosed` closes the day; otherwise `periods` apply.
+model SpecialDate {
+  id                String   @id @default(uuid()) @db.Uuid
+  scheduleVersionId String   @map("schedule_version_id") @db.Uuid
+  businessId        String   @map("business_id") @db.Uuid
+  calendarDate      DateTime @map("calendar_date") @db.Date
+  isClosed          Boolean  @default(false) @map("is_closed")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  scheduleVersion ScheduleVersion     @relation(fields: [scheduleVersionId], references: [id], onDelete: Cascade)
+  business        Business            @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  periods         SpecialDatePeriod[]
+
+  @@unique([scheduleVersionId, calendarDate])
+  @@index([businessId])
+  @@map("special_date")
+}
+
+model SpecialDatePeriod {
+  id                String   @id @default(uuid()) @db.Uuid
+  specialDateId     String   @map("special_date_id") @db.Uuid
+  scheduleVersionId String   @map("schedule_version_id") @db.Uuid
+  businessId        String   @map("business_id") @db.Uuid
+  startMinutes      Int      @map("start_minutes")
+  endMinutes        Int      @map("end_minutes")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  specialDate     SpecialDate     @relation(fields: [specialDateId], references: [id], onDelete: Cascade)
+  scheduleVersion ScheduleVersion @relation(fields: [scheduleVersionId], references: [id], onDelete: Cascade)
+  business        Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([scheduleVersionId])
+  @@index([businessId])
+  @@map("special_date_period")
+}
+
+/// Arbitrary date/time block-out (REQ-084). Negates windows it overlaps;
+/// `reason` is owner-facing only.
+model BlockedPeriod {
+  id                String   @id @default(uuid()) @db.Uuid
+  scheduleVersionId String   @map("schedule_version_id") @db.Uuid
+  businessId        String   @map("business_id") @db.Uuid
+  startAt           DateTime @map("start_at")
+  endAt             DateTime @map("end_at")
+  reason            String?
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  scheduleVersion ScheduleVersion @relation(fields: [scheduleVersionId], references: [id], onDelete: Cascade)
+  business        Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([scheduleVersionId])
+  @@index([businessId, startAt])
+  @@map("blocked_period")
+}
+
+/// Durable audit + email trigger row (REQ-093/094/133). The exposed affected
+/// list is recomputed fresh on read; stored rows serve email + alerting.
+model ScheduleConflict {
+  id                 String                @id @default(uuid()) @db.Uuid
+  businessId         String                @map("business_id") @db.Uuid
+  scheduleVersionId  String                @map("schedule_version_id") @db.Uuid
+  bookingId          String                @map("booking_id") @db.Uuid
+  reason             String
+  status             ScheduleConflictStatus @default(OPEN)
+  createdAt          DateTime              @default(now()) @map("created_at")
+  resolvedAt         DateTime?             @map("resolved_at")
+  resolvedByUserId   String?               @map("resolved_by_user_id") @db.Uuid
+
+  business        Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  scheduleVersion ScheduleVersion @relation(fields: [scheduleVersionId], references: [id], onDelete: Cascade)
+  booking         Booking         @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@unique([scheduleVersionId, bookingId])
+  @@index([businessId])
+  @@index([bookingId])
+  @@map("schedule_conflict")
+}
+
+/// Owner "keep" marker (REQ-160/161): single active exception per booking
+/// (unique booking_id, UPSERT on repeat keep). Exempts THIS booking from
+/// conflict warnings; NEVER makes a time generally bookable.
+model ScheduleException {
+  id                String   @id @default(uuid()) @db.Uuid
+  businessId        String   @map("business_id") @db.Uuid
+  bookingId         String   @map("booking_id") @db.Uuid
+  scheduleVersionId String   @map("schedule_version_id") @db.Uuid
+  reason            String?
+  createdByUserId   String?  @map("created_by_user_id") @db.Uuid
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  business        Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  booking         Booking         @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  scheduleVersion ScheduleVersion @relation(fields: [scheduleVersionId], references: [id], onDelete: Cascade)
+
+  @@unique([bookingId])
+  @@index([businessId])
+  @@index([scheduleVersionId])
+  @@map("schedule_exception")
+}
