@@ -1,5 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { BusinessModule } from '../business/business.module';
+import { IamModule } from '../iam/iam.module';
 import { JobQueueService } from './job-queue.service';
 import { JobRegistrar } from './retention-security-events.job';
 import { MailJobRegistrar, PlatformEmailer } from './platform-email.job';
@@ -12,7 +13,7 @@ import { NotificationDeliveryJob } from './notification-delivery.job';
  */
 @Global()
 @Module({
-  imports: [BusinessModule],
+  imports: [IamModule, BusinessModule],
   providers: [
     JobQueueService,
     JobRegistrar,
