@@ -3,6 +3,7 @@ import { adminBusinessApi } from '../lib/business-api';
 import { ApiError, type BusinessDetail } from '../lib/api';
 import { BusinessProfile } from './BusinessProfile';
 import { SubscriptionReviewPanel } from './SubscriptionReviewPanel';
+import { SecurityHistoryPanel } from './SecurityHistoryPanel';
 
 function message(err: unknown): string {
   if (err instanceof ApiError) {
@@ -41,6 +42,7 @@ export function AdminPanel({ role, goBack }: { role: 'Admin' | 'SuperAdmin'; goB
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState(false);
+  const [viewingSecurity, setViewingSecurity] = useState(false);
   const showLifecycle = role === 'SuperAdmin';
 
   const reload = (q?: string) => {
@@ -67,6 +69,15 @@ export function AdminPanel({ role, goBack }: { role: 'Admin' | 'SuperAdmin'; goB
     );
   }
 
+  if (viewingSecurity) {
+    return (
+      <SecurityHistoryPanel
+        scope={role === 'SuperAdmin' ? 'superadmin' : 'admin'}
+        back={() => setViewingSecurity(false)}
+      />
+    );
+  }
+
   if (openId) {
     return (
       <section>
@@ -88,6 +99,9 @@ export function AdminPanel({ role, goBack }: { role: 'Admin' | 'SuperAdmin'; goB
         <h2>Platform businesses</h2>
         <button type="button" className="secondary" onClick={() => setReviewing(true)}>
           Review subscription payments
+        </button>
+        <button type="button" className="secondary" onClick={() => setViewingSecurity(true)}>
+          Security history
         </button>
         <button type="button" className="secondary" onClick={() => goBack()}>
           Back

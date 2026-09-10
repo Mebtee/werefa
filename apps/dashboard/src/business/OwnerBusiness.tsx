@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { businessApi } from '../lib/business-api';
 import { ApiError, type BusinessDetail } from '../lib/api';
+import { SecurityHistoryPanel } from './SecurityHistoryPanel';
 
 function message(err: unknown): string {
   if (err instanceof ApiError) {
@@ -39,6 +40,7 @@ export function OwnerBusinessHub({
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [showSecurity, setShowSecurity] = useState(false);
 
   const reload = async () => {
     try {
@@ -104,6 +106,10 @@ export function OwnerBusinessHub({
     );
   }
 
+  if (showSecurity) {
+    return <SecurityHistoryPanel scope="owner" back={() => setShowSecurity(false)} />;
+  }
+
   if (creating || businesses.length === 0) {
     return (
       <section>
@@ -156,6 +162,9 @@ export function OwnerBusinessHub({
     <section>
       <div className="row">
         <h2>My businesses</h2>
+        <button type="button" className="secondary" onClick={() => setShowSecurity(true)}>
+          Security &amp; activity
+        </button>
         <button type="button" className="secondary" onClick={() => setCreating(true)}>
           + New business
         </button>
