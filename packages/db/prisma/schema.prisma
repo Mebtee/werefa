@@ -258,13 +258,20 @@ model SecurityEvent {
   device    String?
   browser   String?
   result    String?
+  // Structured, allow-listed audit metadata (Prompt 15): deleted-event
+  // references on SECURITY_EVENT_DELETED, purge counts on SECURITY_EVENT_PURGE.
+  // Written ONLY by platform code from DB facts — never by clients; the API
+  // returns it sanitized against an explicit allow-list.
+  metadata  Json?    @map("metadata") @db.JsonB
   createdAt DateTime @default(now()) @map("created_at")
 
   user      User?    @relation(fields: [userId], references: [id])
   business  Business? @relation(fields: [businessId], references: [id])
 
-  @@index([userId])
-  @@index([businessId])
+  // History/audit query drives (doc 22 §6): (actor, created_at) and
+  // (business, created_at) composites + the retention cutoff scan.
+  @@index([userId, createdAt])
+  @@index([businessId, createdAt])
   @@index([createdAt])
   @@map("security_event")
 }
