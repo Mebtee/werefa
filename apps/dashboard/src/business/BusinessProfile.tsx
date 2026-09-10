@@ -4,6 +4,7 @@ import { ApiError, type BusinessDetail } from '../lib/api';
 import { ServicesManager } from './ServicesManager';
 import { BookingsManager } from './BookingsManager';
 import { SchedulingManager } from './SchedulingManager';
+import { SubscriptionPanel } from './SubscriptionPanel';
 
 function message(err: unknown): string {
   if (err instanceof ApiError) {
@@ -144,9 +145,9 @@ export function BusinessProfile({
 }) {
   const [business, setBusiness] = useState<BusinessDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [section, setSection] = useState<'profile' | 'services' | 'bookings' | 'schedule'>(
-    'profile',
-  );
+  const [section, setSection] = useState<
+    'profile' | 'services' | 'bookings' | 'schedule' | 'subscription'
+  >('profile');
 
   const api = isAdmin ? adminBusinessApi : businessApi;
   const load = (id: string) => (isAdmin ? adminBusinessApi.get(id) : businessApi.get(id));
@@ -172,6 +173,10 @@ export function BusinessProfile({
     return <SchedulingManager businessId={businessId} back={() => setSection('profile')} />;
   }
 
+  if (section === 'subscription' && !isAdmin) {
+    return <SubscriptionPanel businessId={businessId} back={() => setSection('profile')} />;
+  }
+
   return (
     <section>
       <div className="row">
@@ -187,6 +192,9 @@ export function BusinessProfile({
             </button>
             <button type="button" className="secondary" onClick={() => setSection('schedule')}>
               Manage schedule
+            </button>
+            <button type="button" className="secondary" onClick={() => setSection('subscription')}>
+              Subscription &amp; billing
             </button>
           </>
         ) : null}

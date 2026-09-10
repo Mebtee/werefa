@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { adminBusinessApi } from '../lib/business-api';
 import { ApiError, type BusinessDetail } from '../lib/api';
 import { BusinessProfile } from './BusinessProfile';
+import { SubscriptionReviewPanel } from './SubscriptionReviewPanel';
 
 function message(err: unknown): string {
   if (err instanceof ApiError) {
@@ -39,6 +40,7 @@ export function AdminPanel({ role, goBack }: { role: 'Admin' | 'SuperAdmin'; goB
   const [rows, setRows] = useState<BusinessDetail[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [reviewing, setReviewing] = useState(false);
   const showLifecycle = role === 'SuperAdmin';
 
   const reload = (q?: string) => {
@@ -52,6 +54,18 @@ export function AdminPanel({ role, goBack }: { role: 'Admin' | 'SuperAdmin'; goB
   useEffect(() => {
     reload(query);
   }, [query]);
+
+  if (reviewing) {
+    return (
+      <SubscriptionReviewPanel
+        role={role}
+        back={() => {
+          setReviewing(false);
+          reload();
+        }}
+      />
+    );
+  }
 
   if (openId) {
     return (
@@ -72,6 +86,9 @@ export function AdminPanel({ role, goBack }: { role: 'Admin' | 'SuperAdmin'; goB
     <section>
       <div className="row">
         <h2>Platform businesses</h2>
+        <button type="button" className="secondary" onClick={() => setReviewing(true)}>
+          Review subscription payments
+        </button>
         <button type="button" className="secondary" onClick={() => goBack()}>
           Back
         </button>

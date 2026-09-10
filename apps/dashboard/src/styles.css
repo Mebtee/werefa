@@ -230,6 +230,10 @@ h1 {
   color: #b3261e;
 }
 
+.info {
+  color: #137333;
+}
+
 dl {
   display: grid;
   grid-template-columns: 10rem 1fr;

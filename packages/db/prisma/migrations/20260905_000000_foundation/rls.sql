@@ -1912,3 +1912,149 @@ CREATE POLICY "notification_delivery_superadmin_all" ON "notification_delivery"
 CREATE POLICY "notification_delivery_superadmin_insert" ON "notification_delivery"
   FOR INSERT TO app
   WITH CHECK ( current_setting('app.scope', true) = 'SUPER_ADMIN' );
+
+-- ---------------------------------------------------------------------------
+-- Subscription & Billing (Prompt 14 / REQ-125..141, doc 15)
+--
+-- subscription: 1:1 per business. OWNER reads its own subscription and the
+-- system/lifecycle transitions run under app.scope='SUPER_ADMIN' (the owner_*
+-- policies admit BOTH owner-membership and the SUPER_ADMIN scope, matching the
+-- booking/payment pattern). The booking flow reads the AUTHORITATIVE period
+-- dates through a narrow PUBLIC policy (SELECT only, scoped to the
+-- current_booking business) so public availability/create can enforce
+-- eligibility without exposing the row to browsing callers.
+--
+-- subscription_payment: owner may SELECT their own + INSERT a new payment
+-- request on the scope window; SUBMISSION is the only owner write — status
+-- transitions (approve/reject) go through the elevated app_superadmin role.
+--
+-- subscription_status_history: append-only; owner reads + system job writes.
+-- ---------------------------------------------------------------------------
+ALTER TABLE "subscription" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "subscription" FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY "subscription_owner_select" ON "subscription"
+  FOR SELECT TO app
+  USING (
+    current_setting('app.scope', true) = 'SUPER_ADMIN'
+    OR (
+      current_setting('app.scope', true) = 'OWNER'
+      AND EXISTS (
+        SELECT 1 FROM business_owner bo
+        WHERE bo.business_id = "subscription".business_id
+          AND bo.user_id = (NULLIF(current_setting('app.user_id', true), ''))::uuid
+      )
+    )
+  );
+CREATE POLICY "subscription_owner_insert" ON "subscription"
+  FOR INSERT TO app
+  WITH CHECK (
+    current_setting('app.scope', true) = 'SUPER_ADMIN'
+    OR (
+      current_setting('app.scope', true) = 'OWNER'
+      AND EXISTS (
+        SELECT 1 FROM business_owner bo
+        WHERE bo.business_id = "subscription".business_id
+          AND bo.user_id = (NULLIF(current_setting('app.user_id', true), ''))::uuid
+      )
+    )
+  );
+CREATE POLICY "subscription_owner_update" ON "subscription"
+  FOR UPDATE TO app
+  USING (
+    current_setting('app.scope', true) = 'SUPER_ADMIN'
+    OR (
+      current_setting('app.scope', true) = 'OWNER'
+      AND EXISTS (
+        SELECT 1 FROM business_owner bo
+        WHERE bo.business_id = "subscription".business_id
+          AND bo.user_id = (NULLIF(current_setting('app.user_id', true), ''))::uuid
+      )
+    )
+  )
+  WITH CHECK (
+    current_setting('app.scope', true) = 'SUPER_ADMIN'
+    OR (
+      current_setting('app.scope', true) = 'OWNER'
+      AND EXISTS (
+        SELECT 1 FROM business_owner bo
+        WHERE bo.business_id = "subscription".business_id
+          AND bo.user_id = (NULLIF(current_setting('app.user_id', true), ''))::uuid
+      )
+    )
+  );
+-- Booking flow reads the authoritative period dates (REQ-131/132/133/134).
+CREATE POLICY "subscription_public_select" ON "subscription"
+  FOR SELECT TO app
+  USING (
+    current_setting('app.scope', true) = 'PUBLIC'
+    AND current_setting('app.booking_public', true) = '1'
+    AND "subscription".business_id =
+      (NULLIF(current_setting('app.business_id', true), ''))::uuid
+  );
+CREATE POLICY "subscription_superadmin_all" ON "subscription"
+  FOR ALL TO app_superadmin USING (true) WITH CHECK (true);
+
+ALTER TABLE "subscription_payment" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "subscription_payment" FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY "subscription_payment_owner_select" ON "subscription_payment"
+  FOR SELECT TO app
+  USING (
+    current_setting('app.scope', true) = 'SUPER_ADMIN'
+    OR (
+      current_setting('app.scope', true) = 'OWNER'
+      AND EXISTS (
+        SELECT 1 FROM business_owner bo
+        WHERE bo.business_id = "subscription_payment".business_id
+          AND bo.user_id = (NULLIF(current_setting('app.user_id', true), ''))::uuid
+      )
+    )
+  );
+CREATE POLICY "subscription_payment_owner_insert" ON "subscription_payment"
+  FOR INSERT TO app
+  WITH CHECK (
+    current_setting('app.scope', true) = 'SUPER_ADMIN'
+    OR (
+      current_setting('app.scope', true) = 'OWNER'
+      AND EXISTS (
+        SELECT 1 FROM business_owner bo
+        WHERE bo.business_id = "subscription_payment".business_id
+          AND bo.user_id = (NULLIF(current_setting('app.user_id', true), ''))::uuid
+      )
+    )
+  );
+CREATE POLICY "subscription_payment_superadmin_all" ON "subscription_payment"
+  FOR ALL TO app_superadmin USING (true) WITH CHECK (true);
+
+ALTER TABLE "subscription_status_history" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "subscription_status_history" FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY "subscription_status_history_owner_select" ON "subscription_status_history"
+  FOR SELECT TO app
+  USING (
+    current_setting('app.scope', true) = 'SUPER_ADMIN'
+    OR (
+      current_setting('app.scope', true) = 'OWNER'
+      AND EXISTS (
+        SELECT 1 FROM business_owner bo
+        WHERE bo.business_id = "subscription_status_history".business_id
+          AND bo.user_id = (NULLIF(current_setting('app.user_id', true), ''))::uuid
+      )
+    )
+  );
+CREATE POLICY "subscription_status_history_owner_insert" ON "subscription_status_history"
+  FOR INSERT TO app
+  WITH CHECK (
+    current_setting('app.scope', true) = 'SUPER_ADMIN'
+    OR (
+      current_setting('app.scope', true) = 'OWNER'
+      AND EXISTS (
+        SELECT 1 FROM business_owner bo
+        WHERE bo.business_id = "subscription_status_history".business_id
+          AND bo.user_id = (NULLIF(current_setting('app.user_id', true), ''))::uuid
+      )
+    )
+  );
+CREATE POLICY "subscription_status_history_superadmin_all" ON "subscription_status_history"
+  FOR ALL TO app_superadmin USING (true) WITH CHECK (true);

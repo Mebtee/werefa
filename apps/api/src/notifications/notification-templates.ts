@@ -1,4 +1,5 @@
 import { BOOKING_NOTIFICATION_TYPE } from '../booking/booking-notifications';
+import { SUBSCRIPTION_NOTIFICATION_TYPE } from '../subscription/subscription-notifications';
 import type { AppConfig } from '../config/environment';
 import {
   type DeliveryBookingContext,
@@ -211,4 +212,133 @@ function dayLabel(iso: string | undefined): string {
   if (!iso) return '-';
   const d = new Date(iso);
   return formatBookingLine(d);
+}
+
+// ---------------------------------------------------------------------------
+// Subscription & billing emails (Prompt 14, REQ-137/138/139/140, doc 15 §4)
+// ---------------------------------------------------------------------------
+
+/** Monetary minor-units → "1,500.00" (ETB). Safe with huge BigInt strings. */
+export function formatEtb(minorString: string | undefined): string {
+  const minor = BigInt(minorString && minorString.trim() ? minorString : '0');
+  const negative = minor < 0n;
+  const abs = negative ? -minor : minor;
+  const whole = abs / 100n;
+  const cents = abs % 100n;
+  const body = `${whole.toString()}.${cents.toString().padStart(2, '0')}`;
+  return `${negative ? '-' : ''}${body}`;
+}
+
+/** The two platform Admin accounts see submission details (REQ-140). */
+export function renderSubscriptionAdminEmail(payload: Record<string, unknown>): OwnerAffectedEmail {
+  const businessName = readPayloadString(payload, 'businessName') ?? 'a business';
+  const amount = formatEtb(readPayloadString(payload, 'amountMinor'));
+  const submittedAt = readPayloadString(payload, 'submittedAt');
+  const subject = `New subscription payment: ${businessName}`;
+  const text =
+    `Business "${businessName}" submitted a subscription payment of ETB ${amount}. ` +
+    `Log in to the admin console to review the proof.`;
+  const html =
+    `<h2>New subscription payment request</h2>` +
+    `<p>Business: <strong>${escapeHtml(businessName)}</strong></p>` +
+    `<p>Amount: <strong>ETB ${escapeHtml(amount)}</strong></p>` +
+    (submittedAt
+      ? `<p>Submitted: ${escapeHtml(formatBookingLine(new Date(submittedAt)))} (${escapeHtml(intlTime(new Date(submittedAt)))})</p>`
+      : '') +
+    `<p>Log in to the admin console to review the proof and approve or reject it.</p>`;
+  return { subject, text, html };
+}
+
+/**
+ * Owner-facing subscription emails (REQ-137/138/139). The reminder texts are
+ * delivered only when the derived decision still holds (stale-safe check in the
+ * dispatcher).
+ */
+export function renderSubscriptionOwnerEmail(
+  type: string,
+  payload: Record<string, unknown>,
+  businessName: string | undefined,
+): OwnerAffectedEmail {
+  const amount = formatEtb(readPayloadString(payload, 'amountMinor'));
+  const reason = readPayloadString(payload, 'rejectionReason');
+
+  switch (type) {
+    case SUBSCRIPTION_NOTIFICATION_TYPE.paymentApprovedOwner:
+      return {
+        subject: 'Your subscription payment was approved',
+        text:
+          `Your subscription payment of ETB ${amount} for ${businessName ?? 'your business'} ` +
+          `was approved. Your paid period is active; bookings remain open.`,
+        html:
+          `<h2>Subscription payment approved</h2>` +
+          `<p>Business: <strong>${escapeHtml(businessName ?? 'your business')}</strong></p>` +
+          `<p>Amount: <strong>ETB ${escapeHtml(amount)}</strong></p>` +
+          `<p>Your paid period is active and bookings remain open.</p>`,
+      };
+    case SUBSCRIPTION_NOTIFICATION_TYPE.paymentRejectedOwner:
+      return {
+        subject: 'Your subscription payment was rejected',
+        text:
+          `Your subscription payment of ETB ${amount} for ${businessName ?? 'your business'} ` +
+          `was rejected. Reason: ${reason ?? 'not specified'}. Submit a new payment from your ` +
+          `dashboard to keep collecting bookings.`,
+        html:
+          `<h2>Subscription payment rejected</h2>` +
+          `<p>Business: <strong>${escapeHtml(businessName ?? 'your business')}</strong></p>` +
+          `<p>Amount: <strong>ETB ${escapeHtml(amount)}</strong></p>` +
+          `<p>Reason: <strong>${escapeHtml(reason ?? 'not specified')}</strong></p>` +
+          `<p>Submit a new payment from your dashboard to keep collecting bookings.</p>`,
+      };
+    default: {
+      const boundary = readPayloadString(payload, 'boundaryAt');
+      const when = boundary ? ` (${formatBookingLine(new Date(boundary))})` : '';
+      if (type === SUBSCRIPTION_NOTIFICATION_TYPE.reminderPaidEnd) {
+        return {
+          subject: 'Your subscription period is ending soon',
+          text:
+            `Your paid subscription for ${businessName ?? 'your business'} ends soon${when}. ` +
+            `Submit your monthly payment now to keep bookings open.`,
+          html:
+            `<h2>Renew your subscription</h2>` +
+            `<p>Your paid period ends soon${escapeHtml(when)}.</p>` +
+            `<p>Submit your monthly payment now to keep bookings open.</p>`,
+        };
+      }
+      if (type === SUBSCRIPTION_NOTIFICATION_TYPE.reminderTrialEnd) {
+        return {
+          subject: 'Your free trial is ending soon',
+          text:
+            `The free trial for ${businessName ?? 'your business'} ends soon${when}. ` +
+            `Subscribe to a monthly payment to keep collecting bookings.`,
+          html:
+            `<h2>Your free trial is ending</h2>` +
+            `<p>Your trial ends soon${escapeHtml(when)}.</p>` +
+            `<p>Subscribe to a monthly payment to keep collecting bookings.</p>`,
+        };
+      }
+      if (type === SUBSCRIPTION_NOTIFICATION_TYPE.reminderPaidGrace) {
+        return {
+          subject: 'Your subscription is in its paid grace period',
+          text:
+            `The paid period for ${businessName ?? 'your business'} has ended${when} and your ` +
+            `subscription is now in its 5-day grace period. Renew now — bookings stop once the ` +
+            `grace period expires.`,
+          html:
+            `<h2>Subscription in grace period</h2>` +
+            `<p>Your paid period ended${escapeHtml(when)}.</p>` +
+            `<p>You are in the 5-day grace period. Renew now — bookings stop once it expires.</p>`,
+        };
+      }
+      return {
+        subject: 'Your free trial grace period is active',
+        text:
+          `The free trial for ${businessName ?? 'your business'} has ended${when}. You have a ` +
+          `3-day grace period to subscribe — bookings stay open until it expires.`,
+        html:
+          `<h2>Trial grace period active</h2>` +
+          `<p>Your trial ended${escapeHtml(when)}.</p>` +
+          `<p>Subscribe within the grace period to keep your business open for bookings.</p>`,
+      };
+    }
+  }
 }

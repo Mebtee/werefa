@@ -149,6 +149,9 @@ model Business {
   blockedPeriods BlockedPeriod[]
   scheduleConflicts ScheduleConflict[]
   scheduleExceptions ScheduleException[]
+  subscription  Subscription?
+  subscriptionPayments SubscriptionPayment[]
+  subscriptionStatusHistory SubscriptionStatusHistory[]
 
   @@map("business")
 }
@@ -804,4 +807,119 @@ model ScheduleException {
   @@index([businessId])
   @@index([scheduleVersionId])
   @@map("schedule_exception")
+}
+
+// ===========================================================================
+// Subscription & Billing domain (PROMPT 14 — REQ-125..141, doc 15).
+//
+// Tenancy: every row carries the owning `business_id` (shared-schema
+// multi-tenancy, doc 04) and is RLS-scoped by it (policies in rls.sql). Status
+// is DERIVED at query time from the authoritative date columns (trial / paid
+// period boundaries, minute precision); the persisted `status` column is
+// maintained by the lifecycle job for reporting/audit/history only (doc 15 §1).
+//
+// Money: integer minor units as BIGINT (never float, REQ-071). One standard
+// monthly price (REQ-125 AC1), snapshotted on the subscription at activation.
+//
+// Duration policy (doc 15 §1/§2):
+//   TRIAL       30 days from business creation                  (REQ-128)
+//   TRIAL_GRACE 3 days after trial period ends                 (REQ-129)
+//   ACTIVE      30 days per approved payment                   (REQ-126/130/137)
+//   PAID_GRACE  5 days after paid period ends                  (REQ-131)
+//   EXPIRED     period + grace elapsed; until next approval    (REQ-132/133/135)
+//
+// `subscription_payment` is the manual bank-transfer payment request with its
+// proof upload (REQ-136). Single-use tickets: PENDING → APPROVED | REJECTED
+// (terminal); idempotent submission via unique `submission_key`; approval is
+// guarded by an atomic `updateMany` claim (concurrency, doc 15 §6). The owner
+// can never review their own payment (REQ-137-adjacent rule).
+// ===========================================================================
+
+enum SubscriptionStatus {
+  NONE
+  TRIAL
+  TRIAL_GRACE
+  ACTIVE
+  PAID_GRACE
+  EXPIRED
+}
+
+enum SubscriptionPaymentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// One subscription per business (1:1). NULL date columns mean "not yet
+/// entered that band"; a fresh business has TRIAL dates set at creation.
+model Subscription {
+  id               String             @id @default(uuid()) @db.Uuid
+  businessId       String             @unique @map("business_id") @db.Uuid
+  status           SubscriptionStatus @default(NONE) @map("status")
+  trialStartedAt   DateTime?          @map("trial_started_at")
+  trialEndsAt      DateTime?          @map("trial_ends_at")
+  trialGraceEndsAt DateTime?          @map("trial_grace_ends_at")
+  paidPeriodStartAt DateTime?         @map("paid_period_start_at")
+  paidEndsAt       DateTime?          @map("paid_ends_at")
+  paidGraceEndsAt  DateTime?          @map("paid_grace_ends_at")
+  priceMinor       BigInt             @default(0) @map("price_minor")
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+
+  business      Business                   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  payments      SubscriptionPayment[]
+  statusHistory SubscriptionStatusHistory[]
+
+  @@map("subscription")
+}
+
+/// Manual bank-transfer payment request with owner-submitted proof (REQ-136).
+model SubscriptionPayment {
+  id               String                   @id @default(uuid()) @db.Uuid
+  businessId       String                   @map("business_id") @db.Uuid
+  subscriptionId   String                   @map("subscription_id") @db.Uuid
+  status           SubscriptionPaymentStatus @default(PENDING) @map("status")
+  amountMinor      BigInt                   @map("amount_minor")
+  // Proof object reference (SUBSCRIPTION_PROOF category, doc 16).
+  storageKey       String                   @map("storage_key")
+  mime             String
+  sizeBytes        Int                      @map("size_bytes")
+  submissionKey    String                   @map("submission_key")
+  note             String?
+  // Approval/rejection audit trail (REQ-138 reason delivered to the owner).
+  reviewedByUserId String?                  @map("reviewed_by_user_id") @db.Uuid
+  reviewedAt       DateTime?                @map("reviewed_at")
+  rejectionReason  String?                  @map("rejection_reason")
+  submittedAt      DateTime                 @default(now()) @map("submitted_at")
+  createdAt        DateTime                 @default(now()) @map("created_at")
+  updatedAt        DateTime                 @updatedAt @map("updated_at")
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  business     Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([submissionKey])
+  @@index([businessId, status])
+  @@index([subscriptionId])
+  @@index([status, submittedAt])
+  @@map("subscription_payment")
+}
+
+/// Append-only subscription status transitions (reporting/audit, doc 15 §4).
+model SubscriptionStatusHistory {
+  id             String             @id @default(uuid()) @db.Uuid
+  subscriptionId String             @map("subscription_id") @db.Uuid
+  businessId     String             @map("business_id") @db.Uuid
+  fromStatus     SubscriptionStatus @map("from_status")
+  toStatus       SubscriptionStatus @map("to_status")
+  actorType      ActorType          @map("actor_type")
+  actorUserId    String?            @map("actor_user_id") @db.Uuid
+  reason         String?
+  occurredAt     DateTime           @default(now()) @map("occurred_at")
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  business     Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId])
+  @@index([businessId, occurredAt])
+  @@map("subscription_status_history")
 }

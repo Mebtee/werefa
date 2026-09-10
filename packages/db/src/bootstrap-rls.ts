@@ -160,6 +160,17 @@ async function main(): Promise<void> {
     DROP POLICY IF EXISTS "notification_delivery_owner_update" ON "notification_delivery";
     DROP POLICY IF EXISTS "notification_delivery_superadmin_all" ON "notification_delivery";
     DROP POLICY IF EXISTS "notification_delivery_superadmin_insert" ON "notification_delivery";
+    DROP POLICY IF EXISTS "subscription_owner_select" ON "subscription";
+    DROP POLICY IF EXISTS "subscription_owner_insert" ON "subscription";
+    DROP POLICY IF EXISTS "subscription_owner_update" ON "subscription";
+    DROP POLICY IF EXISTS "subscription_public_select" ON "subscription";
+    DROP POLICY IF EXISTS "subscription_superadmin_all" ON "subscription";
+    DROP POLICY IF EXISTS "subscription_payment_owner_select" ON "subscription_payment";
+    DROP POLICY IF EXISTS "subscription_payment_owner_insert" ON "subscription_payment";
+    DROP POLICY IF EXISTS "subscription_payment_superadmin_all" ON "subscription_payment";
+    DROP POLICY IF EXISTS "subscription_status_history_owner_select" ON "subscription_status_history";
+    DROP POLICY IF EXISTS "subscription_status_history_owner_insert" ON "subscription_status_history";
+    DROP POLICY IF EXISTS "subscription_status_history_superadmin_all" ON "subscription_status_history";
   `;
   await client.query(drops);
 

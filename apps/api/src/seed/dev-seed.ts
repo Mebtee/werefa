@@ -55,6 +55,10 @@ async function main(): Promise<void> {
     contactEmail: 'hello@lumina.example',
   });
 
+  // Prompt 14: every business owns exactly one subscription row (doc 15 §1).
+  await seedSubscription(client, bizA);
+  await seedSubscription(client, bizB);
+
   await client.query(
     `INSERT INTO business_owner(business_id, user_id) VALUES ($1, $2), ($3, $4)
      ON CONFLICT (business_id, user_id) DO NOTHING`,
@@ -166,6 +170,20 @@ async function upsertBusiness(
     ],
   );
   return ins.rows[0].id as string;
+}
+
+/**
+ * Prompt 14: one subscription row per business (doc 15 §1). Mirrors the
+ * seeded business.trial_ends_at so the booking gates and demo data agree
+ * exactly with the derived model. Idempotent on the business_id PK.
+ */
+async function seedSubscription(client: Client, businessId: string): Promise<void> {
+  await client.query(
+    `INSERT INTO subscription(business_id, status, trial_started_at, trial_ends_at, price_minor)
+     VALUES ($1, 'TRIAL', date_trunc('minute', now()), date_trunc('minute', now() + interval '30 days'), 150000)
+     ON CONFLICT (business_id) DO NOTHING`,
+    [businessId],
+  );
 }
 
 async function createUser(

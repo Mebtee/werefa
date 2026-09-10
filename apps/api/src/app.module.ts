@@ -7,6 +7,7 @@ import { IamModule } from './iam/iam.module';
 import { BusinessModule } from './business/business.module';
 import { ServiceModule } from './service/service.module';
 import { BookingModule } from './booking/booking.module';
+import { SubscriptionModule } from './subscription/subscription.module';
 import { ScheduleModule } from './schedule/schedule.module';
 import { StorageModule } from './storage/storage.module';
 import { HealthModule } from './health/health.module';
@@ -23,6 +24,7 @@ import { CsrfGuard } from './common/guards/csrf.guard';
     BusinessModule,
     ServiceModule,
     BookingModule,
+    SubscriptionModule,
     ScheduleModule,
     StorageModule,
     HealthModule,

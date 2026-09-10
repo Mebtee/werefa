@@ -105,6 +105,10 @@ export class BookingPublicService {
       this.prisma,
       { scope: 'PUBLIC', businessId, bookingPublic: true },
       async (tx) => {
+        // Prompt 14 (REQ-131/134): an EXPIRED subscription blocks the booking
+        // flow entirely — checked here (read path) and re-checked under the
+        // booking advisory lock in createChain (authoritative, TOCTOU-safe).
+        await this.assertSubscriptionEligible(tx, businessId);
         const combo = await this.pricing.resolveCombination(tx, businessId, services);
         const endAt = new Date(startAt.getTime() + combo.totalDurationMinutes * 60_000);
         const [slotFree, window] = await Promise.all([
@@ -141,6 +145,7 @@ export class BookingPublicService {
     const combo = await this.pricing.resolveCombination(tx, businessId, input.services);
     const startAt = input.startAt;
     const endAt = new Date(startAt.getTime() + combo.totalDurationMinutes * 60_000);
+    await this.assertSubscriptionEligible(tx, businessId);
     await this.scheduleWindow.assertWindowOk(tx, businessId, startAt, endAt);
     await this.availabilityService.requireSlotAvailable(tx, { businessId, startAt, endAt });
 
@@ -277,6 +282,26 @@ export class BookingPublicService {
           ? `This business is paused until ${business.pausedUntil.toISOString()}.`
           : 'This business is currently paused.',
         ErrorCodes.BUSINESS_PAUSED,
+      );
+    }
+  }
+
+  /**
+   * Prompt 14 (doc 15 §1): the authoritative booking gate — the `subscription`
+   * table's period dates, derived at query time. Anonymous callers read the
+   * subscription row through the `subscription_public_select` policy; tenants
+   * that predate the Prompt 14 migration keep using the legacy
+   * `business.trialEndsAt` boundary until their row materializes.
+   */
+  private async assertSubscriptionEligible(
+    db: TenantTransaction,
+    businessId: string,
+  ): Promise<void> {
+    const avail = await this.subscriptions.canAcceptBookings(businessId, db);
+    if (!avail.canAcceptBookings) {
+      throw new ConflictException(
+        'This business subscription is not active; bookings cannot be placed right now.',
+        ErrorCodes.SUBSCRIPTION_EXPIRED,
       );
     }
   }

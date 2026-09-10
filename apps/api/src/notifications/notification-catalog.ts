@@ -1,22 +1,28 @@
 import { BOOKING_NOTIFICATION_TYPE } from '../booking/booking-notifications';
+import { SUBSCRIPTION_NOTIFICATION_TYPE } from '../subscription/subscription-notifications';
 import { SCHEDULE_AFFECTED_TYPE } from '../schedule/schedule.service';
 
 /**
- * Fan-out catalog (doc 13 §3/§4/§8, Prompt 13): the only mapping from a durable
- * domain `notification` outbox row to concrete delivery intents
- * (channel × recipient). Pure and unit-testable — no DB access.
+ * Fan-out catalog (doc 13 §3/§4/§8, Prompt 13; subscription part = Prompt 14,
+ * doc 15 §4): the only mapping from a durable domain `notification` outbox row
+ * to concrete delivery intents (channel × recipient). Pure and unit-testable —
+ * no DB access.
  *
  * Decision rules:
  *  - Customer-facing types are delivered over Telegram ONLY (REQ-060/063/064/065
  *    are SMS/Telegram-to-customer; Telegram is the single customer channel this
  *    prompt implements, doc 12). If the booking has no active connection the
  *    intent is SUPPRESSED (delivery rows exist so fan-out stays idempotent).
- *  - `SCHEDULE_AFFECTED_OWNER` is EMAIL to the business contact (REQ-093/094);
- *    a business without a contact email is SUPPRESSED.
+ *  - `SCHEDULE_AFFECTED_OWNER` and the subscription owner types are EMAIL to
+ *    the business contact (REQ-093/094; REQ-137/138/139/140); a business without
+ *    a contact email is SUPPRESSED.
+ *  - `SUBSCRIPTION_PAYMENT_SUBMITTED_ADMIN` fans out to the (exactly) two Admin
+ *    platform accounts over EMAIL (REQ-140 — takes the two earliest admins).
  *  - `BOOKING_NEW_PROOF_OWNER` and owner-Telegram delivery are OUT OF SCOPE
  *    (dashboard-only; REQ-066 deferred) — no delivery intent is created.
- *  - Reminder intents are re-validated at delivery time (stale-safe): the
- *    booking must still be CONFIRMED and match the queued startAt.
+ *  - Reminder intents are re-validated at delivery time (stale-safe): booking
+ *    reminders require the booking to still be CONFIRMED; subscription
+ *    reminders require the derived reminder decision to still hold.
  */
 
 export const NOTIFICATION_CHANNEL = {
@@ -45,6 +51,48 @@ export const CUSTOMER_TELEGRAM_TYPES = new Set<string>([
 
 /** Outbox types carried by EMAIL. */
 export const OWNER_EMAIL_TYPES = new Set<string>([SCHEDULE_AFFECTED_TYPE]);
+
+/** Payment-submission fan-out to the two Admin platform accounts (REQ-140). */
+export const SUBSCRIPTION_ADMIN_EMAIL_TYPES = new Set<string>([
+  SUBSCRIPTION_NOTIFICATION_TYPE.paymentSubmittedAdmin,
+]);
+
+/** Owner-facing subscription events delivered to the business contact email. */
+export const SUBSCRIPTION_OWNER_EMAIL_TYPES = new Set<string>([
+  SUBSCRIPTION_NOTIFICATION_TYPE.paymentApprovedOwner,
+  SUBSCRIPTION_NOTIFICATION_TYPE.paymentRejectedOwner,
+  SUBSCRIPTION_NOTIFICATION_TYPE.reminderPaidEnd,
+  SUBSCRIPTION_NOTIFICATION_TYPE.reminderTrialEnd,
+  SUBSCRIPTION_NOTIFICATION_TYPE.reminderPaidGrace,
+  SUBSCRIPTION_NOTIFICATION_TYPE.reminderTrialGrace,
+]);
+
+export function isSubscriptionReminderType(type: string): boolean {
+  return (
+    type === SUBSCRIPTION_NOTIFICATION_TYPE.reminderPaidEnd ||
+    type === SUBSCRIPTION_NOTIFICATION_TYPE.reminderTrialEnd ||
+    type === SUBSCRIPTION_NOTIFICATION_TYPE.reminderPaidGrace ||
+    type === SUBSCRIPTION_NOTIFICATION_TYPE.reminderTrialGrace
+  );
+}
+
+/** Map a queued subscription reminder type to its derived-kind identity. */
+export function subscriptionReminderKindOf(
+  type: string,
+): 'PAID_END' | 'TRIAL_END' | 'PAID_GRACE' | 'TRIAL_GRACE' | null {
+  switch (type) {
+    case SUBSCRIPTION_NOTIFICATION_TYPE.reminderPaidEnd:
+      return 'PAID_END';
+    case SUBSCRIPTION_NOTIFICATION_TYPE.reminderTrialEnd:
+      return 'TRIAL_END';
+    case SUBSCRIPTION_NOTIFICATION_TYPE.reminderPaidGrace:
+      return 'PAID_GRACE';
+    case SUBSCRIPTION_NOTIFICATION_TYPE.reminderTrialGrace:
+      return 'TRIAL_GRACE';
+    default:
+      return null;
+  }
+}
 
 export function isReminderType(type: string): boolean {
   return (

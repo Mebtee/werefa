@@ -7,7 +7,6 @@ import {
   formatBookingLine,
 } from '../../src/notifications/notification-templates';
 import type { DeliveryBookingContext } from '../../src/notifications/notification-catalog';
-import { SCHEDULE_AFFECTED_TYPE } from '../../src/schedule/schedule.service';
 
 const BOOKING: DeliveryBookingContext = {
   bookingId: '00000000-0000-0000-0000-000000000001',

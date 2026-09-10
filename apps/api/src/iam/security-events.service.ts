@@ -73,6 +73,11 @@ export type SecurityEventType =
   | 'TELEGRAM_WEBHOOK_DENIED'
   | 'TELEGRAM_PHONE_MISMATCH'
   | 'NOTIFICATION_DELIVERY_FAILED'
+  // Subscription & billing events (Prompt 14, Domain 17, doc 15/22).
+  | 'SUBSCRIPTION_PAYMENT_SUBMITTED'
+  | 'SUBSCRIPTION_PAYMENT_APPROVED'
+  | 'SUBSCRIPTION_PAYMENT_REJECTED'
+  | 'SUBSCRIPTION_REMINDER_ENQUEUED'
   | 'SYSTEM';
 
 export interface RecordSecurityEventInput {

@@ -18,6 +18,7 @@ workflow.
 | `05-booking-management-report.md`       | Prompt 11 Section 38 close-out: booking/payment/notification module (public + owner flows), quality gate, concurrency fixes, IMPLEMENTED/PARTIAL/DEFERRED status, deferred schedule tables                                                          |
 | `06-scheduling-management-report.md`    | Prompt 12 Section 38 close-out: schedule engine + gate, pause/resume reactivation, keep-exceptions + affected sweep, history/PDF (REQ-166/167/170/172), RLS, dashboard, quality-gate numbers                                                        |
 | `07-notifications-telegram-report.md`   | Prompt 13 Section 38 close-out: EMAIL+TELEGRAM pipeline, delivery statuses + idempotency, reminder re-validation, REQ-060 Telegram connect/status/disconnect, webhook binding, notifications RLS (+ superadmin INSERT policy), quality-gate numbers |
+| `08-subscription-billing-report.md`     | Prompt 14 Section 54 close-out: derived subscription lifecycle + booking gate, manual payment + proof upload, idempotent submission, Admin/SA review (+30d / reject-with-reason), exactly-two-Admin + owner emails, status-refresh job + auto-resume gate, dashboard panels, minute-precision CHECK bug, quality-gate numbers |
 
 ## Path note
 

@@ -17,14 +17,24 @@ import {
   CUSTOMER_TELEGRAM_TYPES,
   DELIVERY_EXCLUDED_TYPES,
   OWNER_EMAIL_TYPES,
+  SUBSCRIPTION_ADMIN_EMAIL_TYPES,
+  SUBSCRIPTION_OWNER_EMAIL_TYPES,
   SUPPRESSED_RECIPIENT,
   deliveryIdempotencyKey,
   isReminderType,
+  isSubscriptionReminderType,
   parseScheduleAffected,
   readPayload,
+  subscriptionReminderKindOf,
   type DeliveryBookingContext,
 } from './notification-catalog';
-import { renderCustomerTelegram, renderOwnerAffectedEmail } from './notification-templates';
+import {
+  renderCustomerTelegram,
+  renderOwnerAffectedEmail,
+  renderSubscriptionAdminEmail,
+  renderSubscriptionOwnerEmail,
+} from './notification-templates';
+import { reminderDecision, type SubscriptionDates } from '../subscription/subscription-lifecycle';
 
 /**
  * Delivery pipeline (doc 13 §3/§4/§7, doc 17): the ONLY reader/writer of the
@@ -118,6 +128,45 @@ export class NotificationDispatcher {
     if (OWNER_EMAIL_TYPES.has(notification.type)) {
       const payload = parseScheduleAffected(notification.payload);
       if (!payload.entries || payload.entries.length === 0) return 0;
+      const business = await tx.business.findUnique({
+        where: { id: notification.businessId },
+        select: { contactEmail: true },
+      });
+      const recipient = business?.contactEmail ?? SUPPRESSED_RECIPIENT;
+      return this.insertIntent(tx, {
+        notificationId: notification.id,
+        businessId: notification.businessId,
+        channel: 'EMAIL',
+        recipient,
+        message: business?.contactEmail ? null : 'business has no contact email',
+      });
+    }
+
+    // Prompt 14 (REQ-140): a payment submission is fanned out to the (exactly)
+    // two earliest Admin platform accounts. Missing accounts simply produce
+    // fewer intents — delivery is idempotent, so repeats are no-ops.
+    if (SUBSCRIPTION_ADMIN_EMAIL_TYPES.has(notification.type)) {
+      const admins = await tx.user.findMany({
+        where: { role: 'Admin' },
+        orderBy: { createdAt: 'asc' },
+        take: 2,
+        select: { email: true },
+      });
+      let created = 0;
+      for (const admin of admins) {
+        if (!admin.email || admin.email === '') continue;
+        created += await this.insertIntent(tx, {
+          notificationId: notification.id,
+          businessId: notification.businessId,
+          channel: 'EMAIL',
+          recipient: admin.email,
+          message: null,
+        });
+      }
+      return created;
+    }
+
+    if (SUBSCRIPTION_OWNER_EMAIL_TYPES.has(notification.type)) {
       const business = await tx.business.findUnique({
         where: { id: notification.businessId },
         select: { contactEmail: true },
@@ -313,7 +362,73 @@ export class NotificationDispatcher {
         return this.finalizeFailure(delivery, classifyMailError(err), err, now);
       }
     }
+
+    // Prompt 14: subscription & billing emails (REQ-137/138/139/140).
+    if (SUBSCRIPTION_ADMIN_EMAIL_TYPES.has(type)) {
+      return this.deliverSubscriptionEmail(
+        delivery,
+        renderSubscriptionAdminEmail(readPayload(delivery.notification.payload)),
+        now,
+      );
+    }
+    if (SUBSCRIPTION_OWNER_EMAIL_TYPES.has(type)) {
+      return this.deliverSubscriptionOwnerEmail(delivery, now);
+    }
     return this.finalizeSuppressed(delivery, 'unsupported email notification type', now);
+  }
+
+  /** Reminder emails are stale-safe: suppressed unless the derived decision still holds. */
+  private async deliverSubscriptionOwnerEmail(
+    delivery: DeliveryRowView,
+    now: Date,
+  ): Promise<'sent' | 'failed' | 'suppressed' | 'deadLettered'> {
+    const type = delivery.notification.type;
+    if (isSubscriptionReminderType(type)) {
+      const subscription = await this.readSubscriptionFor(delivery.business.id);
+      const decision = subscription ? reminderDecision(subscription) : null;
+      if (decision?.kind !== subscriptionReminderKindOf(type)) {
+        return this.finalizeSuppressed(delivery, 'stale subscription reminder', now);
+      }
+    }
+    const email = renderSubscriptionOwnerEmail(
+      type,
+      readPayload(delivery.notification.payload),
+      delivery.business.name,
+    );
+    return this.deliverSubscriptionEmail(delivery, email, now);
+  }
+
+  private async deliverSubscriptionEmail(
+    delivery: DeliveryRowView,
+    email: { subject: string; text: string; html: string },
+    now: Date,
+  ): Promise<'sent' | 'failed' | 'suppressed' | 'deadLettered'> {
+    try {
+      await this.mail.sendStrict({
+        to: delivery.recipient,
+        subject: email.subject,
+        text: email.text,
+        html: email.html,
+      });
+      return this.finalizeSent(delivery, now);
+    } catch (err) {
+      return this.finalizeFailure(delivery, classifyMailError(err), err, now);
+    }
+  }
+
+  private readSubscriptionFor(businessId: string): Promise<SubscriptionDates | null> {
+    return this.withSystem((tx) =>
+      tx.subscription.findUnique({
+        where: { businessId },
+        select: {
+          trialStartedAt: true,
+          trialEndsAt: true,
+          paidPeriodStartAt: true,
+          paidEndsAt: true,
+          paidGraceEndsAt: true,
+        },
+      }),
+    );
   }
 
   // --- Finalizers (a claim already owns the row; each writes its own outcome) ---

@@ -80,3 +80,20 @@ export const roleRank: Record<RoleLike, number> = {
   [Role.Admin]: 2,
   [Role.SuperAdmin]: 3,
 };
+
+/**
+ * Subscription & billing (Prompt 14, REQ-125..141, doc 15).
+ *
+ * Platform-wide subscription policy constants (single source of truth). The
+ * durations/grace windows are fixed by the master specification; the exact
+ * monthly price amount (REQ-125 AC1 — exactly one standard monthly price) is
+ * NOT specified by the product spec, so the value is an operator-configured
+ * constant maintained here (minor units, money is never float, REQ-071).
+ */
+export const SUBSCRIPTION_PRICE_MINOR: bigint = 150_000n; // ETB 1,500.00 — placeholder, see report DEC register mapping
+export const SUBSCRIPTION_TRIAL_DAYS = 30; // REQ-128 free trial
+export const SUBSCRIPTION_TRIAL_GRACE_DAYS = 3; // REQ-129 trial grace
+export const SUBSCRIPTION_PAID_DAYS = 30; // REQ-126 30-day paid period per approval
+export const SUBSCRIPTION_PAID_GRACE_DAYS = 5; // REQ-131 paid grace
+export const SUBSCRIPTION_REMINDER_LEAD_DAYS = 3; // REQ-139/140 default reminder lead
+export const SUBSCRIPTION_MAX_PROOF_BYTES = MAX_UPLOAD_BYTES; // reuse upload limit

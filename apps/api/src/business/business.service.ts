@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { Business, Prisma } from '@prisma/client';
-import { ErrorCodes, MAX_UPLOAD_BYTES } from '@werefa/shared';
+import { ErrorCodes, MAX_UPLOAD_BYTES, SUBSCRIPTION_PRICE_MINOR } from '@werefa/shared';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../database/prisma.service';
 import {
@@ -19,6 +19,7 @@ import {
 import { SecurityEventService } from '../iam/security-events.service';
 import { StorageService } from '../storage/storage.service';
 import { SubscriptionAvailabilityService } from '../subscription/subscription-availability.service';
+import { derivedStatus, minuteTrunc } from '../subscription/subscription-lifecycle';
 import { BusinessSerializer } from './business.serializer';
 import { parseBusinessProfile, parsePauseInput, type BusinessProfileInput } from './business-input';
 import { ScheduleService } from '../schedule/schedule.service';
@@ -194,7 +195,7 @@ export class BusinessService {
         if (!current.isPaused) {
           throw new ConflictException('This business is not paused.');
         }
-        this.assertSubscriptionAllowsBookings(current);
+        await this.assertSubscriptionAllowsBookings(tx, businessId);
         const updated = await tx.business.update({
           where: { id: businessId },
           data: { isPaused: false, pausedUntil: null, pauseMessage: null },
@@ -258,7 +259,7 @@ export class BusinessService {
         if (!current.deactivatedAt) {
           throw new ConflictException('This business is not deactivated.');
         }
-        this.assertSubscriptionAllowsBookings(current);
+        await this.assertSubscriptionAllowsBookings(tx, businessId);
         const updated = await tx.business.update({
           where: { id: businessId },
           data: { deactivatedAt: null, isPaused: false, pausedUntil: null, pauseMessage: null },
@@ -372,32 +373,38 @@ export class BusinessService {
     const due = await withSuperAdminContext(this.prisma, SYSTEM_ACTOR_ID, (tx) =>
       tx.business.findMany({
         where: { isPaused: true, pausedUntil: { not: null, lte: now }, deactivatedAt: null },
-        select: { id: true, trialEndsAt: true },
+        select: { id: true },
       }),
     );
 
     let resumed = 0;
     let denied = 0;
     for (const row of due) {
-      const avail = this.subscription.computeAvailability(row.trialEndsAt ?? null);
-      if (avail.canAcceptBookings) {
-        await withTenantContext(
-          this.prisma,
-          { scope: 'SUPER_ADMIN', userId: SYSTEM_ACTOR_ID },
-          (tx) =>
-            withBusinessAdvisoryLock(tx, row.id, async () => {
-              await tx.business.updateMany({
-                where: { id: row.id, isPaused: true },
-                data: { isPaused: false, pausedUntil: null },
-              });
-              // Latest PENDING schedule (created while paused) becomes ACTIVE
-              // and any affected bookings are surfaced (REQ-151/158).
-              await this.schedule.activatePendingSchedule(tx, row.id, {
-                actorType: 'SYSTEM',
-                actorUserId: SYSTEM_ACTOR_ID,
-              });
-            }),
-        );
+      let canAcceptBookings = false;
+      await withTenantContext(
+        this.prisma,
+        { scope: 'SUPER_ADMIN', userId: SYSTEM_ACTOR_ID },
+        async (tx) => {
+          // Authoritative subscription boundary (repo: subscription table), NOT
+          // the legacy business.trialEndsAt mirror (doc 15 §1).
+          const avail = await this.subscription.canAcceptBookings(row.id, tx);
+          canAcceptBookings = avail.canAcceptBookings;
+          if (!canAcceptBookings) return;
+          await withBusinessAdvisoryLock(tx, row.id, async () => {
+            await tx.business.updateMany({
+              where: { id: row.id, isPaused: true },
+              data: { isPaused: false, pausedUntil: null },
+            });
+            // Latest PENDING schedule (created while paused) becomes ACTIVE
+            // and any affected bookings are surfaced (REQ-151/158).
+            await this.schedule.activatePendingSchedule(tx, row.id, {
+              actorType: 'SYSTEM',
+              actorUserId: SYSTEM_ACTOR_ID,
+            });
+          });
+        },
+      );
+      if (canAcceptBookings) {
         resumed += 1;
         await this.security.record({
           type: 'BUSINESS_AUTO_RESUME',
@@ -549,7 +556,7 @@ export class BusinessService {
       if (!current.deactivatedAt) {
         throw new ConflictException('This business is not deactivated.');
       }
-      this.assertSubscriptionAllowsBookings(current);
+      await this.assertSubscriptionAllowsBookings(tx, businessId);
       return tx.business.update({
         where: { id: businessId },
         data: { deactivatedAt: null, isPaused: false, pausedUntil: null, pauseMessage: null },
@@ -600,7 +607,7 @@ export class BusinessService {
       if (!current.isPaused) {
         throw new ConflictException('This business is not paused.');
       }
-      this.assertSubscriptionAllowsBookings(current);
+      await this.assertSubscriptionAllowsBookings(tx, businessId);
       return tx.business.update({
         where: { id: businessId },
         data: { isPaused: false, pausedUntil: null, pauseMessage: null },
@@ -670,6 +677,29 @@ export class BusinessService {
             await tx.businessOwner.create({
               data: { businessId: created.id, userId: actor.userId },
             });
+            // Prompt 14: every business materializes exactly one subscription row
+            // with a freshly-minted 30-day trial boundary (doc 15 §1). The owner
+            // membership already exists so the RLS CHECK passes for the new row.
+            // Boundaries must satisfy the DB minute-precision CHECK (REQ-226).
+            const trialStartedAt = minuteTrunc(new Date());
+            const trialEndsAt = new Date(
+              trialStartedAt.getTime() + SubscriptionAvailabilityService.TRIAL_DAYS * 86_400_000,
+            );
+            await tx.subscription.create({
+              data: {
+                businessId: created.id,
+                status: derivedStatus({
+                  trialStartedAt,
+                  trialEndsAt,
+                  paidPeriodStartAt: null,
+                  paidEndsAt: null,
+                  paidGraceEndsAt: null,
+                }),
+                trialStartedAt,
+                trialEndsAt,
+                priceMinor: SUBSCRIPTION_PRICE_MINOR,
+              },
+            });
             return created;
           },
         );
@@ -687,8 +717,11 @@ export class BusinessService {
     return attempt(1);
   }
 
-  private assertSubscriptionAllowsBookings(business: Pick<Business, 'trialEndsAt'>): void {
-    const avail = this.subscription.computeAvailability(business.trialEndsAt ?? null);
+  private async assertSubscriptionAllowsBookings(
+    db: TenantTransaction,
+    businessId: string,
+  ): Promise<void> {
+    const avail = await this.subscription.canAcceptBookings(businessId, db);
     if (!avail.canAcceptBookings) {
       throw new AppException(
         ErrorCodes.SUBSCRIPTION_EXPIRED,
