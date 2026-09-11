@@ -955,6 +955,143 @@ describe('H: composition, concurrency and proof storage (Prompt 11 close-out)', 
   });
 });
 
+describe('I: booking-history report + PDF export (Prompt 16, REQ-175..190)', () => {
+  async function setupHistoricBookings(): Promise<{ bookingId: string; businessName: string }> {
+    await seedService();
+    const owner = await ownerToken();
+    const body = createBookingBody();
+    const { body: payload } = await publicCreate(body);
+    await postOwner(owner, `${payload.booking!.id}/accept`);
+    return { bookingId: payload.booking!.id, businessName: 'Booking Test Studio' };
+  }
+
+  it('SA history report returns the six approved fields, newest first (REQ-175/177/182/187)', async () => {
+    const { bookingId } = await setupHistoricBookings();
+    const sa = await saToken();
+    const res = await supertest(server).get('/api/v1/super-admin/bookings/history').set(auth(sa));
+    expect(res.status).toBe(200);
+    expect(res.body.total).toBeGreaterThan(0);
+    const entry = (res.body.history as unknown[]).find(
+      (h) => (h as { bookingId: string }).bookingId === bookingId,
+    );
+    expect(entry).toBeDefined();
+    const row = entry as Record<string, unknown>;
+    for (const key of [
+      'id',
+      'bookingId',
+      'customerName',
+      'businessName',
+      'occurredAt',
+      'fromStatus',
+      'toStatus',
+      'actorType',
+    ]) {
+      expect(row[key]).not.toBeUndefined();
+    }
+    expect(row.toStatus).toBe('CONFIRMED');
+  });
+
+  it('SA history report filters by status/business/actor and sorts (REQ-184/185/188..190)', async () => {
+    await setupHistoricBookings();
+    const sa = await saToken();
+    const businessOnly = await supertest(server)
+      .get(`/api/v1/super-admin/bookings/history?businessId=${businessId}`)
+      .set(auth(sa));
+    expect(businessOnly.status).toBe(200);
+    expect(businessOnly.body.total).toBeGreaterThan(0);
+    const allInBusiness = (businessOnly.body.history as { businessName: string }[]).every(
+      (h) => h.businessName === 'Booking Test Studio',
+    );
+    expect(allInBusiness).toBe(true);
+
+    const statusFiltered = await supertest(server)
+      .get('/api/v1/super-admin/bookings/history?status=CONFIRMED')
+      .set(auth(sa));
+    expect(statusFiltered.status).toBe(200);
+    const confirmed = (statusFiltered.body.history as { toStatus: string }[]).find(
+      (h) => h.toStatus === 'CONFIRMED',
+    );
+    expect(confirmed).toBeDefined();
+
+    const sorted = await supertest(server)
+      .get('/api/v1/super-admin/bookings/history?sortBy=customer&sortDirection=desc')
+      .set(auth(sa));
+    expect(sorted.status).toBe(200);
+    const customers = (sorted.body.history as { customerName: string }[]).map(
+      (h) => h.customerName,
+    );
+    const sortedCopy = [...customers].sort().reverse();
+    expect(customers).toEqual(sortedCopy);
+  });
+
+  it('Admin is denied the history surface; SA-only (REQ-177, REQ-168 analog)', async () => {
+    await setupHistoricBookings();
+    const admin = await adminToken();
+    const res = await supertest(server)
+      .get('/api/v1/super-admin/bookings/history')
+      .set(auth(admin));
+    expect(res.status).toBe(403);
+  });
+
+  it('SA PDF export streams a valid PDF with the six columns and no reasons (REQ-178..183)', async () => {
+    await setupHistoricBookings();
+    const sa = await saToken();
+    const res = await supertest(server)
+      .get(`/api/v1/super-admin/bookings/history/pdf?businessId=${businessId}&status=CONFIRMED`)
+      .set(auth(sa));
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toContain('application/pdf');
+    expect(res.headers['content-disposition']).toContain('attachment');
+    const text = (res.body as Buffer).toString('latin1');
+    expect(text.startsWith('%PDF-1.4')).toBe(true);
+    for (const header of ['Date & Time', 'Booking ID', 'Customer', 'Business', 'Status', 'Actor']) {
+      expect(text).toContain(header);
+    }
+    expect(text).not.toMatch(/reason/i);
+  });
+
+  it('Admin cannot export the SA booking-history PDF', async () => {
+    await setupHistoricBookings();
+    const admin = await adminToken();
+    const res = await supertest(server)
+      .get('/api/v1/super-admin/bookings/history/pdf')
+      .set(auth(admin));
+    expect(res.status).toBe(403);
+  });
+
+  it('unknown status or actorType filter is a validation error', async () => {
+    await setupHistoricBookings();
+    const sa = await saToken();
+    const badStatus = await supertest(server)
+      .get('/api/v1/super-admin/bookings/history?status=BOGUS')
+      .set(auth(sa));
+    expect(badStatus.status).toBe(400);
+    const badActor = await supertest(server)
+      .get('/api/v1/super-admin/bookings/history?actorType=BOGUS')
+      .set(auth(sa));
+    expect(badActor.status).toBe(400);
+  });
+
+  it('malformed businessId or actorUserId is rejected as validation errors', async () => {
+    await setupHistoricBookings();
+    const sa = await saToken();
+    const badBusiness = await supertest(server)
+      .get('/api/v1/super-admin/bookings/history?businessId=not-a-uuid')
+      .set(auth(sa));
+    expect(badBusiness.status).toBe(400);
+    expect(
+      badBusiness.body.error.fields.some((f: { field: string }) => f.field === 'businessId'),
+    ).toBe(true);
+    const badActorUser = await supertest(server)
+      .get('/api/v1/super-admin/bookings/history/pdf?actorUserId=not-a-uuid')
+      .set(auth(sa));
+    expect(badActorUser.status).toBe(400);
+    expect(
+      badActorUser.body.error.fields.some((f: { field: string }) => f.field === 'actorUserId'),
+    ).toBe(true);
+  });
+});
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
