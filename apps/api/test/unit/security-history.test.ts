@@ -153,8 +153,9 @@ describe('SecurityHistoryService.deleteAsSuperAdmin', () => {
           txCalls.push('findUnique');
           return target;
         },
-        delete: async () => {
-          txCalls.push('delete');
+        deleteMany: async () => {
+          txCalls.push('deleteMany');
+          return { count: 1 };
         },
       },
     };
@@ -174,7 +175,7 @@ describe('SecurityHistoryService.deleteAsSuperAdmin', () => {
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
     );
 
-    expect(txCalls).toEqual(['findUnique', 'delete']);
+    expect(txCalls).toEqual(['findUnique', 'deleteMany']);
     expect(recorded).toHaveLength(1);
     const audit = recorded[0] as Record<string, unknown>;
     expect(audit.type).toBe('SECURITY_EVENT_DELETED');
@@ -201,8 +202,9 @@ describe('SecurityHistoryService.deleteAsSuperAdmin', () => {
           txCalls.push('findUnique');
           return null;
         },
-        delete: async () => {
-          txCalls.push('delete');
+        deleteMany: async () => {
+          txCalls.push('deleteMany');
+          return { count: 0 };
         },
       },
     };
@@ -217,5 +219,44 @@ describe('SecurityHistoryService.deleteAsSuperAdmin', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
     expect(txCalls).toEqual(['findUnique']);
     expect(record).not.toHaveBeenCalled();
+  });
+
+  it('reports 404 and rolls the audit back when a concurrent request already deleted the target', async () => {
+    const target = {
+      id: 'evt-42',
+      type: 'LOGIN_FAILED',
+      result: 'FAILURE',
+      userId: 'victim',
+      businessId: 'b-9',
+      createdAt: new Date('2026-09-01T08:00:00.000Z'),
+    };
+    const txCalls: string[] = [];
+    const fakeTx = {
+      securityEvent: {
+        findUnique: async () => {
+          txCalls.push('findUnique');
+          return target;
+        },
+        deleteMany: async () => {
+          txCalls.push('deleteMany');
+          return { count: 0 };
+        },
+      },
+    };
+    const prisma = {
+      $transaction: (fn: (tx: typeof fakeTx) => Promise<void>) => fn(fakeTx),
+    } as unknown as never;
+    const recorded: Array<Record<string, unknown>> = [];
+    const record = vi.fn(async (input: Record<string, unknown>) => {
+      recorded.push(input);
+    });
+
+    const service = new SecurityHistoryService(prisma as never, { record } as never);
+    await expect(
+      service.deleteAsSuperAdmin({ userId: 'sa-1' } as never, 'evt-42'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(txCalls).toEqual(['findUnique', 'deleteMany']);
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]).toMatchObject({ type: 'SECURITY_EVENT_DELETED' });
   });
 });
