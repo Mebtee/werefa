@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 import { APP_CONFIG, type AppConfig } from '../config/environment';
 import { PasswordService } from './password.service';
@@ -17,6 +17,15 @@ export interface AdminListItem {
   disabledAt: Date | null;
   createdAt: Date;
 }
+
+/**
+ * Stable PostgreSQL advisory-lock key serializing the Admin account model
+ * (Prompt 18, Task A). Every mutation that must respect the maximum-two-active
+ * Admins invariant acquires this transaction-scoped lock, so concurrent
+ * create/reactivate requests are applied serially instead of racing the
+ * count-then-write check.
+ */
+const ADMIN_MODEL_ADVISORY_LOCK = BigInt(2_847_534_901_640);
 
 /**
  * Super Admin — Admin account lifecycle + forced logout (REQ-217..221).
@@ -54,31 +63,91 @@ export class SuperAdminService {
     const email = normalizeEmail(emailIn);
     validateNewPassword(password, this.config, 'password');
 
-    const activeCount = await this.prisma.user.count({
-      where: { role: 'Admin', disabledAt: null },
-    });
-    if (activeCount >= 2) {
-      throw new ConflictException('Reached the maximum of two active Admin accounts.');
-    }
-    const existing = await this.prisma.user.findUnique({ where: { email }, select: { id: true } });
-    if (existing) {
-      throw new ConflictException('A platform account with this email already exists.');
-    }
+    const created = await this.prisma.$transaction(async (tx) => {
+      // Serialize Admin-model mutations so concurrent count-then-create cannot
+      // exceed the maximum two active Admins (Prompt 18, Task A).
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${ADMIN_MODEL_ADVISORY_LOCK})`;
 
-    const hash = await this.password.hash(password);
-    const user = await this.prisma.user.create({
-      data: { email, passwordHash: hash, role: 'Admin', isEmailVerified: true },
-      select: { id: true, email: true },
+      const activeCount = await tx.user.count({
+        where: { role: 'Admin', disabledAt: null },
+      });
+      if (activeCount >= 2) {
+        throw new ConflictException('Reached the maximum of two active Admin accounts.');
+      }
+      const existing = await tx.user.findUnique({ where: { email }, select: { id: true } });
+      if (existing) {
+        throw new ConflictException('A platform account with this email already exists.');
+      }
+
+      const hash = await this.password.hash(password);
+      const user = await tx.user.create({
+        data: { email, passwordHash: hash, role: 'Admin', isEmailVerified: true },
+        select: { id: true, email: true },
+      });
+      await this.security.record(
+        {
+          type: 'ADMIN_CREATE',
+          userId: user.id,
+          ip,
+          device: meta.device,
+          browser: meta.browser,
+          result: 'SUCCESS',
+        },
+        tx,
+      );
+      return user;
     });
-    await this.security.record({
-      type: 'ADMIN_CREATE',
-      userId: user.id,
-      ip,
-      device: meta.device,
-      browser: meta.browser,
-      result: 'SUCCESS',
+
+    try {
+      await this.emailer.sendTo('admin-welcome', email, { email });
+    } catch {
+      // Email is informational; a capture-provider failure must not roll back a
+      // successfully created Admin (Prompt 18, Task C).
+    }
+    return created;
+  }
+
+  /** REQ-217 — restore a deactivated Admin, honouring the two-active invariant. */
+  async reactivateAdmin(adminId: string, ip?: string, ua?: string): Promise<void> {
+    const meta = clientMetadata(ua, ip);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${ADMIN_MODEL_ADVISORY_LOCK})`;
+
+      const target = await tx.user.findFirst({
+        where: { id: adminId, role: 'Admin' },
+        select: { id: true, disabledAt: true },
+      });
+      if (!target) throw new NotFoundException('Admin account not found.');
+      if (target.disabledAt === null) {
+        throw new ConflictException('Admin account is already active.');
+      }
+
+      const activeCount = await tx.user.count({
+        where: { role: 'Admin', disabledAt: null },
+      });
+      if (activeCount >= 2) {
+        throw new ConflictException('Reached the maximum of two active Admin accounts.');
+      }
+
+      await tx.user.update({ where: { id: target.id }, data: { disabledAt: null } });
+      // A previous (denied or pre-deactivation) reset flow must not leave a token
+      // that could outlive the Admin's reactivation.
+      await tx.passwordResetToken.updateMany({
+        where: { userId: target.id, usedAt: null },
+        data: { usedAt: new Date() },
+      });
+      await this.security.record(
+        {
+          type: 'ADMIN_REACTIVATE',
+          userId: target.id,
+          ip,
+          device: meta.device,
+          browser: meta.browser,
+          result: 'SUCCESS',
+        },
+        tx,
+      );
     });
-    return user;
   }
 
   async deactivateAdmin(adminId: string, ip?: string, ua?: string): Promise<void> {
