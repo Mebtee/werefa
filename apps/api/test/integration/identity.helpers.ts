@@ -4,6 +4,7 @@ import { Client } from 'pg';
 
 export const TEST_EMAILS = {
   owner: 'owner@werefa.test',
+  owner2: 'pwd-reset-owner@werefa.test',
   admin1: 'admin1@werefa.test',
   admin2: 'admin2@werefa.test',
   sa: 'sa@werefa.test',
@@ -40,6 +41,7 @@ export async function resetIdentityDatabaseAndSeed(migratorUrl: string): Promise
   const insertUser = `INSERT INTO "user"(email, password_hash, role, is_email_verified, recovery_email) VALUES ($1,$2,$3,true,$4)`;
 
   await client.query(insertUser, [TEST_EMAILS.owner, ownerHash, 'Owner', null]);
+  await client.query(insertUser, [TEST_EMAILS.owner2, ownerHash, 'Owner', null]);
   await client.query(insertUser, [TEST_EMAILS.admin1, adminHash, 'Admin', null]);
   await client.query(insertUser, [TEST_EMAILS.admin2, adminHash, 'Admin', null]);
   await client.query(insertUser, [
