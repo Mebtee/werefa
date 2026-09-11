@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Actor, api, sessionStore } from './lib/api';
 import { Login } from './pages/Login';
+import { Register } from './pages/Register';
+import { VerifyEmail } from './pages/VerifyEmail';
 import { Dashboard } from './pages/Dashboard';
 import { ResetPassword } from './pages/ResetPassword';
 import { Recovery } from './pages/Recovery';
@@ -56,6 +58,8 @@ export function App() {
     if (state === 'signedIn') {
       return <Dashboard actor={actor as Actor} onSignOut={() => void signOut()} />;
     }
+    if (route === '#/register') return <Register />;
+    if (route.startsWith('#/verify')) return <VerifyEmail />;
     if (isAuthRoute(route)) {
       if (route.startsWith('#/reset')) return <ResetPassword />;
       return <Recovery />;
