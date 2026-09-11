@@ -19,8 +19,13 @@ export const SECURITY_EVENT_TYPES = [
   'PASSWORD_RESET_DENIED',
   'RECOVERY_REQUEST',
   'RECOVERY_COMPLETE',
+  // Owner self-registration + email verification (Prompt 17, doc 14 §4).
+  'REGISTER',
+  'EMAIL_VERIFICATION_REQUEST',
+  'EMAIL_VERIFICATION_COMPLETE',
   'ADMIN_CREATE',
   'ADMIN_DEACTIVATE',
+  'ADMIN_REACTIVATE',
   'ADMIN_PASSWORD_CHANGE',
   'ADMIN_SELF_PASSWORD_DENIED',
   'FORCE_LOGOUT',
@@ -65,6 +70,8 @@ export const SECURITY_EVENT_TYPES = [
   'BOOKING_RESUBMIT',
   'BOOKING_STATUS_VIEW',
   'BOOKING_AUDIT_VIEW',
+  'BOOKING_HISTORY_VIEW',
+  'BOOKING_HISTORY_EXPORT',
   // Scheduling events (Prompt 12, Domains 12/13/16, docs 10/13/21).
   'SCHEDULE_SAVE',
   'SCHEDULE_BOOKING_KEEP',
@@ -119,8 +126,9 @@ export interface RecordSecurityEventInput {
 export class SecurityEventService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async record(input: RecordSecurityEventInput): Promise<void> {
-    await this.prisma.securityEvent.create({
+  async record(input: RecordSecurityEventInput, tx?: Prisma.TransactionClient): Promise<void> {
+    const client = tx ?? this.prisma;
+    await client.securityEvent.create({
       data: {
         type: input.type,
         userId: input.userId ?? null,
