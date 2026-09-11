@@ -11,6 +11,7 @@ import { PasswordService } from './password.service';
 import { SecurityEventService } from './security-events.service';
 import { AuthService } from './auth.service';
 import { PasswordResetService } from './reset-token.service';
+import { EmailVerificationService } from './email-verification.service';
 import { RecoveryService } from './recovery.service';
 import { SuperAdminService } from './super-admin.service';
 import { RateLimitService } from './rate-limit.service';
@@ -31,6 +32,7 @@ import { SecurityHistoryService } from './security-history.service';
     SecurityEventService,
     AuthService,
     PasswordResetService,
+    EmailVerificationService,
     RecoveryService,
     SuperAdminService,
     RateLimitService,
