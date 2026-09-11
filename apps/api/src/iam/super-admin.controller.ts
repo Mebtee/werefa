@@ -61,6 +61,17 @@ export class SuperAdminController {
     await this.service.deactivateAdmin(id, req.ip, req.headers['user-agent']);
   }
 
+  @Post('admins/:id/reactivate')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async reactivateAdmin(
+    @Actor() actor: ActorContext,
+    @Param('id') id: string,
+    @Req() req: Request,
+  ): Promise<void> {
+    void actor;
+    await this.service.reactivateAdmin(id, req.ip, req.headers['user-agent']);
+  }
+
   @Post('admins/:id/password')
   @HttpCode(HttpStatus.NO_CONTENT)
   async changeAdminPassword(
