@@ -53,11 +53,19 @@ export class JobRegistrar implements OnModuleInit {
    * and deletes in bounded batches (oldest-first), so an interrupted sweep
    * simply resumes at the next run. Exposed for direct/unit invocation.
    *
+   * `now` is an injectable clock for deterministic boundary tests; it defaults
+   * to the real wall clock, so production behavior is unchanged.
+   *
    * @returns the number of rows purged this run.
    */
-  async runRetention(olderThanDays = SECURITY_RETENTION_DAYS): Promise<number> {
+  async runRetention(
+    olderThanDays = SECURITY_RETENTION_DAYS,
+    now: Date = new Date(),
+  ): Promise<number> {
     const days = olderThanDays > 0 ? olderThanDays : SECURITY_RETENTION_DAYS;
-    const cutoff = new Date(Date.now() - days * 86_400_000);
+    // Strictly-older-than-the-cutoff is eligible; an event exactly at the
+    // cutoff is retained (exclusive lower bound, documented in doc 22 §5).
+    const cutoff = new Date(now.getTime() - days * 86_400_000);
     let purged = 0;
 
     // Batch loop: pull the oldest ids below the cutoff a bounded batch at a
