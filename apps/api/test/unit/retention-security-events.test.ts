@@ -110,4 +110,19 @@ describe('JobRegistrar.runRetention', () => {
       where: { id: { in: ['old-1', 'old-2'] } },
     });
   });
+
+  it('computes an exclusive 1-year cutoff from an injected clock (boundary retained)', async () => {
+    freshMocks();
+    prisma.securityEvent.findMany.mockResolvedValue([{ id: 'old-1' }]);
+    prisma.securityEvent.deleteMany.mockResolvedValue({ count: 1 });
+
+    const fixedNow = new Date('2026-09-10T12:00:00.000Z');
+    await makeRegistrar().runRetention(365, fixedNow);
+
+    const findCall = prisma.securityEvent.findMany.mock.calls[0][0];
+    const cutoff = findCall.where.createdAt.lt as Date;
+    expect(cutoff.getTime()).toBe(fixedNow.getTime() - 365 * 86_400_000);
+    expect('lt' in findCall.where.createdAt).toBe(true);
+    expect('lte' in findCall.where.createdAt).toBe(false);
+  });
 });
