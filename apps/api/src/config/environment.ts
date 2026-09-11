@@ -69,6 +69,7 @@ export interface AppConfig {
   recoveryRateLimitWindowMs: number;
   resetTokenTtlMinutes: number;
   recoveryCodeTtlMinutes: number;
+  verificationTokenTtlMinutes: number;
   passwordMinLength: number;
   passwordMaxLength: number;
   publicBaseUrl: string;
@@ -200,6 +201,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     recoveryRateLimitWindowMs: asInt(env.RECOVERY_RATE_LIMIT_WINDOW_MS, 900_000),
     resetTokenTtlMinutes: asInt(env.RESET_TOKEN_TTL_MINUTES, 30),
     recoveryCodeTtlMinutes: asInt(env.RECOVERY_CODE_TTL_MINUTES, 15),
+    verificationTokenTtlMinutes: asInt(env.VERIFICATION_TOKEN_TTL_MINUTES, 30),
     passwordMinLength: asInt(env.PASSWORD_MIN_LENGTH, 12),
     passwordMaxLength: asInt(env.PASSWORD_MAX_LENGTH, 128),
     publicBaseUrl: env.PUBLIC_BASE_URL ?? 'http://localhost:5173',
