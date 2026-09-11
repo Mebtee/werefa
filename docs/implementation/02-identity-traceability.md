@@ -26,7 +26,8 @@ the authoritative sources used here are:
 - `SessionService` — opaque random token stored as SHA-256 (ADR-008), `createSession`/`resolveToken`/`revokeSession`/`revokeAllSessions` (REQ-035), `expires_in` server-side.
 - `ResetTokenService` — password reset request issues a one-time random token (30-minute TTL) sent by email; each request invalidates previous tokens; completing a reset revokes all sessions and clears the lock (REQ-033, REQ-194, REQ-035).
 - `RecoveryService` — Super Admin emergency recovery (REQ-198..200): request sends a one-time base32 code (15-minute TTL) to the SA's distinct `recovery_email`; completion immediately replaces the password and revokes all sessions; single-use.
-- `SuperAdminService` — Admin lifecycle (REQ-217, REQ-037/038/039): create/deactivate/list Admin accounts enforcing exactly one Super Admin and exactly two active Admins; change Admin password (REQ-219); force-logout of Owners/Admins with immediate email (REQ-220/221).
+- `SuperAdminService` — Admin lifecycle (REQ-217, REQ-037/038/039): create/deactivate/list Admin accounts enforcing exactly one Super Admin and exactly two active Admins; **reactivate** a deactivated Admin (prompt 18) with a fresh `ADMIN_REACTIVATE` audit event and outstanding reset tokens revoked; change Admin password (REQ-219); force-logout of Owners/Admins with immediate email (REQ-220/221). Create and reactivate serialize the "count-then-write" check behind a transaction-scoped PostgreSQL advisory key (`pg_advisory_xact_lock`, prompt 18 Task A) so concurrent requests can never exceed two active Admins.
+- `ResetTokenService` — password reset request issues a one-time random token (30-minute TTL) sent by email; each request invalidates previous tokens; completing a reset revokes all sessions and clears the lock (REQ-033, REQ-194, REQ-035). Admin accounts never receive a reset link: a request for an Admin records a `PASSWORD_RESET_DENIED` event and returns the same uniform response as a known account (REQ-218, prompt 18 decision).
 - `SecurityEventsService` — records `LOGIN_SUCCESS`, `LOGIN_FAILED`, `ACCOUNT_LOCKED`, `UNRECOGNIZED_DEVICE`, `LOGOUT`, `PASSWORD_CHANGED`, `ADMIN_*`, `FORCED_LOGOUT` with date/time, IP, device/browser, result (REQ-191/192/197, feeds REQ-204 retention job).
 - `RateLimitService` — sliding-window in-memory limiter per instance for `authRateLimitMax` / `recoveryRateLimitMax` (REQ-030 spirit; auth & recovery surfaces).
 - Guards/decorators: `SessionGuard`, `RolesGuard` (hierarchy Owner<Admin<SuperAdmin, REQ-036/041/042), `@Public()`, `@Roles`, `@Actor`.
@@ -43,7 +44,8 @@ the authoritative sources used here are:
 | `POST /api/v1/auth/password/reset/complete`  | public, rate-limited | one-time token → new password                                                               |
 | `POST /api/v1/super-admin/recovery/request`  | public, rate-limited | code to recovery email                                                                      |
 | `POST /api/v1/super-admin/recovery/complete` | public, rate-limited | one-time code → new SA password                                                             |
-| `GET/POST/PATCH … /admin*`                   | SuperAdmin only      | list/create/deactivate/change-password/force-logout                                         |
+| `GET/POST/PATCH … /admin*`                   | SuperAdmin only      | list/create/deactivate/reactivate/change-password/force-logout                          |
+| `POST /api/v1/super-admin/admins/:id/reactivate` | SuperAdmin only  | clears `disabled_at`, revokes outstanding reset tokens, records `ADMIN_REACTIVATE`     |
 
 ### CSRF defense (doc 18)
 
@@ -51,11 +53,16 @@ the authoritative sources used here are:
 
 ### Emails (`apps/api/src/notifications`, `apps/api/src/jobs`)
 
-- `PlatformEmailer` (templates: reset link, lockout alert w/ IP+device/browser, forced-logout, admin credentials) delivered via `MailService` — in-memory capture in tests; MailHog in dev; BullMQ `platform-email` job in prod. `JobsModule` is `@Global()` so the emailer is injectable from the IAM module.
+- `PlatformEmailer` (templates: reset link, lockout alert w/ IP+device/browser, forced-logout, **admin welcome**, admin credentials) delivered via `MailService` — in-memory capture in tests; MailHog in dev; BullMQ `platform-email` job in prod. `JobsModule` is `@Global()` so the emailer is injectable from the IAM module. The admin-welcome email never contains the password or a token (prompt 18).
 
 ### Dashboard (`apps/dashboard/src`)
 
-- Full sign-in (`Login`), sign-out, password change (Owner/SA only; Admins see a notice), forgot-password request + one-time-link completion (`#/reset/<token>`), and Super Admin emergency recovery (`#/recovery`) via hash routes; API client sends the CSRF header on state-changing requests.
+- Full sign-in (`Login`), sign-out, password change (Owner/SA only; Admins see a notice), forgot-password request + one-time-link completion (`#/reset/<token>`), and Super Admin emergency recovery (`#/recovery`) via hash routes; API client sends the CSRF header on state-changing requests. Prompt 18 added the Super Admin "Admin accounts" panel (list/create/deactivate/reactivate/change-password/force-sign-out with client-side confirmation) and surfaced `ADMIN_REACTIVATE` in the security-history filter options.
+
+### Dashboard panels (`apps/dashboard/src`)
+
+- `business/AdminAccountsPanel.tsx` — Super Admin-only Admin lifecycle UI (prompt 18): table of Admins with active/deactivated pills, create form (email + temporary password), per-row deactivate/reactivate/change-password/force-sign-out with `window.confirm` confirmation; passwords never persist in UI state and the welcome/password emails never contain them. Backend authorization remains the real boundary.
+- `lib/admin-accounts-api.ts` — typed client for the `/api/v1/super-admin/admins*` surface (list/create/deactivate/reactivate/change-password/force-logout).
 
 ### Dev seed (`apps/api/src/seed/dev-seed.ts`)
 
@@ -70,7 +77,7 @@ the authoritative sources used here are:
 | REQ-035         | Password change logs out everywhere         | `revokeAllSessions`                                     | `identity-password.test.ts` I         |
 | REQ-036/041/042 | Role set & hierarchy                        | `RolesGuard`, DB `role` enum                            | `test/unit/roles-guard.test.ts`       |
 | REQ-037         | Exactly one Super Admin                     | `SuperAdminService` enforcement                         | `identity-admin-recovery.test.ts` P   |
-| REQ-038         | Exactly two Admins                          | `SuperAdminService` enforcement                         | `identity-admin-recovery.test.ts` P   |
+| REQ-038         | Exactly two admins (active)                 | advisory-lock serialized create/reactivate              | `identity-admin-recovery.test.ts` P   |
 | REQ-039         | Only SA manages Admins                      | `@Roles(SuperAdmin)`                                    | `identity-admin-recovery.test.ts` P   |
 | REQ-191         | Login success/failure recorded              | `SecurityEventsService`                                 | `identity-login.test.ts` D            |
 | REQ-192         | Records include dt/IP/device/browser/result | event fields                                            | D                                     |
@@ -83,9 +90,10 @@ the authoritative sources used here are:
 | REQ-200         | Code → immediate password replacement       | `recovery.complete`                                     | L                                     |
 | REQ-201..203    | View own/all security history               | recorded in DB (view endpoints = later UX)              | D (recorded)                          |
 | REQ-204         | Records retained 1 year                     | retention persistence (`retention-security-events.job`) | foundation                            |
-| REQ-217         | SA creates/deactivates/manages Admins       | `SuperAdminService`                                     | P                                     |
-| REQ-218         | Admin cannot change own password            | forbidden by role                                       | J                                     |
-| REQ-219         | SA can change Admin password                | `SuperAdminService`                                     | P (pw change)                         |
+| REQ-217a        | SA creates/deactivates Admins (max 2)       | advisory-lock `createAdmin` + `deactivateAdmin`         | `identity-admin-recovery.test.ts` P   |
+| REQ-217b        | SA reactivates a deactivated Admin          | `reactivateAdmin` + `ADMIN_REACTIVATE` event            | P (reactivate)                       |
+| REQ-218         | Admin cannot change own password            | forbidden by role (change-password + reset denial)      | J, P (reset denied)                  |
+| REQ-219         | SA can change Admin password                | `SuperAdminService` (clears lock, revokes sessions)     | P (pw change)                        |
 | REQ-220/221     | SA force-logout + immediate email           | `revokeAllSessions` + email                             | P                                     |
 
 Non-enumeration (uniform 401), rate limiting (429), and CSRF (403/204) are additionally covered by tests C, S/T, and the recovery rate-limit case.
