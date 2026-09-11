@@ -242,25 +242,35 @@ export class SecurityHistoryService {
       });
       if (!target) throw new NotFoundException('Security event not found.');
 
-      await this.security.record({
-        type: 'SECURITY_EVENT_DELETED',
-        userId: target.userId ?? undefined,
-        businessId: target.businessId ?? undefined,
-        ip,
-        device: meta.device,
-        browser: meta.browser,
-        result: 'SUCCESS',
-        // Subject columns keep the deleted record's scope; the acting Super
-        // Admin is recorded as byUserId (doc 22 §2 audit content).
-        metadata: {
-          deletedEventId: target.id,
-          deletedType: target.type,
-          deletedResult: target.result ?? null,
-          deletedAt: target.createdAt.toISOString(),
-          byUserId: actor.userId,
+      // The audit and the delete run in THIS transaction (doc 22 REQ-206):
+      // the `tx` is passed through so a losing concurrent request rolls its
+      // own audit back instead of leaving a duplicate SECURITY_EVENT_DELETED.
+      await this.security.record(
+        {
+          type: 'SECURITY_EVENT_DELETED',
+          userId: target.userId ?? undefined,
+          businessId: target.businessId ?? undefined,
+          ip,
+          device: meta.device,
+          browser: meta.browser,
+          result: 'SUCCESS',
+          // Subject columns keep the deleted record's scope; the acting Super
+          // Admin is recorded as byUserId in metadata (doc 22 §2).
+          metadata: {
+            deletedEventId: target.id,
+            deletedType: target.type,
+            deletedResult: target.result ?? null,
+            deletedAt: target.createdAt.toISOString(),
+            byUserId: actor.userId,
+          },
         },
-      });
-      await tx.securityEvent.delete({ where: { id: target.id } });
+        tx,
+      );
+      // deleteMany is race-safe under two concurrent identical requests: only
+      // the request that actually removes the row keeps its audit (the other
+      // observes count 0, rolls the audit back and reports 404).
+      const { count } = await tx.securityEvent.deleteMany({ where: { id: target.id } });
+      if (count === 0) throw new NotFoundException('Security event not found.');
     });
   }
 }
