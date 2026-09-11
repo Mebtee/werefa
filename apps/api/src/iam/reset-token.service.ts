@@ -41,8 +41,28 @@ export class PasswordResetService {
     const meta = clientMetadata(ua, ip);
     const email = normalizeEmail(emailIn);
 
-    const user = await this.prisma.user.findUnique({ where: { email }, select: { id: true } });
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+      select: { id: true, role: true },
+    });
     if (!user) {
+      return UNIFORM_RESPONSE;
+    }
+
+    // Approved decision C2 (strict Admin password restriction): Admin password
+    // changes flow through the Super Admin only (REQ-218/219). An Admin must
+    // not be able to re-establish a password via Forgot Password — return the
+    // identical uniform response so the account's role/existence is never
+    // disclosed. The attempt is still audited.
+    if (user.role === 'Admin') {
+      await this.security.record({
+        type: 'PASSWORD_RESET_DENIED',
+        userId: user.id,
+        ip,
+        device: meta.device,
+        browser: meta.browser,
+        result: 'DENIED',
+      });
       return UNIFORM_RESPONSE;
     }
 
