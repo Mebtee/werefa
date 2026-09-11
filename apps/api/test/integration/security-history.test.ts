@@ -45,6 +45,9 @@ function rootEnv(): NodeJS.ProcessEnv {
 
 const FILE_ENV = rootEnv();
 const TEST_DB = process.env.TEST_DB_NAME ?? 'werefa_test';
+// Local second owner so cross-tenant (Owner A vs Owner B) isolation can be
+// exercised without touching the shared identity seed used by other suites.
+const OWNER2_EMAIL = 'owner2@werefa.test';
 const withDb = (dsn: string | undefined, db: string): string | undefined => {
   if (!dsn) return undefined;
   const u = new URL(dsn);
@@ -77,7 +80,9 @@ let admin1Token: string;
 let admin2Token: string;
 let saToken: string;
 let ownerUserId: string;
+let owner2UserId: string;
 let admin1UserId: string;
+let admin2UserId: string;
 
 async function login(email: string, password: string): Promise<string> {
   const res = await supertest(server)
@@ -130,6 +135,7 @@ beforeAll(async () => {
     process.env.DATABASE_URL_SUPERUSER ?? FILE_ENV.DATABASE_URL_SUPERUSER,
     TEST_DB,
   )!;
+  process.env.REDIS_URL = process.env.REDIS_URL ?? FILE_ENV.REDIS_URL ?? 'redis://localhost:6379/0';
 
   const { bootstrapApp } = await import('./bootstrap-app');
   app = await bootstrapApp();
@@ -145,14 +151,30 @@ beforeAll(async () => {
   superuser = new Client({ connectionString: process.env.DATABASE_URL_SUPERUSER! });
   await superuser.connect();
 
+  // Local second owner (same password material as the canonical owner) so the
+  // cross-tenant window can be proven to exclude another owner's rows.
+  await superuser.query(
+    `INSERT INTO "user"(email, password_hash, role, is_email_verified)
+     SELECT $1, password_hash, 'Owner', true FROM "user" WHERE email = $2`,
+    [OWNER2_EMAIL, TEST_EMAILS.owner],
+  );
+
   ownerUserId = (
     await superuser.query<{ id: string }>(`SELECT id FROM "user" WHERE email = $1`, [
       TEST_EMAILS.owner,
     ])
   ).rows[0].id;
+  owner2UserId = (
+    await superuser.query<{ id: string }>(`SELECT id FROM "user" WHERE email = $1`, [OWNER2_EMAIL])
+  ).rows[0].id;
   admin1UserId = (
     await superuser.query<{ id: string }>(`SELECT id FROM "user" WHERE email = $1`, [
       TEST_EMAILS.admin1,
+    ])
+  ).rows[0].id;
+  admin2UserId = (
+    await superuser.query<{ id: string }>(`SELECT id FROM "user" WHERE email = $1`, [
+      TEST_EMAILS.admin2,
     ])
   ).rows[0].id;
 
@@ -223,7 +245,41 @@ describe('A: owner history (REQ-201)', () => {
     );
     expect(ranged.total).toBe(all.total);
   });
+
+  it('never exposes another owner’s events and ignores spoofed business context', async () => {
+    await login(TEST_EMAILS.owner, TEST_PASSWORDS.owner);
+    await login(OWNER2_EMAIL, TEST_PASSWORDS.owner);
+    const owner2BusinessId = await createOwnerBusinessAs(OWNER2_EMAIL, TEST_PASSWORDS.owner);
+
+    const { events, total } = await getEvents(ownerToken, '/api/v1/owner/security-events');
+    expect(total).toBeGreaterThan(0);
+    for (const e of events) {
+      expect(e.userId).not.toBe(owner2UserId);
+      expect(e.businessId).not.toBe(owner2BusinessId);
+    }
+
+    // Spoofed business context on the owner endpoint is inert (the server
+    // derives the window from the session, never from query params).
+    const spoofed = await getEvents(
+      ownerToken,
+      '/api/v1/owner/security-events',
+      `?businessId=${owner2BusinessId}`,
+    );
+    expect(spoofed.total).toBe(total);
+  });
 });
+
+/** Create a business on behalf of a specific owner; returns its id. */
+async function createOwnerBusinessAs(email: string, password: string): Promise<string> {
+  const token = await login(email, password);
+  const slug = `sec-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
+  const res = await supertest(server)
+    .post('/api/v1/businesses')
+    .send({ name: `Security Biz ${slug}`, publicSlug: slug })
+    .set(auth(token));
+  expect(res.status).toBe(201);
+  return (res.body.business as { id: string }).id;
+}
 
 describe('B: admin own history (REQ-202) + isolation', () => {
   it('never exposes another admins rows', async () => {
@@ -235,6 +291,14 @@ describe('B: admin own history (REQ-202) + isolation', () => {
     for (const e of events) {
       expect(e.userId).toBe(admin1UserId);
     }
+
+    const admin2 = await getEvents(admin2Token, '/api/v1/admin/security-events');
+    expect(admin2.total).toBeGreaterThanOrEqual(1);
+    for (const e of admin2.events) {
+      expect(e.userId).toBe(admin2UserId);
+    }
+    const admin1Ids = new Set(events.map((e) => e.id));
+    for (const e of admin2.events) expect(admin1Ids.has(e.id)).toBe(false);
   });
 
   it('has no scoped-out business/user/role filter knobs for admins', async () => {
@@ -417,6 +481,33 @@ describe('F: super admin deletion (REQ-205/206)', () => {
       .set(auth(saToken));
     expect(res.status).toBe(404);
   });
+
+  it('is concurrency-safe: two identical deletes yield one 204 + one 404 and a single audit', async () => {
+    await login(TEST_EMAILS.owner, TEST_PASSWORDS.owner);
+    await createOwnerBusiness();
+    const { events } = await getEvents(saToken, '/api/v1/super-admin/security-events');
+    const target = events[0]!;
+
+    const [a, b] = await Promise.all([
+      supertest(server)
+        .delete(`/api/v1/super-admin/security-events/${target.id}`)
+        .set(auth(saToken)),
+      supertest(server)
+        .delete(`/api/v1/super-admin/security-events/${target.id}`)
+        .set(auth(saToken)),
+    ]);
+    expect([a.status, b.status].sort()).toEqual([204, 404]);
+
+    const audits = await getEvents(
+      saToken,
+      '/api/v1/super-admin/security-events',
+      '?type=SECURITY_EVENT_DELETED&pageSize=200',
+    );
+    const matching = audits.events.filter(
+      (e: { metadata: { deletedEventId?: string } }) => e.metadata?.deletedEventId === target.id,
+    );
+    expect(matching).toHaveLength(1);
+  });
 });
 
 describe('G: cross-role denial', () => {
@@ -445,5 +536,74 @@ describe('G: cross-role denial', () => {
       const res = await supertest(server).get(path).set(CSRF);
       expect(res.status).toBe(401);
     }
+  });
+});
+
+describe('H: retention purge boundaries (REQ-204, doc 22 §5)', () => {
+  let retentionJob: import('../../src/jobs/retention-security-events.job').JobRegistrar;
+
+  beforeAll(async () => {
+    const { JobRegistrar } = await import('../../src/jobs/retention-security-events.job');
+    retentionJob = app.get(JobRegistrar);
+  });
+
+  async function insertRawEvent(type: string, createdAt: Date): Promise<string> {
+    const id = crypto.randomUUID();
+    await superuser.query(
+      `INSERT INTO "security_event"(id, type, result, created_at, user_id)
+       VALUES ($1, $2, 'SUCCESS', $3, $4)`,
+      [id, type, createdAt, ownerUserId],
+    );
+    return id;
+  }
+
+  it('purges strictly-older than 1 year, retains the exact boundary and recent rows, and audits once', async () => {
+    const fixedNow = new Date('2026-09-10T12:00:00.000Z');
+    const cutoff = new Date(fixedNow.getTime() - 365 * 86_400_000);
+
+    const oldId = await insertRawEvent('age-500d', new Date(cutoff.getTime() - 135 * 86_400_000));
+    const boundaryId = await insertRawEvent('age-exactly-365d', cutoff);
+    const withinId = await insertRawEvent('age-364d', new Date(cutoff.getTime() + 86_400_000));
+    const recentId = await insertRawEvent('age-60s', new Date(fixedNow.getTime() - 60_000));
+
+    const purged = await retentionJob.runRetention(365, fixedNow);
+    expect(purged).toBe(1);
+
+    const { rows } = await superuser.query<{ id: string; type: string }>(
+      `SELECT id, type FROM "security_event" ORDER BY type`,
+    );
+    const ids = rows.map((r) => r.id);
+    expect(ids).not.toContain(oldId);
+    expect(ids).toContain(boundaryId);
+    expect(ids).toContain(withinId);
+    expect(ids).toContain(recentId);
+
+    const audit = rows.find((r) => r.type === 'SECURITY_EVENT_PURGE');
+    expect(audit).toBeTruthy();
+    const meta = (
+      await superuser.query<{
+        metadata: { purgedCount: number; olderThanDays: number; cutoff: string };
+      }>(`SELECT metadata FROM "security_event" WHERE type = 'SECURITY_EVENT_PURGE'`)
+    ).rows[0]?.metadata;
+    expect(meta).toMatchObject({
+      purgedCount: 1,
+      olderThanDays: 365,
+      cutoff: cutoff.toISOString(),
+    });
+  });
+
+  it('is idempotent on retry: no additional purge and no duplicate audit row', async () => {
+    const fixedNow = new Date('2026-09-10T12:00:00.000Z');
+    const cutoff = new Date(fixedNow.getTime() - 365 * 86_400_000);
+    await insertRawEvent('age-400d', new Date(cutoff.getTime() - 35 * 86_400_000));
+
+    expect(await retentionJob.runRetention(365, fixedNow)).toBe(1);
+    expect(await retentionJob.runRetention(365, fixedNow)).toBe(0);
+    expect(await retentionJob.runRetention(365, fixedNow)).toBe(0);
+
+    const { rows } = await superuser.query<{ type: string }>(
+      `SELECT type FROM "security_event" WHERE type = 'SECURITY_EVENT_PURGE'`,
+    );
+    expect(rows).toHaveLength(1);
   });
 });
