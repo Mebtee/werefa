@@ -4,6 +4,8 @@ import { ApiError, type BusinessDetail } from '../lib/api';
 import { BusinessProfile } from './BusinessProfile';
 import { SubscriptionReviewPanel } from './SubscriptionReviewPanel';
 import { SecurityHistoryPanel } from './SecurityHistoryPanel';
+import { BookingHistoryReportPanel } from './BookingHistoryReportPanel';
+import { AdminAccountsPanel } from './AdminAccountsPanel';
 
 function message(err: unknown): string {
   if (err instanceof ApiError) {
@@ -43,6 +45,8 @@ export function AdminPanel({ role, goBack }: { role: 'Admin' | 'SuperAdmin'; goB
   const [openId, setOpenId] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [viewingSecurity, setViewingSecurity] = useState(false);
+  const [viewingBookingReport, setViewingBookingReport] = useState(false);
+  const [viewingAdminAccounts, setViewingAdminAccounts] = useState(false);
   const showLifecycle = role === 'SuperAdmin';
 
   const reload = (q?: string) => {
@@ -78,6 +82,17 @@ export function AdminPanel({ role, goBack }: { role: 'Admin' | 'SuperAdmin'; goB
     );
   }
 
+  if (viewingBookingReport) {
+    // REQ-177/178: the booking status-history report + PDF export is Super
+    // Admin only; Admin is 403'd server-side and never sees this button.
+    return <BookingHistoryReportPanel back={() => setViewingBookingReport(false)} />;
+  }
+
+  if (viewingAdminAccounts) {
+    // REQ-217..221: platform Admin account lifecycle is Super Admin only.
+    return <AdminAccountsPanel back={() => setViewingAdminAccounts(false)} />;
+  }
+
   if (openId) {
     return (
       <section>
@@ -103,6 +118,24 @@ export function AdminPanel({ role, goBack }: { role: 'Admin' | 'SuperAdmin'; goB
         <button type="button" className="secondary" onClick={() => setViewingSecurity(true)}>
           Security history
         </button>
+        {showLifecycle ? (
+          <>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setViewingBookingReport(true)}
+            >
+              Booking history report
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setViewingAdminAccounts(true)}
+            >
+              Admin accounts
+            </button>
+          </>
+        ) : null}
         <button type="button" className="secondary" onClick={() => goBack()}>
           Back
         </button>
