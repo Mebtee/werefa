@@ -8,7 +8,13 @@
 import type { AppConfig } from '../config/environment';
 
 export type PlatformEmailTemplate =
-  'password-reset' | 'lockout' | 'forced-logout' | 'recovery-code' | 'admin-password-changed';
+  | 'password-reset'
+  | 'lockout'
+  | 'forced-logout'
+  | 'recovery-code'
+  | 'admin-password-changed'
+  | 'admin-welcome'
+  | 'verification';
 
 export interface TemplateRender {
   subject: string;
@@ -80,6 +86,34 @@ export function renderPlatformEmail(
           '',
           'All your existing sessions were signed out. If you did not expect this,',
           'contact a Super Admin immediately.',
+        ].join('\n'),
+      };
+    case 'admin-welcome':
+      return {
+        subject: 'Your Werefa Admin account is ready',
+        text: [
+          'A Super Admin has created a Werefa Admin account for you.',
+          '',
+          `Account email: ${params.email}`,
+          '',
+          'Your initial credentials were provided to you out-of-band by a Super',
+          'Admin — they are not included in this email for your security.',
+          '',
+          `Sign in at: ${config.publicBaseUrl}`,
+          '',
+          'If you did not expect this email, contact a Super Admin immediately.',
+        ].join('\n'),
+      };
+    case 'verification':
+      return {
+        subject: 'Verify your Werefa account',
+        text: [
+          'Welcome to Werefa! Confirm your email to finish creating your account.',
+          '',
+          `Verification link (valid ${config.verificationTokenTtlMinutes} minutes, one-time only):`,
+          `${config.publicBaseUrl}/verify/${params.token}`,
+          '',
+          'If you did not create a Werefa account, you can safely ignore this email.',
         ].join('\n'),
       };
   }
