@@ -22,6 +22,7 @@ import { AuthService } from './auth.service';
 import { SessionService } from './session.service';
 import { SecurityEventService } from './security-events.service';
 import { PasswordResetService } from './reset-token.service';
+import { EmailVerificationService } from './email-verification.service';
 import { RateLimitService } from './rate-limit.service';
 import { bodyObject, readString } from './validation';
 import { clientMetadata } from './client-metadata';
@@ -39,6 +40,7 @@ export class AuthController {
     private readonly sessions: SessionService,
     private readonly security: SecurityEventService,
     private readonly resets: PasswordResetService,
+    private readonly verifications: EmailVerificationService,
     private readonly rateLimits: RateLimitService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
@@ -165,6 +167,55 @@ export class AuthController {
       this.config.authRateLimitWindowMs,
     );
     await this.resets.complete(token, newPassword, ip, req.headers['user-agent']);
+  }
+
+  @Post('register')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Public()
+  async register(@Body() body: unknown, @Req() req: Request): Promise<{ message: string }> {
+    const payload = bodyObject(body);
+    const email = readString(payload, 'email', { required: true, email: true, max: 255 })!;
+    const password = readString(payload, 'password', { required: true })!;
+    const ip = req.ip;
+    await this.rateLimits.check(
+      `auth:register:${ip ?? 'unknown'}`,
+      this.config.authRateLimitMax,
+      this.config.authRateLimitWindowMs,
+    );
+    return this.verifications.register(email, password, ip, req.headers['user-agent']);
+  }
+
+  @Post('verify-email/request')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Public()
+  async requestVerification(
+    @Body() body: unknown,
+    @Req() req: Request,
+  ): Promise<{ message: string }> {
+    const payload = bodyObject(body);
+    const email = readString(payload, 'email', { required: true, email: true, max: 255 })!;
+    const ip = req.ip;
+    await this.rateLimits.check(
+      `auth:verify-request:${ip ?? 'unknown'}`,
+      this.config.authRateLimitMax,
+      this.config.authRateLimitWindowMs,
+    );
+    return this.verifications.request(email, ip, req.headers['user-agent']);
+  }
+
+  @Post('verify-email/complete')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Public()
+  async completeVerification(@Body() body: unknown, @Req() req: Request): Promise<void> {
+    const payload = bodyObject(body);
+    const token = readString(payload, 'token', { required: true })!;
+    const ip = req.ip;
+    await this.rateLimits.check(
+      `auth:verify-complete:${ip ?? 'unknown'}`,
+      this.config.authRateLimitMax,
+      this.config.authRateLimitWindowMs,
+    );
+    await this.verifications.complete(token, ip, req.headers['user-agent']);
   }
 
   @Get('ping')
