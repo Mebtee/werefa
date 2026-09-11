@@ -132,10 +132,10 @@ describe('E: reset request — uniform response, email sent only for known accou
 
 describe('F: reset complete — works, revokes sessions, clears lock', () => {
   it('correct token sets a new password; old password fails; sessions revoked', async () => {
-    // Request reset for admin1
+    // Request reset for owner2 (Admins are excluded from the reset flow).
     await supertest(server)
       .post('/api/v1/auth/password/reset/request')
-      .send({ email: TEST_EMAILS.admin1 })
+      .send({ email: TEST_EMAILS.owner2 })
       .set(CSRF)
       .expect(202);
 
@@ -150,11 +150,11 @@ describe('F: reset complete — works, revokes sessions, clears lock', () => {
       .expect(204);
 
     // Old password fails
-    const old = await login(TEST_EMAILS.admin1, TEST_PASSWORDS.admin);
+    const old = await login(TEST_EMAILS.owner2, TEST_PASSWORDS.owner);
     expect(old.status).toBe(401);
 
     // New password works
-    const fresh = await login(TEST_EMAILS.admin1, newPw);
+    const fresh = await login(TEST_EMAILS.owner2, newPw);
     expect(fresh.status).toBe(200);
 
     // Session is valid
@@ -164,7 +164,7 @@ describe('F: reset complete — works, revokes sessions, clears lock', () => {
       .set('Cookie', `wrf.sid=${cookie}`)
       .set(CSRF)
       .expect(200);
-    expect(me.body.email).toBe(TEST_EMAILS.admin1);
+    expect(me.body.email).toBe(TEST_EMAILS.owner2);
   });
 });
 
@@ -183,7 +183,7 @@ describe('H: reset token used/expired', () => {
   it('used token → 409 TOKEN_USED', async () => {
     await supertest(server)
       .post('/api/v1/auth/password/reset/request')
-      .send({ email: TEST_EMAILS.admin2 })
+      .send({ email: TEST_EMAILS.owner2 })
       .set(CSRF)
       .expect(202);
     const token = extractResetTokenFromMail();
@@ -208,14 +208,14 @@ describe('H: reset token used/expired', () => {
     // Request a fresh token
     await supertest(server)
       .post('/api/v1/auth/password/reset/request')
-      .send({ email: TEST_EMAILS.admin1 })
+      .send({ email: TEST_EMAILS.owner2 })
       .set(CSRF)
       .expect(202);
     const token = extractResetTokenFromMail();
 
     // Manually expire it
     const userId = (await prisma.user.findUnique({
-      where: { email: TEST_EMAILS.admin1 },
+      where: { email: TEST_EMAILS.owner2 },
       select: { id: true },
     }))!.id;
     await prisma.passwordResetToken.updateMany({
@@ -260,8 +260,7 @@ describe('I: password change — revokes all sessions', () => {
 
 describe('J: admin cannot change own password → 403 + event', () => {
   it('returns 403 FORBIDDEN with admin-specific detail', async () => {
-    // admin2's password was changed to newPassword in test H.
-    const loginRes = await login(TEST_EMAILS.admin2, TEST_PASSWORDS.newPassword);
+    const loginRes = await login(TEST_EMAILS.admin2, TEST_PASSWORDS.admin);
     const cookie = extractSessionToken(loginRes.setCookie)!;
     expect(cookie).toBeDefined();
 
@@ -280,7 +279,7 @@ describe('M: reset token guessing — second request invalidates first', () => {
     // Request 1
     await supertest(server)
       .post('/api/v1/auth/password/reset/request')
-      .send({ email: TEST_EMAILS.admin2 })
+      .send({ email: TEST_EMAILS.owner2 })
       .set(CSRF)
       .expect(202);
     const token1 = extractResetTokenFromMail();
@@ -288,7 +287,7 @@ describe('M: reset token guessing — second request invalidates first', () => {
     // Request 2 — invalidates token1
     await supertest(server)
       .post('/api/v1/auth/password/reset/request')
-      .send({ email: TEST_EMAILS.admin2 })
+      .send({ email: TEST_EMAILS.owner2 })
       .set(CSRF)
       .expect(202);
     const token2 = extractResetTokenFromMail();
