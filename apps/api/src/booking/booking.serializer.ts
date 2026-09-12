@@ -138,6 +138,7 @@ export interface AvailabilityDto {
   endAt: string;
   totalPriceMinor: number;
   totalDurationMinutes: number;
+  prepaidMinor: number;
 }
 
 function minor(value: bigint): number {
@@ -275,6 +276,7 @@ export class BookingSerializer {
     endAt: Date;
     totalPriceMinor: bigint;
     totalDurationMinutes: number;
+    prepaidMinor: bigint;
   }): AvailabilityDto {
     return {
       available: args.available,
@@ -282,6 +284,7 @@ export class BookingSerializer {
       endAt: iso(args.endAt),
       totalPriceMinor: minor(args.totalPriceMinor),
       totalDurationMinutes: args.totalDurationMinutes,
+      prepaidMinor: minor(args.prepaidMinor),
     };
   }
 
