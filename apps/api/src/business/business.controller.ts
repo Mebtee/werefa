@@ -21,6 +21,8 @@ import { TenantGuard } from '../common/guards/tenant.guard';
 import type { ActorContext } from '../common/context/actor-context';
 import { BusinessService } from './business.service';
 import { BusinessSerializer, type BusinessDetailDto } from './business.serializer';
+import { PrepaymentConfigService } from './prepayment-config.service';
+import type { PrepaymentConfigDto } from './prepayment-input';
 
 /**
  * Owner business-management endpoints (Prompt 09, Domain 2 TENANT + Domain 14
@@ -34,6 +36,7 @@ export class BusinessController {
   constructor(
     private readonly businesses: BusinessService,
     private readonly serializer: BusinessSerializer,
+    private readonly prepayment: PrepaymentConfigService,
   ) {}
 
   @Post()
@@ -128,6 +131,30 @@ export class BusinessController {
     @Param('businessId') businessId: string,
   ): Promise<{ activeBusinessId: string }> {
     return this.businesses.selectContext(actor, businessId);
+  }
+
+  /** Read own business prepayment configuration (REQ-110/111). */
+  @Get(':businessId/prepayment-config')
+  @UseGuards(TenantGuard)
+  async getPrepaymentConfig(
+    @Actor() actor: ActorContext,
+    @Param('businessId') businessId: string,
+  ): Promise<{ prepayment: PrepaymentConfigDto }> {
+    const prepayment = await this.prepayment.getForOwner(actor.userId, businessId);
+    return { prepayment };
+  }
+
+  /** Update own business prepayment configuration (REQ-110/111). */
+  @Patch(':businessId/prepayment-config')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(TenantGuard)
+  async updatePrepaymentConfig(
+    @Actor() actor: ActorContext,
+    @Param('businessId') businessId: string,
+    @Body() body: unknown,
+  ): Promise<{ prepayment: PrepaymentConfigDto }> {
+    const prepayment = await this.prepayment.updateForOwner(actor.userId, businessId, body);
+    return { prepayment };
   }
 
   @Post(':businessId/logo')

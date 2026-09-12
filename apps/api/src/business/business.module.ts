@@ -7,11 +7,22 @@ import { BusinessController } from './business.controller';
 import { BusinessPublicController } from './business-public.controller';
 import { BusinessSerializer } from './business.serializer';
 import { BusinessService } from './business.service';
+import { PrepaymentConfigService } from './prepayment-config.service';
 
 @Module({
   imports: [IamModule, ScheduleModule],
   controllers: [BusinessController, BusinessAdminController, BusinessPublicController],
-  providers: [BusinessService, BusinessSerializer, SubscriptionAvailabilityService],
-  exports: [BusinessService, BusinessSerializer, SubscriptionAvailabilityService],
+  providers: [
+    BusinessService,
+    BusinessSerializer,
+    SubscriptionAvailabilityService,
+    PrepaymentConfigService,
+  ],
+  exports: [
+    BusinessService,
+    BusinessSerializer,
+    SubscriptionAvailabilityService,
+    PrepaymentConfigService,
+  ],
 })
 export class BusinessModule {}
