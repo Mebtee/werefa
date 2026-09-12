@@ -22,6 +22,7 @@ interface AvailabilityResult {
   endAt: string;
   totalPriceMinor: number;
   totalDurationMinutes: number;
+  prepaidMinor: number;
 }
 
 interface BookingCreated {
@@ -251,6 +252,12 @@ export function BookingPanel({ slug }: { slug: string }) {
           <dd>{money(b.totalPriceMinor)}</dd>
           <dt>Payment</dt>
           <dd>{b.paymentStatus === 'PAID' ? 'Paid' : 'Pending'}</dd>
+          {b.prepaidMinor > 0 ? (
+            <>
+              <dt>Deposit required</dt>
+              <dd>{money(b.prepaidMinor)}</dd>
+            </>
+          ) : null}
           <dt>Method</dt>
           <dd>
             {PAYMENT_METHODS.find((m) => m.value === b.paymentMethod)?.label ??
@@ -260,7 +267,13 @@ export function BookingPanel({ slug }: { slug: string }) {
         </dl>
         <p className="muted small">
           {b.paymentStatus === 'PENDING'
-            ? `Please complete payment of ${money(b.totalPriceMinor)} using the method selected. Keep the reference above — the business will confirm your appointment once payment is verified.`
+            ? b.prepaidMinor > 0
+              ? `Please complete your ${money(b.prepaidMinor)} deposit (out of a total of ${money(
+                  b.totalPriceMinor,
+                )}) using the method selected. Keep the reference above — the business will confirm your appointment once the deposit is verified.`
+              : `Please complete payment of ${money(
+                  b.totalPriceMinor,
+                )} using the method selected. Keep the reference above — the business will confirm your appointment once payment is verified.`
             : 'Your appointment is confirmed. Show this page (or the QR) when you arrive.'}
         </p>
         <TelegramConnectCard slug={slug} bookingId={b.id} phone={customerPhone} />
@@ -425,6 +438,9 @@ export function BookingPanel({ slug }: { slug: string }) {
               Free at {new Date(checked.startAt).toLocaleString()} →{' '}
               {new Date(checked.endAt).toLocaleTimeString()} · {money(checked.totalPriceMinor)} ·{' '}
               {minutes(checked.totalDurationMinutes)}
+              {checked.prepaidMinor > 0
+                ? ` · Deposit required: ${money(checked.prepaidMinor)}`
+                : ''}
             </p>
           ) : (
             <p className="notice small">That time is not available — pick a different slot.</p>
@@ -436,6 +452,11 @@ export function BookingPanel({ slug }: { slug: string }) {
         <button className="button" type="submit" disabled={submitBusy || !checked?.available}>
           {submitBusy ? 'Booking…' : selectedCount > 0 ? `Book for ${money(totals.price)}` : 'Book'}
         </button>
+        {checked?.available && checked.prepaidMinor > 0 ? (
+          <p className="muted small">
+            A deposit of {money(checked.prepaidMinor)} is required with your proof of payment.
+          </p>
+        ) : null}
       </form>
     </section>
   );
