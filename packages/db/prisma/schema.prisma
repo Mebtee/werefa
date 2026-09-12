@@ -136,6 +136,15 @@ model Business {
   pauseMessage  String?   @map("pause_message")
   trialEndsAt   DateTime? @map("trial_ends_at") // REQ-006/128 30-day free trial
 
+  // Prepayment configuration (REQ-110/111). Owner configures either a
+  // percentage (1..100) or a fixed minor-unit amount; exactly one must be set
+  // when enabled. Snapshot at booking creation time; config changes do NOT
+  // alter existing bookings.
+  prepaymentEnabled   Boolean  @default(false) @map("prepayment_enabled")
+  prepaymentType      String?  @map("prepayment_type") @db.VarChar(20) // "PERCENTAGE" | "FIXED"
+  prepaymentPercentage Int?    @map("prepayment_percentage") // 1..100 when type=PERCENTAGE
+  prepaymentFixedMinor BigInt? @map("prepayment_fixed_minor") // minor units when type=FIXED
+
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
