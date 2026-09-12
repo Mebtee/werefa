@@ -34,18 +34,18 @@ the authoritative sources used here are:
 
 ### API endpoints (`apps/api/src/iam/{auth.controller,super-admin.controller}.ts`)
 
-| Endpoint                                     | Access               | Behavior                                                                                    |
-| -------------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------- |
-| `POST /api/v1/auth/login`                    | public, rate-limited | sets `wrf.sid` HttpOnly cookie; uniform 401 / 423 locked                                    |
-| `GET /api/v1/auth/me`                        | session              | actor profile + owned businesses                                                            |
-| `POST /api/v1/auth/logout`                   | session              | revoke session, clear cookie                                                                |
-| `POST /api/v1/auth/password/change`          | Owner/SuperAdmin     | requires current + new password; revokes all sessions (REQ-035; Admins blocked per REQ-218) |
-| `POST /api/v1/auth/password/reset/request`   | public, rate-limited | email reset link (uniform response)                                                         |
-| `POST /api/v1/auth/password/reset/complete`  | public, rate-limited | one-time token → new password                                                               |
-| `POST /api/v1/super-admin/recovery/request`  | public, rate-limited | code to recovery email                                                                      |
-| `POST /api/v1/super-admin/recovery/complete` | public, rate-limited | one-time code → new SA password                                                             |
-| `GET/POST/PATCH … /admin*`                   | SuperAdmin only      | list/create/deactivate/reactivate/change-password/force-logout                          |
-| `POST /api/v1/super-admin/admins/:id/reactivate` | SuperAdmin only  | clears `disabled_at`, revokes outstanding reset tokens, records `ADMIN_REACTIVATE`     |
+| Endpoint                                         | Access               | Behavior                                                                                    |
+| ------------------------------------------------ | -------------------- | ------------------------------------------------------------------------------------------- |
+| `POST /api/v1/auth/login`                        | public, rate-limited | sets `wrf.sid` HttpOnly cookie; uniform 401 / 423 locked                                    |
+| `GET /api/v1/auth/me`                            | session              | actor profile + owned businesses                                                            |
+| `POST /api/v1/auth/logout`                       | session              | revoke session, clear cookie                                                                |
+| `POST /api/v1/auth/password/change`              | Owner/SuperAdmin     | requires current + new password; revokes all sessions (REQ-035; Admins blocked per REQ-218) |
+| `POST /api/v1/auth/password/reset/request`       | public, rate-limited | email reset link (uniform response)                                                         |
+| `POST /api/v1/auth/password/reset/complete`      | public, rate-limited | one-time token → new password                                                               |
+| `POST /api/v1/super-admin/recovery/request`      | public, rate-limited | code to recovery email                                                                      |
+| `POST /api/v1/super-admin/recovery/complete`     | public, rate-limited | one-time code → new SA password                                                             |
+| `GET/POST/PATCH … /admin*`                       | SuperAdmin only      | list/create/deactivate/reactivate/change-password/force-logout                              |
+| `POST /api/v1/super-admin/admins/:id/reactivate` | SuperAdmin only      | clears `disabled_at`, revokes outstanding reset tokens, records `ADMIN_REACTIVATE`          |
 
 ### CSRF defense (doc 18)
 
@@ -91,9 +91,9 @@ the authoritative sources used here are:
 | REQ-201..203    | View own/all security history               | recorded in DB (view endpoints = later UX)              | D (recorded)                          |
 | REQ-204         | Records retained 1 year                     | retention persistence (`retention-security-events.job`) | foundation                            |
 | REQ-217a        | SA creates/deactivates Admins (max 2)       | advisory-lock `createAdmin` + `deactivateAdmin`         | `identity-admin-recovery.test.ts` P   |
-| REQ-217b        | SA reactivates a deactivated Admin          | `reactivateAdmin` + `ADMIN_REACTIVATE` event            | P (reactivate)                       |
-| REQ-218         | Admin cannot change own password            | forbidden by role (change-password + reset denial)      | J, P (reset denied)                  |
-| REQ-219         | SA can change Admin password                | `SuperAdminService` (clears lock, revokes sessions)     | P (pw change)                        |
+| REQ-217b        | SA reactivates a deactivated Admin          | `reactivateAdmin` + `ADMIN_REACTIVATE` event            | P (reactivate)                        |
+| REQ-218         | Admin cannot change own password            | forbidden by role (change-password + reset denial)      | J, P (reset denied)                   |
+| REQ-219         | SA can change Admin password                | `SuperAdminService` (clears lock, revokes sessions)     | P (pw change)                         |
 | REQ-220/221     | SA force-logout + immediate email           | `revokeAllSessions` + email                             | P                                     |
 
 Non-enumeration (uniform 401), rate limiting (429), and CSRF (403/204) are additionally covered by tests C, S/T, and the recovery rate-limit case.
