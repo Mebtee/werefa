@@ -16,6 +16,7 @@ import { loadBookingAggregate } from './booking-aggregate';
 import { BookingSerializer } from './booking.serializer';
 import { validateProofFile } from './booking-proof';
 import type { AvailabilityInput, CreateBookingInput } from './booking-input';
+import { PrepaymentConfigService, derivePrepaidMinor } from '../business/prepayment-config.service';
 
 export type MultiPartProof = { buffer: Buffer; mimetype: string; size: number };
 
@@ -42,6 +43,7 @@ export class BookingPublicService {
     private readonly businesses: BusinessService,
     private readonly subscriptions: SubscriptionAvailabilityService,
     private readonly scheduleWindow: ScheduleAvailabilityService,
+    private readonly prepaid: PrepaymentConfigService,
   ) {}
 
   /** Live availability for a start time + service combination (no reservation). */
@@ -111,11 +113,14 @@ export class BookingPublicService {
         await this.assertSubscriptionEligible(tx, businessId);
         const combo = await this.pricing.resolveCombination(tx, businessId, services);
         const endAt = new Date(startAt.getTime() + combo.totalDurationMinutes * 60_000);
+        const prepaidMinor = await this.prepaid
+          .getForBooking(tx, businessId)
+          .then((row) => derivePrepaidMinor(row, combo.totalPriceMinor));
         const [slotFree, window] = await Promise.all([
           this.availabilityService.isSlotAvailable(tx, { businessId, startAt, endAt }),
           this.scheduleWindow.windowOk(tx, businessId, startAt, endAt),
         ]);
-        return { available: slotFree && window.ok, startAt, endAt, ...combo };
+        return { available: slotFree && window.ok, startAt, endAt, ...combo, prepaidMinor };
       },
     );
   }
@@ -148,6 +153,9 @@ export class BookingPublicService {
     await this.assertSubscriptionEligible(tx, businessId);
     await this.scheduleWindow.assertWindowOk(tx, businessId, startAt, endAt);
     await this.availabilityService.requireSlotAvailable(tx, { businessId, startAt, endAt });
+    const prepaidMinor = await this.prepaid
+      .getForBooking(tx, businessId)
+      .then((row) => derivePrepaidMinor(row, combo.totalPriceMinor));
 
     const now = new Date();
     const booking = await tx.booking.create({
@@ -170,7 +178,7 @@ export class BookingPublicService {
         bookingId: booking.id,
         status: 'PENDING',
         method: input.paymentMethod,
-        prepaidMinor: 0n,
+        prepaidMinor,
         createdAt: now,
         updatedAt: now,
       },
