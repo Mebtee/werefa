@@ -171,6 +171,15 @@ async function main(): Promise<void> {
     DROP POLICY IF EXISTS "subscription_status_history_owner_select" ON "subscription_status_history";
     DROP POLICY IF EXISTS "subscription_status_history_owner_insert" ON "subscription_status_history";
     DROP POLICY IF EXISTS "subscription_status_history_superadmin_all" ON "subscription_status_history";
+    DROP POLICY IF EXISTS "business_owner_telegram_connection_owner_select" ON "business_owner_telegram_connection";
+    DROP POLICY IF EXISTS "business_owner_telegram_connection_owner_insert" ON "business_owner_telegram_connection";
+    DROP POLICY IF EXISTS "business_owner_telegram_connection_owner_update" ON "business_owner_telegram_connection";
+    DROP POLICY IF EXISTS "business_owner_telegram_connection_owner_delete" ON "business_owner_telegram_connection";
+    DROP POLICY IF EXISTS "business_owner_telegram_connection_superadmin_all" ON "business_owner_telegram_connection";
+    DROP POLICY IF EXISTS "owner_telegram_action_superadmin_select" ON "owner_telegram_action";
+    DROP POLICY IF EXISTS "owner_telegram_action_superadmin_insert" ON "owner_telegram_action";
+    DROP POLICY IF EXISTS "owner_telegram_action_superadmin_update" ON "owner_telegram_action";
+    DROP POLICY IF EXISTS "owner_telegram_action_superadmin_all" ON "owner_telegram_action";
   `;
   await client.query(drops);
 

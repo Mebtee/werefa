@@ -2058,3 +2058,113 @@ CREATE POLICY "subscription_status_history_owner_insert" ON "subscription_status
   );
 CREATE POLICY "subscription_status_history_superadmin_all" ON "subscription_status_history"
   FOR ALL TO app_superadmin USING (true) WITH CHECK (true);
+
+-- ---------------------------------------------------------------------------
+-- Owner Telegram verification (Prompt 23, REQ-065/066/067/068/119/120):
+--
+-- business_owner_telegram_connection: owner-scoped like every business table
+-- (the acting owner must own the business AND the row's user_id is the acting
+-- owner — a connection is bound to ONE owner). The webhook `/start` binding and
+-- the delivery worker operate under scope SUPER_ADMIN (server-trusted), which
+-- the owner policies allow explicitly; app_superadmin has full access.
+--
+-- owner_telegram_action: NOT tenant-addressable — action tokens are consumed
+-- from Telegram callback data, never from an HTTP owner request. There are no
+-- owner policies at all: the app role may touch rows only under scope
+-- SUPER_ADMIN (dispatcher issues, webhook consumes), and app_superadmin has
+-- full access. An owner can therefore never reach another tenant's action rows.
+-- ---------------------------------------------------------------------------
+ALTER TABLE "business_owner_telegram_connection" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "business_owner_telegram_connection" FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY "business_owner_telegram_connection_owner_select" ON "business_owner_telegram_connection"
+  FOR SELECT TO app
+  USING (
+    current_setting('app.scope', true) = 'SUPER_ADMIN'
+    OR (
+      current_setting('app.scope', true) = 'OWNER'
+      AND "business_owner_telegram_connection".user_id =
+        (NULLIF(current_setting('app.user_id', true), ''))::uuid
+      AND EXISTS (
+        SELECT 1 FROM business_owner bo
+        WHERE bo.business_id = "business_owner_telegram_connection".business_id
+          AND bo.user_id = (NULLIF(current_setting('app.user_id', true), ''))::uuid
+      )
+    )
+  );
+CREATE POLICY "business_owner_telegram_connection_owner_insert" ON "business_owner_telegram_connection"
+  FOR INSERT TO app
+  WITH CHECK (
+    current_setting('app.scope', true) = 'SUPER_ADMIN'
+    OR (
+      current_setting('app.scope', true) = 'OWNER'
+      AND "business_owner_telegram_connection".user_id =
+        (NULLIF(current_setting('app.user_id', true), ''))::uuid
+      AND EXISTS (
+        SELECT 1 FROM business_owner bo
+        WHERE bo.business_id = "business_owner_telegram_connection".business_id
+          AND bo.user_id = (NULLIF(current_setting('app.user_id', true), ''))::uuid
+      )
+    )
+  );
+CREATE POLICY "business_owner_telegram_connection_owner_update" ON "business_owner_telegram_connection"
+  FOR UPDATE TO app
+  USING (
+    current_setting('app.scope', true) = 'SUPER_ADMIN'
+    OR (
+      current_setting('app.scope', true) = 'OWNER'
+      AND "business_owner_telegram_connection".user_id =
+        (NULLIF(current_setting('app.user_id', true), ''))::uuid
+      AND EXISTS (
+        SELECT 1 FROM business_owner bo
+        WHERE bo.business_id = "business_owner_telegram_connection".business_id
+          AND bo.user_id = (NULLIF(current_setting('app.user_id', true), ''))::uuid
+      )
+    )
+  )
+  WITH CHECK (
+    current_setting('app.scope', true) = 'SUPER_ADMIN'
+    OR (
+      current_setting('app.scope', true) = 'OWNER'
+      AND "business_owner_telegram_connection".user_id =
+        (NULLIF(current_setting('app.user_id', true), ''))::uuid
+      AND EXISTS (
+        SELECT 1 FROM business_owner bo
+        WHERE bo.business_id = "business_owner_telegram_connection".business_id
+          AND bo.user_id = (NULLIF(current_setting('app.user_id', true), ''))::uuid
+      )
+    )
+  );
+CREATE POLICY "business_owner_telegram_connection_owner_delete" ON "business_owner_telegram_connection"
+  FOR DELETE TO app
+  USING (
+    current_setting('app.scope', true) = 'SUPER_ADMIN'
+    OR (
+      current_setting('app.scope', true) = 'OWNER'
+      AND "business_owner_telegram_connection".user_id =
+        (NULLIF(current_setting('app.user_id', true), ''))::uuid
+      AND EXISTS (
+        SELECT 1 FROM business_owner bo
+        WHERE bo.business_id = "business_owner_telegram_connection".business_id
+          AND bo.user_id = (NULLIF(current_setting('app.user_id', true), ''))::uuid
+      )
+    )
+  );
+CREATE POLICY "business_owner_telegram_connection_superadmin_all" ON "business_owner_telegram_connection"
+  FOR ALL TO app_superadmin USING (true) WITH CHECK (true);
+
+ALTER TABLE "owner_telegram_action" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "owner_telegram_action" FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY "owner_telegram_action_superadmin_select" ON "owner_telegram_action"
+  FOR SELECT TO app
+  USING (current_setting('app.scope', true) = 'SUPER_ADMIN');
+CREATE POLICY "owner_telegram_action_superadmin_insert" ON "owner_telegram_action"
+  FOR INSERT TO app
+  WITH CHECK (current_setting('app.scope', true) = 'SUPER_ADMIN');
+CREATE POLICY "owner_telegram_action_superadmin_update" ON "owner_telegram_action"
+  FOR UPDATE TO app
+  USING (current_setting('app.scope', true) = 'SUPER_ADMIN')
+  WITH CHECK (current_setting('app.scope', true) = 'SUPER_ADMIN');
+CREATE POLICY "owner_telegram_action_superadmin_all" ON "owner_telegram_action"
+  FOR ALL TO app_superadmin USING (true) WITH CHECK (true);

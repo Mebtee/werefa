@@ -34,6 +34,8 @@ model User {
   passwordResetTokens       PasswordResetToken[]
   recoveryTokens            RecoveryToken[]
   emailVerificationTokens   EmailVerificationToken[]
+  ownerTelegramConnections  BusinessOwnerTelegramConnection[]
+  ownerTelegramActions      OwnerTelegramAction[]
 
   @@map("user")
 }
@@ -166,6 +168,8 @@ model Business {
   notifications Notification[]
   notificationDeliveries NotificationDelivery[]
   telegramConnections TelegramConnection[]
+  ownerTelegramConnections BusinessOwnerTelegramConnection[]
+  ownerTelegramActions OwnerTelegramAction[]
   scheduleVersions ScheduleVersion[]
   workingPeriods WorkingPeriod[]
   specialDates   SpecialDate[]
@@ -629,6 +633,73 @@ model TelegramConnection {
   @@index([businessId])
   @@index([status])
   @@map("telegram_connection")
+}
+
+/// Owner-level Telegram chat + one-time connect token (REQ-065/066, Prompt 23).
+///
+/// One row per (owner, business) pair — an owner may manage several businesses
+/// through the same bot, so `chatId` is NOT unique globally (the shared bot
+/// webhook receives callbacks for every bound chat). The chat is bound from a
+/// Telegram-authenticated `/start <token>` and the token is stored as sha256
+/// (raw never persisted).
+model BusinessOwnerTelegramConnection {
+  id                    String                  @id @default(uuid()) @db.Uuid
+  businessId            String                  @map("business_id") @db.Uuid
+  userId                String                  @map("user_id") @db.Uuid
+  status                TelegramConnectionStatus @default(PENDING)
+  connectTokenHash      String?                 @map("connect_token_hash") @db.Char(64)
+  connectTokenExpiresAt DateTime?               @map("connect_token_expires_at")
+  chatId                BigInt?                 @map("chat_id")
+  connectedAt           DateTime?               @map("connected_at")
+  createdAt             DateTime                @default(now()) @map("created_at")
+  updatedAt             DateTime                @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, businessId])
+  @@unique([userId, chatId])
+  @@index([businessId])
+  @@index([status])
+  @@map("business_owner_telegram_connection")
+}
+
+/// Owner verification action issued inside a new-proof Telegram notification
+/// (REQ-067/068): a single-use Accept / Reject token bound to the chat + proof.
+///
+/// Security model:
+///  - The raw token is random 256-bit base64url; only the sha256 hash is
+///    stored, so a leaked table does not leak usable action links.
+///  - `status` drives the two-step reject: ISSUED → (callback) →
+///    AWAITING_REASON → (text message) → CONSUMED. Accept consumes directly.
+///  - Replays are refused (usedAt/status transitions), expiry is re-checked on
+///    every step, and the consuming chat must equal the issuing chat.
+///  - System/SUPER_ADMIN scope only (webhook-originated) — no tenant RLS
+///    policies grant app-role access; ownership is enforced by the row's
+///    userId/businessId when the action executes.
+model OwnerTelegramAction {
+  id         String   @id @default(uuid()) @db.Uuid
+  businessId String   @map("business_id") @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  bookingId  String   @map("booking_id") @db.Uuid
+  paymentId  String   @map("payment_id") @db.Uuid
+  proofId    String   @map("proof_id") @db.Uuid
+  chatId     BigInt   @map("chat_id")
+  kind       String   @map("kind") @db.VarChar(10) // "ACCEPT" | "REJECT"
+  status     String   @map("status") @db.VarChar(20)
+  tokenHash  String   @unique @map("token_hash") @db.Char(64)
+  reason     String?  @map("reason") @db.VarChar(500)
+  expiresAt  DateTime @map("expires_at")
+  usedAt     DateTime? @map("used_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id])
+
+  @@index([businessId])
+  @@index([chatId, status])
+  @@index([expiresAt])
+  @@map("owner_telegram_action")
 }
 
 /// Durable send intent for a single recipient × channel (doc 13 §3/§4).
