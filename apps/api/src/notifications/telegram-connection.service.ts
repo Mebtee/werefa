@@ -8,6 +8,7 @@ import { withTenantContext } from '../database/tenant-executor';
 import { SecurityEventService } from '../iam/security-events.service';
 import { RateLimitService } from '../iam/rate-limit.service';
 import { SYSTEM_ACTOR_ID } from '../business/business.service';
+import { OwnerTelegramService } from './owner-telegram.service';
 
 const GENERIC_MESSAGE =
   'If a matching booking exists for that phone, check its Telegram status below.';
@@ -57,6 +58,7 @@ export class TelegramConnectionService {
     private readonly businesses: BusinessService,
     private readonly security: SecurityEventService,
     private readonly rateLimit: RateLimitService,
+    private readonly ownerTelegram: OwnerTelegramService,
   ) {}
 
   async initiate(
@@ -238,9 +240,15 @@ export class TelegramConnectionService {
 
   /**
    * Webhook entry point (doc 12 §5). Authenticates via the shared secret header,
-   * deduplicates update ids (at-most-once), and binds a chat to a booking using
-   * an unexpired, unconsumed connect token. Returns `{ ok: true }` in every
-   * legitimately-processed case (Telegram contract); unauthorized calls get 401.
+   * deduplicates update ids (at-most-once), and routes the update:
+   *
+   *  - inline-button callback → owner Accept/Reject action (Prompt 23);
+   *  - `/start <token>` → owner bind first, then customer bind;
+   *  - plain text → owner reject-reason step (silently ignored otherwise);
+   *  - anything else → ignored.
+   *
+   * Returns `{ ok: true }` in every legitimately-processed case (Telegram
+   * contract); unauthorized calls get 401.
    */
   async handleWebhook(
     raw: unknown,
@@ -275,31 +283,70 @@ export class TelegramConnectionService {
       });
     if (!processed) return { ok: true };
 
-    const command = parseStartCommand(update.text);
-    if (!command) return { ok: true }; // non-command message: ignore
+    // Inline-button callback → owner action flow.
+    if (update.callbackQueryId !== undefined && update.callbackData !== undefined) {
+      await this.ownerTelegram.handleCallback(
+        update.chatId,
+        update.callbackQueryId,
+        update.callbackData,
+        ip,
+      );
+      return { ok: true };
+    }
 
-    const outcome = await this.bindChatByToken(command, update.chatId, ip);
-    if (outcome.type === 'linked') {
-      await this.security.record({
-        type: 'TELEGRAM_CONNECTED',
-        businessId: outcome.businessId,
-        ip,
-        result: 'SUCCESS',
-      });
-      this.logger.log(`Telegram chat ${update.chatId} bound to booking ${outcome.bookingId}`);
-    } else if (outcome.type === 'expired') {
-      await this.security.record({
-        type: 'TELEGRAM_TOKEN_EXPIRED',
-        businessId: outcome.businessId,
-        ip,
-        result: 'FAILURE',
-      });
-    } else if (outcome.type === 'invalid') {
-      await this.security.record({
-        type: 'TELEGRAM_LINK_INVALID',
-        ip,
-        result: 'FAILURE',
-      });
+    const command = parseStartCommand(update.text);
+    if (command) {
+      const ownerOutcome = await this.ownerTelegram.bindOwnerChat(command, update.chatId, ip);
+      if (ownerOutcome.type === 'linked') {
+        await this.security.record({
+          type: 'TELEGRAM_OWNER_CONNECTED',
+          businessId: ownerOutcome.businessId,
+          ip,
+          result: 'SUCCESS',
+        });
+        this.logger.log(
+          `Telegram owner chat ${update.chatId} bound to business ${ownerOutcome.businessId}`,
+        );
+        return { ok: true };
+      }
+      if (ownerOutcome.type === 'expired') {
+        await this.security.record({
+          type: 'TELEGRAM_OWNER_TOKEN_EXPIRED',
+          businessId: ownerOutcome.businessId,
+          ip,
+          result: 'FAILURE',
+        });
+        return { ok: true };
+      }
+      // No owner token matched → fall through to the customer binding.
+      const outcome = await this.bindChatByToken(command, update.chatId, ip);
+      if (outcome.type === 'linked') {
+        await this.security.record({
+          type: 'TELEGRAM_CONNECTED',
+          businessId: outcome.businessId,
+          ip,
+          result: 'SUCCESS',
+        });
+        this.logger.log(`Telegram chat ${update.chatId} bound to booking ${outcome.bookingId}`);
+      } else if (outcome.type === 'expired') {
+        await this.security.record({
+          type: 'TELEGRAM_TOKEN_EXPIRED',
+          businessId: outcome.businessId,
+          ip,
+          result: 'FAILURE',
+        });
+      } else {
+        await this.security.record({
+          type: 'TELEGRAM_LINK_INVALID',
+          ip,
+          result: 'FAILURE',
+        });
+      }
+      return { ok: true };
+    }
+
+    if (update.text) {
+      await this.ownerTelegram.handleTextMessage(update.chatId, update.text, ip);
     }
     return { ok: true };
   }
@@ -364,6 +411,9 @@ export interface TelegramUpdateView {
   updateId: bigint;
   chatId: bigint;
   text?: string;
+  /** Present for inline-button callbacks (the shared proof-keyboard flow). */
+  callbackQueryId?: string;
+  callbackData?: string;
 }
 
 /** Defensive parser for the Telegram update envelope (doc 12 §5). */
@@ -373,6 +423,19 @@ export function parseTelegramUpdate(raw: unknown): TelegramUpdateView | null {
   if (typeof root.update_id !== 'number' && typeof root.update_id !== 'string') return null;
   const updateId = toBigInt(root.update_id);
   if (updateId === null) return null;
+
+  const callbackQuery = root.callback_query as Record<string, unknown> | undefined;
+  if (callbackQuery && typeof callbackQuery === 'object') {
+    const cqId = typeof callbackQuery.id === 'string' ? callbackQuery.id : undefined;
+    const data = typeof callbackQuery.data === 'string' ? callbackQuery.data : undefined;
+    const message = callbackQuery.message as Record<string, unknown> | undefined;
+    const chat = message?.chat as Record<string, unknown> | undefined;
+    const chatId = chat ? toBigInt(chat.id) : null;
+    if (cqId && data !== undefined && chatId !== null) {
+      return { updateId, chatId, callbackQueryId: cqId, callbackData: data };
+    }
+    return null;
+  }
 
   const message = root.message as Record<string, unknown> | undefined;
   if (!message || typeof message !== 'object') return null;
