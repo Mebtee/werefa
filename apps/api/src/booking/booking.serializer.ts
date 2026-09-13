@@ -32,6 +32,8 @@ export interface BookingServiceItemDto {
 export interface PaymentProofDto {
   id: string;
   submittedAt: string;
+  mime: string;
+  sizeBytes: number;
 }
 
 export interface BookingHistoryDto {
@@ -197,6 +199,8 @@ export class BookingSerializer {
       proofs: (row.payment?.proofs ?? []).map((p) => ({
         id: p.id,
         submittedAt: iso(p.submittedAt),
+        mime: p.mime,
+        sizeBytes: Number(p.sizeBytes),
       })),
       scheduleExceptions: row.scheduleExceptions.map((e) => ({
         id: e.id,

@@ -47,6 +47,13 @@ export interface AppConfig {
   telegramConnectRateLimitWindowMs: number;
   telegramWebhookRateLimitMax: number;
   telegramWebhookRateLimitWindowMs: number;
+  /** Owner verification action TTL (REQ-067/068): single-use accept/reject tokens. */
+  ownerTelegramActionTtlMinutes: number;
+  /** Time the owner has to send the mandatory reason after tapping Reject. */
+  ownerTelegramRejectReasonTtlMinutes: number;
+  /** Per-chat owner action rate limit (webhook counter-reuse guard). */
+  ownerTelegramActionRateLimitMax: number;
+  ownerTelegramActionRateLimitWindowMs: number;
   deliveryRetryMaxAttempts: number;
   deliveryRetryBaseDelayMs: number;
   deliveryRetryMaxDelayMs: number;
@@ -180,6 +187,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     telegramConnectRateLimitWindowMs: asInt(env.TELEGRAM_CONNECT_RATE_LIMIT_WINDOW_MS, 3_600_000),
     telegramWebhookRateLimitMax: asInt(env.TELEGRAM_WEBHOOK_RATE_LIMIT_MAX, 120),
     telegramWebhookRateLimitWindowMs: asInt(env.TELEGRAM_WEBHOOK_RATE_LIMIT_WINDOW_MS, 60_000),
+    ownerTelegramActionTtlMinutes: asInt(env.OWNER_TELEGRAM_ACTION_TTL_MINUTES, 30),
+    ownerTelegramRejectReasonTtlMinutes: asInt(env.OWNER_TELEGRAM_REJECT_REASON_TTL_MINUTES, 15),
+    ownerTelegramActionRateLimitMax: asInt(env.OWNER_TELEGRAM_ACTION_RATE_LIMIT_MAX, 20),
+    ownerTelegramActionRateLimitWindowMs: asInt(
+      env.OWNER_TELEGRAM_ACTION_RATE_LIMIT_WINDOW_MS,
+      60_000,
+    ),
     deliveryRetryMaxAttempts: asInt(env.DELIVERY_RETRY_MAX_ATTEMPTS, 8),
     deliveryRetryBaseDelayMs: asInt(env.DELIVERY_RETRY_BASE_DELAY_MS, 30_000),
     deliveryRetryMaxDelayMs: asInt(env.DELIVERY_RETRY_MAX_DELAY_MS, 43_200_000),

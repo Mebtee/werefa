@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   HttpCode,
   HttpStatus,
   Param,
@@ -66,6 +67,18 @@ export class BookingController {
     @Param('bookingId') bookingId: string,
   ): Promise<{ booking: Awaited<ReturnType<BookingService['detail']>> }> {
     return { booking: await this.service.detail(actor, businessId, bookingId) };
+  }
+
+  @Get(':bookingId/proofs/:proofId')
+  // The response carries a short-lived presigned URL: never cache it.
+  @Header('Cache-Control', 'no-store')
+  async proof(
+    @Actor() actor: ActorContext,
+    @Param('businessId') businessId: string,
+    @Param('bookingId') bookingId: string,
+    @Param('proofId') proofId: string,
+  ): Promise<{ proof: Awaited<ReturnType<BookingService['proofView']>> }> {
+    return { proof: await this.service.proofView(actor, businessId, bookingId, proofId) };
   }
 
   @Post(':bookingId/accept')

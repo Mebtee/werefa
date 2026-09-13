@@ -18,6 +18,7 @@ import { BookingNotificationService, BOOKING_NOTIFICATION_TYPE } from './booking
 import { loadBookingAggregate } from './booking-aggregate';
 import { BookingSerializer, type BookingAggregate } from './booking.serializer';
 import type { BookingStatus } from '@prisma/client';
+import { StorageService } from '../storage/storage.service';
 
 export interface ListBookingsParams {
   status?: BookingStatus;
@@ -48,6 +49,7 @@ export class BookingService {
     private readonly scheduleWindow: ScheduleAvailabilityService,
     private readonly notifications: BookingNotificationService,
     private readonly securityEvents: SecurityEventService,
+    private readonly storage: StorageService,
   ) {}
 
   async list(actor: ActorContext, businessId: string, params: ListBookingsParams) {
@@ -108,6 +110,50 @@ export class BookingService {
       result: 'SUCCESS',
     });
     return this.serializer.ownerDetail(row);
+  }
+
+  /**
+   * REQ-119: owner proof view. Returns a short-lived presigned read URL for
+   * the exact proof row of the exact business booking (owner scope enforced by
+   * RLS); the object never rides a public URL.
+   */
+  async proofView(
+    actor: ActorContext,
+    businessId: string,
+    bookingId: string,
+    proofId: string,
+  ): Promise<{ url: string | null; mime: string; sizeBytes: number; submittedAt: string }> {
+    const row = await withOwnerBusinessContext(
+      this.prisma,
+      actor.userId,
+      businessId,
+      async (tx) => {
+        const booking = await tx.booking.findFirst({
+          where: { id: bookingId, businessId },
+          select: { id: true },
+        });
+        if (!booking) return null;
+        return tx.paymentProof.findFirst({
+          where: { id: proofId, payment: { bookingId } },
+          select: { storageKey: true, mime: true, sizeBytes: true, submittedAt: true },
+        });
+      },
+    );
+    if (!row) throw new NotFoundException('Proof not found.');
+    const url = await this.storage.presignRead(row.storageKey, 300);
+    await this.securityEvents.record({
+      type: 'PAYMENT_PROOF_VIEWED',
+      userId: actor.userId,
+      businessId,
+      result: 'SUCCESS',
+      metadata: { proofId, bookingId },
+    });
+    return {
+      url,
+      mime: row.mime,
+      sizeBytes: Number(row.sizeBytes),
+      submittedAt: row.submittedAt.toISOString(),
+    };
   }
 
   /** Accept a booking + its payment proof (T2): PENDING proof accepted, slot ALLOCATED. */

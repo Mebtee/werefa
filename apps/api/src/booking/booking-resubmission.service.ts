@@ -316,7 +316,7 @@ export class BookingResubmissionService {
     }
 
     const previousProofId = payment.proofs[0]?.id ?? null;
-    await tx.paymentProof.create({
+    const newProof = await tx.paymentProof.create({
       data: {
         paymentId: payment.id,
         businessId,
@@ -362,7 +362,7 @@ export class BookingResubmissionService {
       businessId,
       bookingId: booking.id,
       type: BOOKING_NOTIFICATION_TYPE.newProofOwner,
-      payload: { proofId: previousProofId },
+      payload: { proofId: newProof.id },
     });
 
     const result = await loadBookingAggregate(tx, businessId, booking.id);

@@ -52,6 +52,6 @@ import { BookingLifecycleJob } from '../jobs/booking-lifecycle.job';
     InMemoryVerificationCodeChannel,
     BookingLifecycleJob,
   ],
-  exports: [BookingNotificationService, BookingPricingService],
+  exports: [BookingNotificationService, BookingPricingService, BookingService],
 })
 export class BookingModule {}

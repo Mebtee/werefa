@@ -60,6 +60,10 @@ export const METADATA_ALLOW_LIST = [
   'purgedCount',
   'olderThanDays',
   'cutoff',
+  // Owner payment-proof retrieval (Prompt 23, REQ-119): lets the Super Admin
+  // audit which proof/booking was read (Owner/Admin scopes never echo metadata).
+  'proofId',
+  'bookingId',
 ] as const;
 
 /** Minimum shape of a security_event row used by the serializer. */
