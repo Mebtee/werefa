@@ -1,5 +1,11 @@
 # Implementation documentation
 
+> **Historical reference only.** The application described here was removed from
+> the active tree by the clean implementation reset. These reports document the
+> previous implementation effort and must NOT be treated as instructions for the
+> new implementation. The canonical product source of truth is
+> [`docs/WEREFA-COMPLETE-SPECIFICATION.md`](../WEREFA-COMPLETE-SPECIFICATION.md).
+
 Implementation-focused docs that map the approved requirement & architecture
 set (`docs/*.md`, `docs/architecture/*.md`, `docs/architecture/adr/*.md`) to the
 codebase, record build/prod decisions behind code, and explain the developer
