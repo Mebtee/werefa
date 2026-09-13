@@ -426,12 +426,17 @@ export class BookingService {
       });
     }
 
-    await this.notifications.enqueue(tx, {
-      businessId,
-      bookingId: booking.id,
-      type: BOOKING_NOTIFICATION_TYPE.cancelled,
-      payload: {},
-    });
+    // REQ-104 AC4 / REQ-228 AC1: only a CANCELLED Confirmed booking notifies the
+    // (connected) customer. Cancelling a PAYMENT_PENDING booking requires NO
+    // customer notification; a REJECTED booking already notified rejection.
+    if (booking.status === 'CONFIRMED') {
+      await this.notifications.enqueue(tx, {
+        businessId,
+        bookingId: booking.id,
+        type: BOOKING_NOTIFICATION_TYPE.cancelled,
+        payload: {},
+      });
+    }
     const result = await loadBookingAggregate(tx, businessId, bookingId);
     if (!result)
       throw new ConflictException('Booking disappeared during cancellation.', ErrorCodes.CONFLICT);
