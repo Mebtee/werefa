@@ -18,7 +18,7 @@ import { BookingNotificationService } from './booking-notifications';
 import { BookingPricingService } from './booking-pricing';
 import { BookingSerializer } from './booking.serializer';
 import { SuperAdminPrismaService } from './super-admin.prisma.service';
-import { InMemoryVerificationCodeChannel } from './verification-code.channel';
+import { provideVerificationCodeChannel } from './verification-code.channel';
 import { BookingLifecycleJob } from '../jobs/booking-lifecycle.job';
 
 /**
@@ -49,7 +49,7 @@ import { BookingLifecycleJob } from '../jobs/booking-lifecycle.job';
     BookingPricingService,
     BookingSerializer,
     SuperAdminPrismaService,
-    InMemoryVerificationCodeChannel,
+    provideVerificationCodeChannel(),
     BookingLifecycleJob,
   ],
   exports: [BookingNotificationService, BookingPricingService, BookingService],

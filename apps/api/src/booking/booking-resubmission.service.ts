@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { randomBytes, randomUUID, createHash, timingSafeEqual } from 'node:crypto';
 import { ErrorCodes } from '@werefa/shared';
 import {
@@ -18,7 +18,10 @@ import { BookingNotificationService, BOOKING_NOTIFICATION_TYPE } from './booking
 import { loadBookingAggregate } from './booking-aggregate';
 import { BookingSerializer } from './booking.serializer';
 import { validateProofFile } from './booking-proof';
-import { InMemoryVerificationCodeChannel } from './verification-code.channel';
+import {
+  VERIFICATION_CODE_CHANNEL,
+  type VerificationCodeChannel,
+} from './verification-code.channel';
 import type { RequestCodeInput, ResubmitInput } from './booking-input';
 
 const CODE_TTL_MS = 15 * 60 * 1000; // REQ-109: codes expire shortly after issue
@@ -38,9 +41,10 @@ export interface RequestCodeResult {
  *  1. `requestCode(phone)` — if the phone has the most recent REJECTED booking
  *     for this business, a one-time 6-digit code is issued with a sha256 hash
  *     persisted on `resubmission_verification`. The plaintext rides the
- *     delivery channel seam (in-memory in this prompt; documented no real
- *     SMS/Telegram path yet). Response is generic so callers cannot probe
- *     whether a booking exists (REQ-109: no customer-addressable reference).
+ *     Telegram delivery channel seam to the booking's ACTIVE customer chat
+ *     (doc 08 §9.2). A booking with no approved code path is VOIDED at issue
+ *     (never usable). Response is generic so callers cannot probe whether a
+ *     booking exists (REQ-109: no customer-addressable reference).
  *  2. `resubmit({phone, code, paymentMethod})` — verifies the code (single-use,
  *     expiry, attempt cap + backoff), then inside the bookingPublic +
  *     customerPhone transaction transitions REJECTED→PAYMENT_PENDING and
@@ -61,7 +65,7 @@ export class BookingResubmissionService {
     private readonly storage: StorageService,
     private readonly businesses: BusinessService,
     private readonly rateLimit: RateLimitService,
-    private readonly channel: InMemoryVerificationCodeChannel,
+    @Inject(VERIFICATION_CODE_CHANNEL) private readonly channel: VerificationCodeChannel,
   ) {}
 
   async requestCode(
@@ -75,6 +79,8 @@ export class BookingResubmissionService {
 
     let expiresAt: Date | null = null;
     let code = '';
+    let bookingId = '';
+    let verificationId = '';
     await withTenantContext(
       this.prisma,
       { scope: 'PUBLIC', businessId: business.id, bookingPublic: true },
@@ -86,6 +92,7 @@ export class BookingResubmissionService {
         });
         if (!booking) return;
         code = randomSixDigits();
+        bookingId = booking.id;
         const row = await tx.resubmissionVerification.create({
           data: {
             bookingId: booking.id,
@@ -97,17 +104,47 @@ export class BookingResubmissionService {
             attempts: 0,
           },
         });
+        verificationId = row.id;
         expiresAt = row.expiresAt;
       },
     );
 
     if (code) {
-      await this.channel.deliver({
+      const delivered = await this.channel.deliver({
         businessId: business.id,
+        bookingId,
         phone: input.phone,
         code,
         purpose: PURPOSE,
+        ttlMinutes: Math.round(CODE_TTL_MS / 60_000),
       });
+      if (!delivered) {
+        // No approved code path for this booking (doc 08 §9.2: "else no code
+        // path") or the provider rejected the send. Void the just-issued code
+        // so it can never be consumed: marking it "used" keeps the API response
+        // indistinguishable from a phone with no booking (REQ-109/anti-enum.).
+        await withTenantContext(
+          this.prisma,
+          {
+            scope: 'PUBLIC',
+            businessId: business.id,
+            bookingPublic: true,
+            customerPhone: input.phone,
+          },
+          (tx) =>
+            tx.resubmissionVerification.update({
+              where: { id: verificationId },
+              data: { usedAt: new Date() },
+            }),
+        ).catch(() => undefined);
+        await this.securityEvents.record({
+          type: 'BOOKING_VERIFICATION_CODE_NO_CHANNEL',
+          businessId: business.id,
+          ip,
+          result: 'FAILURE',
+        });
+        expiresAt = null;
+      }
     }
     await this.securityEvents.record({
       type: 'BOOKING_VERIFICATION_CODE_REQUESTED',
