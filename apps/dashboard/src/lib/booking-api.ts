@@ -62,7 +62,15 @@ export interface BookingOwnerDetail {
   slotLock: string | null;
   statusHistory: BookingHistory[];
   paymentStatusHistory: PaymentHistory[];
-  proofs: { id: string; submittedAt: string }[];
+  proofs: { id: string; submittedAt: string; mime: string; sizeBytes: number }[];
+}
+
+/** Owner proof retrieval result (REQ-119): a short-lived presigned read URL. */
+export interface PaymentProofView {
+  url: string | null;
+  mime: string;
+  sizeBytes: number;
+  submittedAt: string;
 }
 
 export type BookingSort = 'RECENT' | 'UPCOMING';
@@ -99,6 +107,13 @@ export const bookingApi = {
         `/api/v1/businesses/${businessId}/bookings/${bookingId}`,
       )
       .then((r) => r.booking),
+  /** Fetch a short-lived presigned URL for one submitted payment proof. */
+  proofView: (businessId: string, bookingId: string, proofId: string) =>
+    api
+      .get<{ proof: PaymentProofView }>(
+        `/api/v1/businesses/${businessId}/bookings/${bookingId}/proofs/${proofId}`,
+      )
+      .then((r) => r.proof),
   accept: (businessId: string, bookingId: string) =>
     api
       .post<{ booking: BookingOwnerDetail }>(

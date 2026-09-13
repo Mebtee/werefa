@@ -23,6 +23,13 @@ function message(err: unknown): string {
   return err instanceof Error ? err.message : 'Request failed.';
 }
 
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '—';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 const FILTERS: { value: string; label: string }[] = [
   { value: '', label: 'All statuses' },
   { value: 'PAYMENT_PENDING', label: 'Payment pending' },
@@ -200,6 +207,8 @@ function BookingDetail({
   const [error, setError] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [rescheduleTo, setRescheduleTo] = useState('');
+  const [proofBusy, setProofBusy] = useState<string | null>(null);
+  const [proofError, setProofError] = useState<string | null>(null);
 
   const reload = async () => {
     try {
@@ -222,6 +231,27 @@ function BookingDetail({
       setError(message(err));
     } finally {
       setBusy(false);
+    }
+  }
+
+  /**
+   * REQ-119: open the actual submitted proof. The API returns a short-lived
+   * presigned read URL; the object is never public and the key is not exposed.
+   */
+  async function openProof(proofId: string) {
+    setProofBusy(proofId);
+    setProofError(null);
+    try {
+      const proof = await bookingApi.proofView(businessId, bookingId, proofId);
+      if (!proof.url) {
+        setProofError('The proof file is no longer available in storage.');
+        return;
+      }
+      window.open(proof.url, '_blank', 'noopener,noreferrer');
+    } catch (err) {
+      setProofError(message(err));
+    } finally {
+      setProofBusy(null);
     }
   }
 
@@ -308,6 +338,12 @@ function BookingDetail({
             <dd>{PAYMENT_METHOD_LABELS[booking.payment.method] ?? booking.payment.method}</dd>
             <dt>Status</dt>
             <dd>{booking.payment.status}</dd>
+            {booking.payment.prepaidMinor > 0 ? (
+              <>
+                <dt>Prepaid required</dt>
+                <dd>{majorFromMinor(booking.payment.prepaidMinor)}</dd>
+              </>
+            ) : null}
             {booking.payment.rejectionReason ? (
               <>
                 <dt>Rejection reason</dt>
@@ -315,11 +351,41 @@ function BookingDetail({
               </>
             ) : null}
           </dl>
+
           {booking.proofs.length > 0 ? (
-            <p className="muted small">
-              <strong>{booking.proofs.length}</strong> payment proof submission
-              {booking.proofs.length > 1 ? 's' : ''} recorded.
-            </p>
+            <>
+              <h4>Payment proofs</h4>
+              {proofError ? <p className="alert">{proofError}</p> : null}
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Submitted</th>
+                    <th>Type</th>
+                    <th>Size</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {booking.proofs.map((p) => (
+                    <tr key={p.id}>
+                      <td>{new Date(p.submittedAt).toLocaleString()}</td>
+                      <td>{p.mime === 'application/pdf' ? 'PDF' : 'Image'}</td>
+                      <td>{formatBytes(p.sizeBytes)}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="secondary"
+                          disabled={proofBusy !== null}
+                          onClick={() => void openProof(p.id)}
+                        >
+                          {proofBusy === p.id ? 'Opening…' : 'View proof'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
           ) : null}
         </>
       ) : null}
