@@ -3,6 +3,7 @@ import { SUBSCRIPTION_NOTIFICATION_TYPE } from '../../src/subscription/subscript
 import {
   SUBSCRIPTION_ADMIN_EMAIL_TYPES,
   SUBSCRIPTION_OWNER_EMAIL_TYPES,
+  SUBSCRIPTION_OWNER_TELEGRAM_TYPES,
   isSubscriptionReminderType,
   subscriptionReminderKindOf,
 } from '../../src/notifications/notification-catalog';
@@ -10,6 +11,7 @@ import {
   formatEtb,
   renderSubscriptionAdminEmail,
   renderSubscriptionOwnerEmail,
+  renderSubscriptionOwnerTelegram,
 } from '../../src/notifications/notification-templates';
 
 describe('SUBSCRIPTION_NOTIFICATION_TYPE', () => {
@@ -79,6 +81,28 @@ describe('catalog classification (doc 15 §4)', () => {
     expect(
       subscriptionReminderKindOf(SUBSCRIPTION_NOTIFICATION_TYPE.paymentApprovedOwner),
     ).toBeNull();
+  });
+
+  it('REQ-139: the four reminder types are ALSO owner-Telegram types (email partner)', () => {
+    for (const type of [
+      SUBSCRIPTION_NOTIFICATION_TYPE.reminderPaidEnd,
+      SUBSCRIPTION_NOTIFICATION_TYPE.reminderTrialEnd,
+      SUBSCRIPTION_NOTIFICATION_TYPE.reminderPaidGrace,
+      SUBSCRIPTION_NOTIFICATION_TYPE.reminderTrialGrace,
+    ]) {
+      expect(SUBSCRIPTION_OWNER_TELEGRAM_TYPES.has(type)).toBe(true);
+      expect(SUBSCRIPTION_OWNER_EMAIL_TYPES.has(type)).toBe(true);
+    }
+    // Payment approve/reject stay EMAIL-only — reminders alone go to the bot.
+    expect(
+      SUBSCRIPTION_OWNER_TELEGRAM_TYPES.has(SUBSCRIPTION_NOTIFICATION_TYPE.paymentApprovedOwner),
+    ).toBe(false);
+    expect(
+      SUBSCRIPTION_OWNER_TELEGRAM_TYPES.has(SUBSCRIPTION_NOTIFICATION_TYPE.paymentRejectedOwner),
+    ).toBe(false);
+    expect(
+      SUBSCRIPTION_OWNER_TELEGRAM_TYPES.has(SUBSCRIPTION_NOTIFICATION_TYPE.paymentSubmittedAdmin),
+    ).toBe(false);
   });
 });
 
@@ -150,5 +174,35 @@ describe('renderSubscriptionOwnerEmail (REQ-137/138/139)', () => {
       expect(email.text).toContain(fragment);
       expect(email.html.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('renderSubscriptionOwnerTelegram (REQ-139 — plain text, no links/HTML)', () => {
+  it('renders all four reminder variants with business + boundary, text-only', () => {
+    const boundary = '2026-09-15T09:00:00.000Z';
+    const cases: Array<[string, string]> = [
+      [SUBSCRIPTION_NOTIFICATION_TYPE.reminderPaidEnd, 'paid subscription'],
+      [SUBSCRIPTION_NOTIFICATION_TYPE.reminderTrialEnd, 'free trial'],
+      [SUBSCRIPTION_NOTIFICATION_TYPE.reminderPaidGrace, '5-day grace period'],
+      [SUBSCRIPTION_NOTIFICATION_TYPE.reminderTrialGrace, '3-day grace period'],
+    ];
+    for (const [type, fragment] of cases) {
+      const { text } = renderSubscriptionOwnerTelegram(
+        type,
+        { boundaryAt: boundary },
+        'Ink Studio',
+      );
+      expect(text).toContain('Ink Studio');
+      expect(text).toContain(fragment);
+      expect(text).toContain('15 Sep'); // boundary date rendered
+      expect(text).not.toContain('<');
+      expect(text).not.toContain('http');
+    }
+  });
+
+  it('falls back to the trial-grace text for an unknown type (defensive)', () => {
+    const { text } = renderSubscriptionOwnerTelegram('NOT_A_REAL_TYPE', {}, 'Ink');
+    expect(text).toContain('Ink');
+    expect(text).toContain('trial');
   });
 });

@@ -22,6 +22,8 @@ import type { Client } from 'pg';
 import { MailService } from '../../src/notifications/mail.service';
 import { NotificationDispatcher } from '../../src/notifications/notification-dispatcher';
 import { TELEGRAM_PROVIDER, FakeTelegramProvider } from '../../src/notifications/providers';
+import { formatBookingLine } from '../../src/notifications/notification-templates';
+import { BookingLifecycleJob } from '../../src/jobs/booking-lifecycle.job';
 import {
   TEST_EMAILS,
   TEST_PASSWORDS,
@@ -641,5 +643,165 @@ describe('C: delivery pipeline', () => {
     const row = (await deliveryForNotification(affectedId)).rows[0];
     expect(row.status).toBe('SUPPRESSED');
     expect(row.last_error).toContain('no contact email');
+  });
+});
+
+describe('D: dedicated customer notification flows (REQ-061/063/064/227/228/229)', () => {
+  /** A booking with an ACTIVE customer Telegram chat that is then Confirmed. */
+  async function confirmedConnected(): Promise<{
+    token: string;
+    bookingId: string;
+    phone: string;
+    chatId: number;
+  }> {
+    const token = await ownerToken();
+    const { bookingId, phone, chatId } = await connectedBooking();
+    const res = await postOwnerBooking(token, bookingId, 'accept');
+    expect([200, 201]).toContain(res.status);
+    return { token, bookingId, phone, chatId };
+  }
+
+  async function postOwnerBooking(
+    token: string,
+    bookingId: string,
+    action: string,
+    body?: Record<string, unknown>,
+  ) {
+    return supertest(server)
+      .post(`/api/v1/businesses/${businessId}/bookings/${bookingId}/${action}`)
+      .send(body)
+      .set(auth(token));
+  }
+
+  async function triggeredBooking(startAt: string): Promise<{ bookingId: string; chatId: number }> {
+    const booking = await publicCreate(startAt);
+    const started = await connect(booking.id, booking.customerPhone);
+    expect([200, 201]).toContain(started.status);
+    const token = (started.body as { token?: string }).token;
+    expect(typeof token).toBe('string');
+    const chatId = 800000000 + updateSeq;
+    const bound = await webhook(++updateSeq, chatId, `/start ${token}`);
+    expect([200, 201]).toContain(bound.status);
+    return { bookingId: booking.id, chatId };
+  }
+
+  async function fanOutAndProcess(): Promise<void> {
+    expect(await dispatcher.fanOutDue()).toBeGreaterThan(0);
+    const stats = await dispatcher.processDue();
+    expect(stats.failed + stats.deadLettered).toBe(0);
+  }
+
+  function deliveryRowsForBooking(bookingId: string, type: string) {
+    return superuser.query<{ status: string; recipient: string }>(
+      `SELECT nd.status, nd.recipient
+         FROM notification_delivery nd
+         JOIN notification n ON n.id = nd.notification_id
+        WHERE n.booking_id = $1 AND n.type = $2`,
+      [bookingId, type],
+    );
+  }
+
+  it('REQ-061 Confirmed → customer Telegram when a chat is connected', async () => {
+    await seedService();
+    const { bookingId, chatId } = await confirmedConnected();
+    await fanOutAndProcess();
+
+    expect(telegram.sent.some((m) => m.text.includes('is confirmed'))).toBe(true);
+    const rows = await deliveryRowsForBooking(bookingId, 'BOOKING_CONFIRMED');
+    expect(rows.rows).toHaveLength(1);
+    expect(rows.rows[0].status).toBe('SENT');
+    expect(rows.rows[0].recipient).toBe(String(chatId));
+  });
+
+  it('a Confirmed booking without a connected chat produces no customer message', async () => {
+    await seedService();
+    const booking = await publicCreate();
+    await postOwnerBooking(await ownerToken(), booking.id, 'accept');
+    await fanOutAndProcess();
+
+    expect(telegram.sent.some((m) => m.text.includes('is confirmed'))).toBe(false);
+    const rows = await deliveryRowsForBooking(booking.id, 'BOOKING_CONFIRMED');
+    expect(rows.rows[0].status).toBe('SUPPRESSED');
+    expect(rows.rows[0].recipient).toBe('-');
+  });
+
+  it('REQ-063/064 queued 24h and 1h reminders reach the connected customer', async () => {
+    await seedService();
+    const token = await ownerToken();
+    const job = app.get(BookingLifecycleJob);
+
+    const { bookingId: day } = await triggeredBooking(wholeMinuteInFuture(24));
+    await postOwnerBooking(token, day, 'accept');
+    expect(await job.queueDueReminders()).toBeGreaterThan(0);
+    await fanOutAndProcess();
+    expect(telegram.sent.some((m) => m.text.includes('is tomorrow'))).toBe(true);
+
+    const { bookingId: hour } = await triggeredBooking(wholeMinuteInFuture(1));
+    await postOwnerBooking(token, hour, 'accept');
+    expect(await job.queueDueReminders()).toBeGreaterThan(0);
+    await fanOutAndProcess();
+    expect(telegram.sent.some((m) => m.text.includes('starts in about 1 hour'))).toBe(true);
+  });
+
+  it('REQ-227 No Show → customer Telegram message', async () => {
+    await seedService();
+    const { token, bookingId, chatId } = await confirmedConnected();
+    await postOwnerBooking(token, bookingId, 'no-show');
+    await fanOutAndProcess();
+
+    expect(telegram.sent.some((m) => m.text.includes('no-show'))).toBe(true);
+    const rows = await deliveryRowsForBooking(bookingId, 'BOOKING_NO_SHOW');
+    expect(rows.rows[0].status).toBe('SENT');
+    expect(rows.rows[0].recipient).toBe(String(chatId));
+  });
+
+  it('REQ-228 cancel of a Confirmed booking notifies the connected customer', async () => {
+    await seedService();
+    const { token, bookingId, chatId } = await confirmedConnected();
+    await postOwnerBooking(token, bookingId, 'cancel');
+    await fanOutAndProcess();
+
+    expect(telegram.sent.some((m) => m.text.includes('was cancelled'))).toBe(true);
+    const rows = await deliveryRowsForBooking(bookingId, 'BOOKING_CANCELLED');
+    expect(rows.rows[0].status).toBe('SENT');
+    expect(rows.rows[0].recipient).toBe(String(chatId));
+  });
+
+  it('REQ-104/228 cancel of a Payment Pending booking produces NO customer notification', async () => {
+    await seedService();
+    const token = await ownerToken();
+    const { bookingId } = await connectedBooking();
+    const sentBefore = telegram.sent.length;
+
+    await postOwnerBooking(token, bookingId, 'cancel');
+    await fanOutAndProcess();
+
+    const cancelled = await superuser.query<{ id: string }>(
+      `SELECT id FROM notification WHERE booking_id = $1 AND type = 'BOOKING_CANCELLED'`,
+      [bookingId],
+    );
+    expect(cancelled.rows).toHaveLength(0);
+    // The earlier proof-received message (REQ-060) still reaches the chat; the
+    // cancel itself must NOT fan out any customer cancellation message.
+    expect(telegram.sent.slice(sentBefore).some((m) => m.text.includes('was cancelled'))).toBe(
+      false,
+    );
+  });
+
+  it('REQ-229 reschedule with the new date/time reaches the connected customer', async () => {
+    await seedService();
+    const { token, bookingId, chatId } = await confirmedConnected();
+    const newStartAt = wholeMinuteInFuture(5);
+    const res = await postOwnerBooking(token, bookingId, 'reschedule', { newStartAt });
+    expect([200, 201]).toContain(res.status);
+    await fanOutAndProcess();
+
+    const expected = formatBookingLine(new Date(newStartAt));
+    const message = telegram.sent.at(-1)?.text ?? '';
+    expect(message).toContain('was rescheduled to');
+    expect(message).toContain(expected);
+    const rows = await deliveryRowsForBooking(bookingId, 'BOOKING_RESCHEDULED');
+    expect(rows.rows[0].status).toBe('SENT');
+    expect(rows.rows[0].recipient).toBe(String(chatId));
   });
 });

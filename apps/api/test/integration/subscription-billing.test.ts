@@ -13,7 +13,8 @@
  *     Super Admin audit reads everything.
  *  F) Delivery pipeline: payment submission fans out to exactly two Admin
  *     EMAILs (REQ-140); approval/rejection reach the owner contact; reminders
- *     are stale-safe (stale → SUPPRESSED, due → SENT).
+ *     fan out to EMAIL + owner Telegram (REQ-139) and are stale-safe
+ *     (stale → SUPPRESSED, due → SENT).
  *  G) Lifecycle: derived EXPIRED blocks public availability + resume (402 /
  *     409 SUBSCRIPTION_EXPIRED), the status job persists the transition, the
  *     reminder job dedups (7-day window), auto-resume is denied while EXPIRED
@@ -28,6 +29,7 @@ import { BusinessService } from '../../src/business/business.service';
 import { SubscriptionLifecycleJob } from '../../src/jobs/subscription-lifecycle.job';
 import { MailService } from '../../src/notifications/mail.service';
 import { NotificationDispatcher } from '../../src/notifications/notification-dispatcher';
+import { TELEGRAM_PROVIDER, FakeTelegramProvider } from '../../src/notifications/providers';
 import {
   TEST_EMAILS,
   TEST_PASSWORDS,
@@ -87,6 +89,8 @@ let owner2Token: string;
 let admin1Token: string;
 let admin2Token: string;
 let saToken: string;
+let telegram: FakeTelegramProvider;
+let updateSeq = 0;
 
 async function login(email: string, password: string): Promise<string> {
   const res = await supertest(server)
@@ -161,6 +165,22 @@ function securityEventCount(type: string): Promise<number> {
     .then((r) => r.rows[0].c);
 }
 
+/** Owner connects a business owner Telegram chat (REQ-139 delivery target). */
+async function connectOwnerChat(businessId: string, chatId: number): Promise<void> {
+  const res = await supertest(server)
+    .post(`/api/v1/businesses/${businessId}/telegram/connect`)
+    .set(auth(ownerToken));
+  expect([200, 201]).toContain(res.status);
+  const token = (res.body.telegram as { token?: string }).token;
+  expect(typeof token).toBe('string');
+  const bound = await supertest(server)
+    .post('/api/v1/telegram/webhook')
+    .set('x-telegram-bot-api-secret-token', process.env.TG_WEBHOOK_SECRET!)
+    .set(CSRF)
+    .send({ update_id: ++updateSeq, message: { chat: { id: chatId }, text: `/start ${token}` } });
+  expect(bound.body).toEqual({ ok: true });
+}
+
 beforeAll(async () => {
   process.env.APP_ENV = 'test';
   process.env.NODE_ENV = 'test';
@@ -190,6 +210,7 @@ beforeAll(async () => {
   dispatcher = app.get(NotificationDispatcher);
   businesses = app.get(BusinessService);
   job = app.get(SubscriptionLifecycleJob);
+  telegram = app.get(TELEGRAM_PROVIDER) as FakeTelegramProvider;
 
   const supertestModule = await import('supertest');
   supertest = (supertestModule.default ?? supertestModule) as typeof import('supertest');
@@ -226,9 +247,11 @@ beforeEach(async () => {
   // creates its own uniquely-slugged business, so no cross-test interference.
   await superuser.query(
     'TRUNCATE "subscription_payment", "subscription_status_history", "subscription", ' +
-      '"notification_delivery", "notification", "security_event" CASCADE',
+      '"notification_delivery", "notification", "security_event", ' +
+      '"owner_telegram_action", "telegram_update", "business_owner_telegram_connection" CASCADE',
   );
   mail.captured.length = 0;
+  telegram.reset();
 });
 
 describe('A: owner subscription flow (REQ-125/128/129/136)', () => {
@@ -574,9 +597,16 @@ describe('F: notification delivery (REQ-139/140)', () => {
     );
     await fanOutAndProcess();
     const rows = await deliveryRows(id, 'SUBSCRIPTION_REMINDER_PAID_END');
-    expect(rows.rows[0].status).toBe('SUPPRESSED');
-    expect(rows.rows[0].last_error).toBe('stale subscription reminder');
+    // REQ-139 dual fan-out: the EMAIL intent is re-validated on delivery…
+    const emailRow = rows.rows.find((r) => r.channel === 'EMAIL');
+    expect(emailRow?.status).toBe('SUPPRESSED');
+    expect(emailRow?.last_error).toBe('stale subscription reminder');
+    // …and the Telegram intent is suppressed at fan-out when no owner chat exists.
+    const telegramRow = rows.rows.find((r) => r.channel === 'TELEGRAM');
+    expect(telegramRow?.status).toBe('SUPPRESSED');
+    expect(telegramRow?.last_error).toBe('no connected owner chat');
     expect(mail.captured.length).toBe(0);
+    expect(telegram.sent).toHaveLength(0);
   });
 
   it('queues and delivers a due PAID_END reminder exactly once', async () => {
@@ -600,7 +630,39 @@ describe('F: notification delivery (REQ-139/140)', () => {
     expect(email).toBeDefined();
     expect(email!.to).toBe('owner@werefa.test');
     const rows = await deliveryRows(id, 'SUBSCRIPTION_REMINDER_PAID_END');
-    expect(rows.rows[0].status).toBe('SENT');
+    const emailRow = rows.rows.find((r) => r.channel === 'EMAIL');
+    expect(emailRow?.status).toBe('SENT');
+    const telegramRow = rows.rows.find((r) => r.channel === 'TELEGRAM');
+    expect(telegramRow?.status).toBe('SUPPRESSED'); // no owner chat connected here
+  });
+
+  it('REQ-139: a due reminder also reaches the connected owner Telegram chat', async () => {
+    const { id } = await createBusiness('owner@werefa.test');
+    await superuser.query(
+      `UPDATE subscription SET
+         paid_period_start_at = date_trunc('minute', now()) - interval '29 days',
+         paid_ends_at = date_trunc('minute', now()) + interval '1 day',
+         paid_grace_ends_at = date_trunc('minute', now()) + interval '6 days',
+         status = 'ACTIVE', updated_at = now()
+       WHERE business_id = $1`,
+      [id],
+    );
+    const chatId = 600000000 + ++updateSeq;
+    await connectOwnerChat(id, chatId);
+
+    expect(await job.queueDueReminders()).toBe(1);
+    await fanOutAndProcess();
+
+    const rows = await deliveryRows(id, 'SUBSCRIPTION_REMINDER_PAID_END');
+    const emailRow = rows.rows.find((r) => r.channel === 'EMAIL');
+    expect(emailRow?.status).toBe('SENT');
+    const telegramRow = rows.rows.find((r) => r.channel === 'TELEGRAM');
+    expect(telegramRow?.status).toBe('SENT');
+
+    const message = telegram.sent.find((m) => m.text.includes('paid subscription'));
+    expect(message).toBeDefined();
+    expect(message!.chatId).toBe(BigInt(chatId));
+    expect(message!.text).toContain('ends soon');
   });
 });
 
