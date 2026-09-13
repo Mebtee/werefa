@@ -496,20 +496,22 @@ describe('C: delivery pipeline', () => {
     void booking;
   });
 
-  it('does not fan out BOOKING_NEW_PROOF_OWNER (dashboard-only, REQ-066 deferred)', async () => {
+  it('fans BOOKING_NEW_PROOF_OWNER out to a SUPPRESSED owner intent when no owner chat is connected', async () => {
     await seedService();
     const booking = await publicCreate();
-    const excluded = await superuser.query<{ id: string }>(
+    const ownerNotification = await superuser.query<{ id: string }>(
       `SELECT id FROM notification WHERE booking_id = $1 AND type = 'BOOKING_NEW_PROOF_OWNER'`,
       [booking.id],
     );
-    expect(excluded.rows).toHaveLength(1);
+    expect(ownerNotification.rows).toHaveLength(1);
     await dispatcher.fanOutDue();
-    const delivered = await superuser.query<{ count: number }>(
-      'SELECT count(*)::int AS count FROM notification_delivery WHERE notification_id = $1',
-      [excluded.rows[0].id],
-    );
-    expect(delivered.rows[0].count).toBe(0);
+    // Prompt 23: the owner channel now fans out (REQ-065). With no connected
+    // owner chat the intent is SUPPRESSED so fan-out stays idempotent.
+    const rows = await deliveryForNotification(ownerNotification.rows[0].id);
+    expect(rows.rows).toHaveLength(1);
+    expect(rows.rows[0].status).toBe('SUPPRESSED');
+    expect(rows.rows[0].last_error).toContain('no connected owner chat');
+    expect(telegram.media).toHaveLength(0);
   });
 
   it('re-validates reminders against the authoritative booking (stale → SUPPRESSED)', async () => {
@@ -554,10 +556,12 @@ describe('C: delivery pipeline', () => {
     expect(failRow.rows[0].attempts).toBe(1);
     expect(new Date(failRow.rows[0].next_attempt_at).getTime()).toBeGreaterThan(Date.now());
 
-    // Make it due now, recover the channel, and dispatch again.
+    // Make it due now, recover the channel, and dispatch again. The one-second
+    // backdate keeps the retry immune to DB-vs-host clock skew (the claim query
+    // compares against `new Date()` on the caller side).
     telegram.mode = 'ok';
     await superuser.query(
-      'UPDATE notification_delivery SET next_attempt_at = now() WHERE id = $1',
+      `UPDATE notification_delivery SET next_attempt_at = now() - interval '1 second' WHERE id = $1`,
       [failRow.rows[0].id],
     );
     const recovered = await dispatcher.processDue();

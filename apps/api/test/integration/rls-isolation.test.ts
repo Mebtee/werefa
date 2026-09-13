@@ -1142,3 +1142,176 @@ describe('RLS isolation on notifications & telegram (Prompt 13, tests A/B/D)', (
     await client.end();
   });
 });
+
+describe('RLS isolation on owner Telegram verification (Prompt 23, tests A/B/D)', () => {
+  const fx: Record<string, string> = {};
+
+  beforeAll(async () => {
+    const setup = new Client({ connectionString: SUPER_URL });
+    await setup.connect();
+    await setup.query('TRUNCATE business_owner_telegram_connection, owner_telegram_action CASCADE');
+    const ids = fxIds();
+    const connActiveA = uuid();
+    const connActiveB = uuid();
+    const actionA = uuid();
+    fx.connActiveA = connActiveA;
+    fx.connActiveB = connActiveB;
+    fx.actionA = actionA;
+
+    // Owner A also owns a second business with NO connection yet, so the
+    // owner-scoped INSERT policy can be exercised positively.
+    const bizC = uuid();
+    fx.businessC = bizC;
+    await setup.query(`INSERT INTO business(id, public_slug, name) VALUES ($1, 'isl-c', 'I C')`, [
+      bizC,
+    ]);
+    await setup.query('INSERT INTO business_owner(business_id, user_id) VALUES ($1, $2)', [
+      bizC,
+      ids.userA,
+    ]);
+
+    // One ACTIVE owner chat for business A and one for business B.
+    await setup.query(
+      `INSERT INTO business_owner_telegram_connection
+         (id, business_id, user_id, status, chat_id, connected_at)
+       VALUES ($1, $2, $3, 'ACTIVE', 5001, now()),
+              ($4, $5, $6, 'ACTIVE', 5002, now())`,
+      [connActiveA, ids.a, ids.userA, connActiveB, ids.b, ids.userB],
+    );
+    // An owner action token issued to business A's owner chat.
+    await setup.query(
+      `INSERT INTO owner_telegram_action
+         (id, business_id, user_id, booking_id, payment_id, proof_id, chat_id, kind, status, token_hash, expires_at)
+       VALUES ($1, $2, $3, gen_random_uuid(), gen_random_uuid(), gen_random_uuid(),
+               5001, 'ACCEPT', 'ISSUED', repeat('c', 64), now() + interval '30 minutes')`,
+      [actionA, ids.a, ids.userA],
+    );
+    await setup.end();
+  });
+
+  function fxIds(): { a: string; b: string; userA: string; userB: string } {
+    return (globalThis as Record<string, unknown>).__isl_biz as {
+      a: string;
+      b: string;
+      userA: string;
+      userB: string;
+    };
+  }
+
+  it('D: `app` role sees nothing without a tenant context', async () => {
+    const client = new Client({ connectionString: APP_URL });
+    await client.connect();
+    for (const table of ['business_owner_telegram_connection', 'owner_telegram_action']) {
+      const res = await client.query(`SELECT count(*)::int AS c FROM ${table}`);
+      expect(res.rows[0].c, table).toBe(0);
+    }
+    await client.end();
+  });
+
+  it('A: owner A sees only its own connections and cannot read B’s', async () => {
+    const ids = fxIds();
+    const client = new Client({ connectionString: APP_URL });
+    await client.connect();
+    await client.query(`SET app.user_id = '${ids.userA}'`);
+    await client.query(`SET app.scope = 'OWNER'`);
+
+    const own = await client.query('SELECT id FROM business_owner_telegram_connection ORDER BY id');
+    expect(own.rows.map((r) => r.id)).toEqual([fx.connActiveA]);
+    const foreign = await client.query(
+      'SELECT id FROM business_owner_telegram_connection WHERE id = $1',
+      [fx.connActiveB],
+    );
+    expect(foreign.rows).toEqual([]);
+
+    // Owner scope can bind a chat for a business this owner belongs to…
+    const okInsert = await client.query(
+      `INSERT INTO business_owner_telegram_connection(id, business_id, user_id, status, chat_id)
+       VALUES (gen_random_uuid(), $1, $2, 'ACTIVE', 5003)`,
+      [fx.businessC, ids.userA],
+    );
+    expect(okInsert.rowCount).toBe(1);
+    const revoked = await client.query(
+      `UPDATE business_owner_telegram_connection SET status = 'REVOKED' WHERE id = $1`,
+      [fx.connActiveA],
+    );
+    expect(revoked.rowCount).toBe(1);
+
+    // …but never for a business owned by someone else (WITH CHECK).
+    await expect(
+      client.query(
+        `INSERT INTO business_owner_telegram_connection(id, business_id, user_id, status, chat_id)
+         VALUES (gen_random_uuid(), $1, $2, 'ACTIVE', 5005)`,
+        [ids.b, ids.userA],
+      ),
+    ).rejects.toThrow(/row-level security/);
+    await client.end();
+  });
+
+  it('B: owner B cannot read, spoof, update or insert into owner A’s connection or action rows', async () => {
+    const ids = fxIds();
+    const client = new Client({ connectionString: APP_URL });
+    await client.connect();
+    await client.query(`SET app.user_id = '${ids.userB}'`);
+    await client.query(`SET app.scope = 'OWNER'`);
+    await client.query(`SET app.business_id = '${ids.a}'`); // spoof tenant A
+
+    const readForeign = await client.query(
+      'SELECT id FROM business_owner_telegram_connection WHERE id = $1',
+      [fx.connActiveA],
+    );
+    expect(readForeign.rows).toEqual([]);
+    const updateForeign = await client.query(
+      `UPDATE business_owner_telegram_connection SET status = 'REVOKED' WHERE id = $1`,
+      [fx.connActiveA],
+    );
+    expect(updateForeign.rowCount).toBe(0);
+
+    // Owner B may not claim a business B does not own (business A’s), nor
+    // owner A’s second business.
+    for (const businessId of [ids.a, fx.businessC]) {
+      await expect(
+        client.query(
+          `INSERT INTO business_owner_telegram_connection(id, business_id, user_id, status, chat_id)
+           VALUES (gen_random_uuid(), $1, $2, 'ACTIVE', 5004)`,
+          [businessId, ids.userB],
+        ),
+      ).rejects.toThrow(/row-level security/);
+    }
+
+    // owner_telegram_action has NO owner policies at all: invisible and unwritable
+    // even with a spoofed business context.
+    const actions = await client.query('SELECT id FROM owner_telegram_action');
+    expect(actions.rows).toEqual([]);
+    await expect(
+      client.query(
+        `INSERT INTO owner_telegram_action
+           (id, business_id, user_id, booking_id, payment_id, proof_id, chat_id, kind, status, token_hash, expires_at)
+         VALUES (gen_random_uuid(), $1, $2, gen_random_uuid(), gen_random_uuid(), gen_random_uuid(),
+                 5002, 'ACCEPT', 'ISSUED', repeat('d', 64), now() + interval '30 minutes')`,
+        [ids.b, ids.userB],
+      ),
+    ).rejects.toThrow(/row-level security/);
+    await client.end();
+  });
+
+  it('SUPER_ADMIN pipeline scope can read every connection and action row', async () => {
+    const client = new Client({ connectionString: APP_URL });
+    await client.connect();
+    await client.query(`SET app.user_id = '00000000-0000-0000-0000-000000000000'`);
+    await client.query(`SET app.scope = 'SUPER_ADMIN'`);
+
+    const connections = await client.query('SELECT id FROM business_owner_telegram_connection');
+    expect(connections.rows.length).toBe(3); // A, B, plus the owner-A insert above
+    const actions = await client.query('SELECT id FROM owner_telegram_action WHERE id = $1', [
+      fx.actionA,
+    ]);
+    expect(actions.rows).toHaveLength(1);
+    // The webhook consumes an action (ISSUED → CONSUMED) under the same scope.
+    const consumed = await client.query(
+      `UPDATE owner_telegram_action SET status = 'CONSUMED', used_at = now() WHERE id = $1`,
+      [fx.actionA],
+    );
+    expect(consumed.rowCount).toBe(1);
+    await client.end();
+  });
+});

@@ -5,8 +5,11 @@ import {
   parseStartCommand,
   parseTelegramUpdate,
 } from '../../src/notifications/telegram-connection.service';
+import { parseOwnerCallback } from '../../src/notifications/owner-telegram.service';
 import { backoffDelay } from '../../src/notifications/notification-dispatcher';
 import {
+  OWNER_TELEGRAM_TYPES,
+  DELIVERY_EXCLUDED_TYPES,
   deliveryIdempotencyKey,
   isReminderType,
   parseScheduleAffected,
@@ -52,6 +55,52 @@ describe('parseTelegramUpdate', () => {
     expect(parseTelegramUpdate(null)).toBeNull();
     expect(parseTelegramUpdate({ update_id: 1 })).toBeNull();
     expect(parseTelegramUpdate({ update_id: 1, message: {} })).toBeNull();
+  });
+  it('parses an inline-button callback query', () => {
+    const u = parseTelegramUpdate({
+      update_id: 999,
+      callback_query: {
+        id: '1234567890:abcdef',
+        data: 'pv:accept:token',
+        message: { chat: { id: 777 } },
+      },
+    });
+    expect(u).toEqual({
+      updateId: 999n,
+      chatId: 777n,
+      callbackQueryId: '1234567890:abcdef',
+      callbackData: 'pv:accept:token',
+    });
+  });
+  it('does not treat an ordinary message as a callback', () => {
+    const u = parseTelegramUpdate({
+      update_id: 1,
+      message: { chat: { id: 5 }, text: 'just some text' },
+    });
+    expect(u?.callbackData).toBeUndefined();
+  });
+});
+
+describe('parseOwnerCallback', () => {
+  it('parses a valid accept/reject action token', () => {
+    const token = createConnectToken();
+    expect(parseOwnerCallback(`pv:accept:${token}`)).toEqual({ kind: 'ACCEPT', token });
+    expect(parseOwnerCallback(`pv:reject:${token}`)).toEqual({ kind: 'REJECT', token });
+  });
+  it('rejects non-action callbacks and malformed payloads', () => {
+    expect(parseOwnerCallback('menu:open')).toBeNull();
+    expect(parseOwnerCallback('pv:accept:')).toBeNull();
+    expect(parseOwnerCallback('pv:accept:SHORT')).toBeNull();
+    expect(parseOwnerCallback('')).toBeNull();
+  });
+});
+
+describe('Prompt 23 catalog wiring', () => {
+  it('fans the new-proof notification out to owners via Telegram', () => {
+    expect(OWNER_TELEGRAM_TYPES.has(BOOKING_NOTIFICATION_TYPE.newProofOwner)).toBe(true);
+  });
+  it('no longer excludes the owner-proof notification from delivery', () => {
+    expect(DELIVERY_EXCLUDED_TYPES.has(BOOKING_NOTIFICATION_TYPE.newProofOwner)).toBe(false);
   });
 });
 

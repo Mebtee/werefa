@@ -4,6 +4,7 @@ import {
   escapeHtml,
   renderCustomerTelegram,
   renderOwnerAffectedEmail,
+  renderOwnerTelegramProof,
   formatBookingLine,
 } from '../../src/notifications/notification-templates';
 import type { DeliveryBookingContext } from '../../src/notifications/notification-catalog';
@@ -114,5 +115,39 @@ describe('renderOwnerAffectedEmail', () => {
       { publicBaseUrl: 'https://example.com' },
     );
     expect(result.subject).toContain('2 bookings');
+  });
+});
+
+describe('renderOwnerTelegramProof', () => {
+  const PROOF = {
+    bookingId: '00000000-0000-0000-0000-000000000001',
+    businessName: 'Test Salon',
+    customerName: 'Selam',
+    customerPhone: '+251911000000',
+    startAt: '2026-10-05T08:30:00.000Z',
+    services: [
+      { name: 'Haircut', durationMinutes: 30 },
+      { name: 'Color', durationMinutes: 60 },
+    ],
+    paymentMethod: 'TELEBIRR',
+    totalPriceMinor: 120000,
+    prepaidMinor: 30000,
+    submittedAt: '2026-10-05T08:31:00.000Z',
+  };
+
+  it('renders owner notification with booking + payment facts (REQ-065/066)', () => {
+    const { text } = renderOwnerTelegramProof(PROOF);
+    expect(text).toContain('Test Salon');
+    expect(text).toContain('Selam');
+    expect(text).toContain('Haircut');
+    expect(text).toContain('ETB 1200.00');
+    expect(text).toContain('Telebirr');
+    expect(text).not.toContain('accept:');
+  });
+  it('includes the prepaid-required line only when prepaid is set', () => {
+    const withPrepaid = renderOwnerTelegramProof(PROOF);
+    expect(withPrepaid.text).toContain('Prepaid required: ETB 300.00');
+    const without = renderOwnerTelegramProof({ ...PROOF, prepaidMinor: 0 });
+    expect(without.text).not.toContain('Prepaid required');
   });
 });
