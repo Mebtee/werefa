@@ -1,0 +1,1 @@
+export { PublicBookingPage } from '@/features/public-booking/PublicBookingPage'
