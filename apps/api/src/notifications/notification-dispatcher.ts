@@ -17,6 +17,7 @@ import {
   CUSTOMER_TELEGRAM_TYPES,
   DELIVERY_EXCLUDED_TYPES,
   OWNER_EMAIL_TYPES,
+  OWNER_TELEGRAM_TYPES,
   SUBSCRIPTION_ADMIN_EMAIL_TYPES,
   SUBSCRIPTION_OWNER_EMAIL_TYPES,
   SUPPRESSED_RECIPIENT,
@@ -25,15 +26,20 @@ import {
   isSubscriptionReminderType,
   parseScheduleAffected,
   readPayload,
+  readPayloadString,
   subscriptionReminderKindOf,
   type DeliveryBookingContext,
 } from './notification-catalog';
 import {
   renderCustomerTelegram,
   renderOwnerAffectedEmail,
+  renderOwnerTelegramProof,
   renderSubscriptionAdminEmail,
   renderSubscriptionOwnerEmail,
 } from './notification-templates';
+import { createConnectToken, hashToken } from './telegram-connection.service';
+import type { TelegramReplyMarkup } from './providers';
+import { StorageService } from '../storage/storage.service';
 import { reminderDecision, type SubscriptionDates } from '../subscription/subscription-lifecycle';
 
 /**
@@ -63,6 +69,7 @@ export class NotificationDispatcher {
     @Inject(TELEGRAM_PROVIDER) private readonly telegram: TelegramProvider,
     private readonly mail: MailService,
     private readonly security: SecurityEventService,
+    private readonly storage: StorageService,
   ) {}
 
   /** Super-admin transaction helper shared by every fan-out / finalize step. */
@@ -123,6 +130,38 @@ export class NotificationDispatcher {
         recipient,
         message: connection?.status === 'ACTIVE' ? null : 'no connected recipient',
       });
+    }
+
+    // Prompt 23 (REQ-065/066): a new payment proof fans out to EVERY ACTIVE
+    // owner chat of the business (a shared bot may serve one owner with many
+    // businesses). Missing connections produce one SUPPRESSED intent so the
+    // fan-out remains idempotent.
+    if (OWNER_TELEGRAM_TYPES.has(notification.type)) {
+      const connections = await tx.businessOwnerTelegramConnection.findMany({
+        where: { businessId: notification.businessId, status: 'ACTIVE', chatId: { not: null } },
+        select: { chatId: true },
+      });
+      if (connections.length === 0) {
+        return this.insertIntent(tx, {
+          notificationId: notification.id,
+          businessId: notification.businessId,
+          channel: 'TELEGRAM',
+          recipient: SUPPRESSED_RECIPIENT,
+          message: 'no connected owner chat',
+        });
+      }
+      let created = 0;
+      for (const connection of connections) {
+        if (connection.chatId === null) continue;
+        created += await this.insertIntent(tx, {
+          notificationId: notification.id,
+          businessId: notification.businessId,
+          channel: 'TELEGRAM',
+          recipient: String(connection.chatId),
+          message: null,
+        });
+      }
+      return created;
     }
 
     if (OWNER_EMAIL_TYPES.has(notification.type)) {
@@ -271,7 +310,9 @@ export class NotificationDispatcher {
             endAt: true,
             customerName: true,
             customerPhone: true,
-            serviceItems: { select: { nameSnapshot: true, durationMinutes: true } },
+            serviceItems: {
+              select: { nameSnapshot: true, durationMinutes: true, unitPriceMinor: true },
+            },
           },
         })
       : null;
@@ -283,17 +324,41 @@ export class NotificationDispatcher {
         })
       : null;
 
-    return { delivery, booking, connection };
+    // Owner-proof deliveries need the payment + proof at the claim's snapshot
+    // (the provider call happens OUTSIDE the transaction, but the source of
+    // truth is read here so the send cannot race a commit).
+    let ownerMeta: OwnerProofMeta | null = null;
+    if (delivery.notification.bookingId && OWNER_TELEGRAM_TYPES.has(delivery.notification.type)) {
+      const payment = await tx.payment.findFirst({
+        where: { bookingId: delivery.notification.bookingId },
+        include: {
+          proofs: {
+            orderBy: { submittedAt: 'desc' },
+            select: { id: true, storageKey: true, mime: true, sizeBytes: true, submittedAt: true },
+          },
+        },
+      });
+      if (payment) {
+        ownerMeta = {
+          paymentId: payment.id,
+          method: payment.method,
+          prepaidMinor: payment.prepaidMinor,
+          proofs: payment.proofs,
+        };
+      }
+    }
+
+    return { delivery, booking, connection, ownerMeta };
   }
 
   /** Send (OUTSIDE any DB transaction) then finalize the claim. Returns outcome. */
   private async executeAndFinalize(
     claimed: ClaimedDelivery,
   ): Promise<'sent' | 'failed' | 'suppressed' | 'deadLettered'> {
-    const { delivery, booking, connection } = claimed;
+    const { delivery, booking, connection, ownerMeta } = claimed;
     try {
       return delivery.channel === 'TELEGRAM'
-        ? await this.deliverTelegram(delivery, booking, connection)
+        ? await this.deliverTelegram(delivery, booking, connection, ownerMeta)
         : await this.deliverEmail(delivery);
     } catch (err) {
       return this.finalizeFailure(delivery, 'TRANSIENT', err, new Date());
@@ -304,11 +369,18 @@ export class NotificationDispatcher {
     delivery: DeliveryRowView,
     booking: BookingView | null,
     connection: ConnectionView | null,
+    ownerMeta: OwnerProofMeta | null,
   ): Promise<'sent' | 'failed' | 'suppressed' | 'deadLettered'> {
     const now = new Date();
     const type = delivery.notification.type;
     const chatId = parseChatId(delivery.recipient);
     if (chatId === null) return this.finalizeSuppressed(delivery, 'no active chat', now);
+
+    // Owner proof verification (Prompt 23): photo/document send with Accept and
+    // Reject inline action tokens, executed from chat-originated callbacks.
+    if (OWNER_TELEGRAM_TYPES.has(type)) {
+      return this.deliverOwnerProof(delivery, booking, ownerMeta, chatId, now);
+    }
 
     // Reminder safety (doc 17 §reminder): re-check the AUTHORITATIVE booking
     // state at processing time — a stale queued reminder is suppressed.
@@ -334,6 +406,142 @@ export class NotificationDispatcher {
     const failure = await this.telegram.sendMessage({ chatId, text: message.text });
     if (failure === null) return this.finalizeSent(delivery, now);
     return this.finalizeFailure(delivery, failure, undefined, now);
+  }
+
+  /**
+   * Owner new-proof delivery (REQ-065/066/067/068): attach the proof object
+   * (image → sendPhoto, PDF → sendDocument) with the booking caption and an
+   * inline Accept/Reject keyboard. The buttons carry single-use, expiring,
+   * opaque action tokens issued here (sha256 stored); the callback flow in
+   * OwnerTelegramService executes them with the owner's authority.
+   *
+   * Stale-safe: if the booking has already left PAYMENT_PENDING the intent is
+   * suppressed instead of showing a misleading accept/reject prompt.
+   */
+  private async deliverOwnerProof(
+    delivery: DeliveryRowView,
+    booking: BookingView | null,
+    ownerMeta: OwnerProofMeta | null,
+    chatId: bigint,
+    now: Date,
+  ): Promise<'sent' | 'failed' | 'suppressed' | 'deadLettered'> {
+    if (!booking || booking.status !== 'PAYMENT_PENDING') {
+      return this.finalizeSuppressed(delivery, 'booking no longer awaits payment', now);
+    }
+    if (!ownerMeta || ownerMeta.proofs.length === 0) {
+      return this.finalizeSuppressed(delivery, 'no proof found', now);
+    }
+
+    const wanted = readPayloadString(delivery.notification.payload, 'proofId');
+    const proof = ownerMeta.proofs.find((p) => p.id === wanted) ?? ownerMeta.proofs[0];
+    if (!proof) return this.finalizeSuppressed(delivery, 'no proof found', now);
+
+    const buffer = await this.storage.get(proof.storageKey);
+    if (!buffer) return this.finalizeSuppressed(delivery, 'proof object missing', now);
+
+    const caption = renderOwnerTelegramProof({
+      bookingId: booking.id,
+      businessName: delivery.business.name,
+      customerName: booking.customerName,
+      customerPhone: booking.customerPhone,
+      startAt: booking.startAt.toISOString(),
+      services: booking.serviceItems.map((item) => ({
+        name: item.nameSnapshot,
+        durationMinutes: item.durationMinutes,
+      })),
+      paymentMethod: ownerMeta.method,
+      totalPriceMinor: booking.serviceItems.reduce(
+        (sum, item) => sum + Number(item.unitPriceMinor),
+        0,
+      ),
+      prepaidMinor: Number(ownerMeta.prepaidMinor),
+      submittedAt: proof.submittedAt.toISOString(),
+    });
+
+    const tokens = await this.issueOwnerActions(chatId, {
+      businessId: delivery.business.id,
+      bookingId: booking.id,
+      paymentId: ownerMeta.paymentId,
+      proofId: proof.id,
+    });
+    if (tokens === null) return this.finalizeSuppressed(delivery, 'action token issue failed', now);
+
+    const replyMarkup: TelegramReplyMarkup = {
+      inlineKeyboard: [
+        [
+          { text: 'Accept payment', callbackData: `pv:accept:${tokens.acceptToken}` },
+          { text: 'Reject payment', callbackData: `pv:reject:${tokens.rejectToken}` },
+        ],
+      ],
+    };
+
+    const input = {
+      chatId,
+      text: caption.text,
+      buffer,
+      mime: proof.mime,
+      replyMarkup,
+    };
+    const failure =
+      proof.mime === 'application/pdf'
+        ? await this.telegram.sendDocument(input)
+        : await this.telegram.sendPhoto(input);
+    if (failure === null) return this.finalizeSent(delivery, now);
+    return this.finalizeFailure(delivery, failure, undefined, now);
+  }
+
+  /**
+   * Issue the single-use Accept/Reject action rows for an owner delivery.
+   * The acting owner is the ACTIVE business_owner_telegram_connection for this
+   * chat (the action must carry the owner's user_id so its execution runs with
+   * that owner's RLS authority). Runs under SUPER_ADMIN scope (the webhook +
+   * consumer do too). Raw tokens are returned once for the inline keyboard and
+   * then never stored again — only their sha256 hashes persist.
+   */
+  private async issueOwnerActions(
+    chatId: bigint,
+    ref: { businessId: string; bookingId: string; paymentId: string; proofId: string },
+  ): Promise<{ acceptToken: string; rejectToken: string } | null> {
+    const owner = await this.withSystem((tx) =>
+      tx.businessOwnerTelegramConnection.findFirst({
+        where: { businessId: ref.businessId, chatId, status: 'ACTIVE' },
+        select: { userId: true },
+      }),
+    );
+    if (!owner) return null;
+
+    const acceptToken = createConnectToken();
+    const rejectToken = createConnectToken();
+    const expiresAt = new Date(Date.now() + this.config.ownerTelegramActionTtlMinutes * 60_000);
+    const rows = [
+      {
+        businessId: ref.businessId,
+        userId: owner.userId,
+        bookingId: ref.bookingId,
+        paymentId: ref.paymentId,
+        proofId: ref.proofId,
+        chatId,
+        kind: 'ACCEPT',
+        status: 'ISSUED',
+        tokenHash: hashToken(acceptToken),
+        expiresAt,
+      },
+      {
+        businessId: ref.businessId,
+        userId: owner.userId,
+        bookingId: ref.bookingId,
+        paymentId: ref.paymentId,
+        proofId: ref.proofId,
+        chatId,
+        kind: 'REJECT',
+        status: 'ISSUED',
+        tokenHash: hashToken(rejectToken),
+        expiresAt,
+      },
+    ];
+    const count = await this.withSystem((tx) => tx.ownerTelegramAction.createMany({ data: rows }));
+    if (count.count !== 2) return null;
+    return { acceptToken, rejectToken };
   }
 
   private async deliverEmail(
@@ -525,7 +733,7 @@ export interface BookingView {
   endAt: Date;
   customerName: string;
   customerPhone: string;
-  serviceItems: { nameSnapshot: string; durationMinutes: number }[];
+  serviceItems: { nameSnapshot: string; durationMinutes: number; unitPriceMinor: bigint }[];
 }
 
 export interface ConnectionView {
@@ -533,10 +741,18 @@ export interface ConnectionView {
   chatId: bigint | null;
 }
 
+export interface OwnerProofMeta {
+  paymentId: string;
+  method: string;
+  prepaidMinor: bigint;
+  proofs: { id: string; storageKey: string; mime: string; sizeBytes: number; submittedAt: Date }[];
+}
+
 export interface ClaimedDelivery {
   delivery: DeliveryRowView;
   booking: BookingView | null;
   connection: ConnectionView | null;
+  ownerMeta: OwnerProofMeta | null;
 }
 
 function parseChatId(recipient: string): bigint | null {

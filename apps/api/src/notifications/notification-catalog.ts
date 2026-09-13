@@ -18,8 +18,9 @@ import { SCHEDULE_AFFECTED_TYPE } from '../schedule/schedule.service';
  *    a contact email is SUPPRESSED.
  *  - `SUBSCRIPTION_PAYMENT_SUBMITTED_ADMIN` fans out to the (exactly) two Admin
  *    platform accounts over EMAIL (REQ-140 — takes the two earliest admins).
- *  - `BOOKING_NEW_PROOF_OWNER` and owner-Telegram delivery are OUT OF SCOPE
- *    (dashboard-only; REQ-066 deferred) — no delivery intent is created.
+ *  - `BOOKING_NEW_PROOF_OWNER` fans out to every ACTIVE owner Telegram chat of
+ *    the business (REQ-065/066, Prompt 23). No connected owner chat → one
+ *    SUPPRESSED intent so fan-out stays idempotent.
  *  - Reminder intents are re-validated at delivery time (stale-safe): booking
  *    reminders require the booking to still be CONFIRMED; subscription
  *    reminders require the derived reminder decision to still hold.
@@ -35,7 +36,10 @@ export type NotificationChannel = (typeof NOTIFICATION_CHANNEL)[keyof typeof NOT
 export const SUPPRESSED_RECIPIENT = '-';
 
 /** Outbox types whose delivery is deferred/dashboard-only (no delivery rows). */
-export const DELIVERY_EXCLUDED_TYPES = new Set<string>([BOOKING_NOTIFICATION_TYPE.newProofOwner]);
+export const DELIVERY_EXCLUDED_TYPES = new Set<string>([]);
+
+/** Outbox types fanned out to the OWNER's Telegram chats (REQ-065/066). */
+export const OWNER_TELEGRAM_TYPES = new Set<string>([BOOKING_NOTIFICATION_TYPE.newProofOwner]);
 
 /** Outbox types fanned out to TELEGRAM when a chat connection exists (REQ-060+). */
 export const CUSTOMER_TELEGRAM_TYPES = new Set<string>([

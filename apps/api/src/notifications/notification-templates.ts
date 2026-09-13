@@ -26,6 +26,25 @@ export function escapeHtml(value: unknown): string {
     .replace(/'/g, '&#39;');
 }
 
+/**
+ * Human-readable payment-method label (REQ-066). The stored value is the
+ * `PaymentMethod` enum (`BANK_TRANSFER` / `TELEBIRR_MOBILE_MONEY`); the owner
+ * message must never show raw enum casing. Unknown methods fall back to a
+ * readable de-snake-cased form instead of leaking the enum.
+ */
+export function paymentMethodLabel(method: string | null | undefined): string {
+  if (!method) return '—';
+  const known: Record<string, string> = {
+    BANK_TRANSFER: 'Bank transfer',
+    TELEBIRR: 'Telebirr',
+    TELEBIRR_MOBILE_MONEY: 'Telebirr / mobile money',
+  };
+  const key = method.trim().toUpperCase();
+  if (known[key]) return known[key];
+  const words = method.replace(/_/g, ' ').toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 /** Format a banner title line used by both channels. */
 export function formatBookingLine(startAt: Date): string {
   const date = intlDate(startAt);
@@ -130,6 +149,47 @@ export function renderCustomerTelegram(
     default:
       return { text: `Update about your booking at ${booking.businessName}: ${line}.` };
   }
+}
+
+export interface OwnerProofDeliveryContext {
+  bookingId: string;
+  businessName: string;
+  customerName: string;
+  customerPhone: string;
+  startAt: string;
+  services: { name: string; durationMinutes: number }[];
+  paymentMethod: string;
+  totalPriceMinor: number;
+  prepaidMinor: number;
+  submittedAt: string;
+}
+
+/**
+ * Owner Telegram notification for a new/updated payment proof (REQ-065/066).
+ * Shows the booking facts (authoritative at delivery time) plus the payment
+ * summary. The proof itself rides as a photo/document attachment; Accept and
+ * Reject arrive as inline buttons carrying opaque single-use action tokens
+ * (REQ-067/068). Reinforces that no refund or automatic clearing happens —
+ * the owner's decision is authoritative (REQ-068/120).
+ */
+export function renderOwnerTelegramProof(proof: OwnerProofDeliveryContext): { text: string } {
+  const when = formatBookingLine(new Date(proof.startAt));
+  const services =
+    proof.services
+      .map((s) => s.name)
+      .filter((n) => n.length > 0)
+      .join(', ') || '—';
+  const total = formatEtb(String(proof.totalPriceMinor));
+  const prepaid = formatEtb(String(proof.prepaidMinor));
+  return {
+    text:
+      `New payment proof for ${proof.businessName} · ${when}.\n` +
+      `Customer: ${proof.customerName} (${proof.customerPhone})\n` +
+      `Services: ${services}\n` +
+      `Total: ETB ${total} · Method: ${paymentMethodLabel(proof.paymentMethod)}` +
+      (proof.prepaidMinor > 0 ? ` · Prepaid required: ETB ${prepaid}` : '') +
+      `\nUse the buttons to accept or reject this payment.`,
+  };
 }
 
 export interface OwnerAffectedEmail {
