@@ -15,7 +15,7 @@ export const SUBSCRIPTION_NOTIFICATION_TYPE = {
   paymentApprovedOwner: 'SUBSCRIPTION_PAYMENT_APPROVED_OWNER',
   /** EMAIL to the business contact with the rejection reason (REQ-138). */
   paymentRejectedOwner: 'SUBSCRIPTION_PAYMENT_REJECTED_OWNER',
-  /** Renewal reminders to the business contact (REQ-139/140); Telegram PARTIAL. */
+  /** Renewal reminders to the business contact (REQ-139/140); owner Telegram PARTNER. */
   reminderPaidEnd: 'SUBSCRIPTION_REMINDER_PAID_END',
   reminderTrialEnd: 'SUBSCRIPTION_REMINDER_TRIAL_END',
   reminderPaidGrace: 'SUBSCRIPTION_REMINDER_PAID_GRACE',

@@ -20,6 +20,7 @@ import {
   OWNER_TELEGRAM_TYPES,
   SUBSCRIPTION_ADMIN_EMAIL_TYPES,
   SUBSCRIPTION_OWNER_EMAIL_TYPES,
+  SUBSCRIPTION_OWNER_TELEGRAM_TYPES,
   SUPPRESSED_RECIPIENT,
   deliveryIdempotencyKey,
   isReminderType,
@@ -36,6 +37,7 @@ import {
   renderOwnerTelegramProof,
   renderSubscriptionAdminEmail,
   renderSubscriptionOwnerEmail,
+  renderSubscriptionOwnerTelegram,
 } from './notification-templates';
 import { createConnectToken, hashToken } from './telegram-connection.service';
 import type { TelegramReplyMarkup } from './providers';
@@ -137,31 +139,7 @@ export class NotificationDispatcher {
     // businesses). Missing connections produce one SUPPRESSED intent so the
     // fan-out remains idempotent.
     if (OWNER_TELEGRAM_TYPES.has(notification.type)) {
-      const connections = await tx.businessOwnerTelegramConnection.findMany({
-        where: { businessId: notification.businessId, status: 'ACTIVE', chatId: { not: null } },
-        select: { chatId: true },
-      });
-      if (connections.length === 0) {
-        return this.insertIntent(tx, {
-          notificationId: notification.id,
-          businessId: notification.businessId,
-          channel: 'TELEGRAM',
-          recipient: SUPPRESSED_RECIPIENT,
-          message: 'no connected owner chat',
-        });
-      }
-      let created = 0;
-      for (const connection of connections) {
-        if (connection.chatId === null) continue;
-        created += await this.insertIntent(tx, {
-          notificationId: notification.id,
-          businessId: notification.businessId,
-          channel: 'TELEGRAM',
-          recipient: String(connection.chatId),
-          message: null,
-        });
-      }
-      return created;
+      return this.fanOutOwnerTelegram(tx, notification);
     }
 
     if (OWNER_EMAIL_TYPES.has(notification.type)) {
@@ -206,21 +184,67 @@ export class NotificationDispatcher {
     }
 
     if (SUBSCRIPTION_OWNER_EMAIL_TYPES.has(notification.type)) {
+      // REQ-139: subscription REMINDERS run on BOTH channels — the existing
+      // business-contact email AND the business-owner Telegram chats. The
+      // email intent is created here; the telegram intents (if any) were
+      // created by the branch above. Summed so fan-out reports the real count.
+      let created = 0;
+      if (SUBSCRIPTION_OWNER_TELEGRAM_TYPES.has(notification.type)) {
+        created += await this.fanOutOwnerTelegram(tx, notification);
+      }
       const business = await tx.business.findUnique({
         where: { id: notification.businessId },
         select: { contactEmail: true },
       });
       const recipient = business?.contactEmail ?? SUPPRESSED_RECIPIENT;
-      return this.insertIntent(tx, {
+      created += await this.insertIntent(tx, {
         notificationId: notification.id,
         businessId: notification.businessId,
         channel: 'EMAIL',
         recipient,
         message: business?.contactEmail ? null : 'business has no contact email',
       });
+      return created;
     }
 
     return 0; // unrecognized / excluded types: no delivery intent
+  }
+
+  /**
+   * Fan out an owner-scoped outbox row to every ACTIVE owner Telegram chat of
+   * the business (REQ-065/139). No connected owner chat → one SUPPRESSED intent
+   * so fan-out stays idempotent.
+   */
+  private async fanOutOwnerTelegram(
+    tx: TenantTransaction,
+    notification: { id: string; businessId: string | null },
+  ): Promise<number> {
+    if (!notification.businessId) return 0;
+    const connections = await tx.businessOwnerTelegramConnection.findMany({
+      where: { businessId: notification.businessId, status: 'ACTIVE', chatId: { not: null } },
+      select: { chatId: true },
+    });
+    if (connections.length === 0) {
+      return this.insertIntent(tx, {
+        notificationId: notification.id,
+        businessId: notification.businessId,
+        channel: 'TELEGRAM',
+        recipient: SUPPRESSED_RECIPIENT,
+        message: 'no connected owner chat',
+      });
+    }
+    let created = 0;
+    for (const connection of connections) {
+      if (connection.chatId === null) continue;
+      created += await this.insertIntent(tx, {
+        notificationId: notification.id,
+        businessId: notification.businessId,
+        channel: 'TELEGRAM',
+        recipient: String(connection.chatId),
+        message: null,
+      });
+    }
+    return created;
   }
 
   private async insertIntent(
@@ -375,6 +399,13 @@ export class NotificationDispatcher {
     const type = delivery.notification.type;
     const chatId = parseChatId(delivery.recipient);
     if (chatId === null) return this.finalizeSuppressed(delivery, 'no active chat', now);
+
+    // Prompt 25 (REQ-139): subscription REMINDERS also reach the business owner
+    // over Telegram. They carry no booking, are stale-safe like their email
+    // counterparts, and are dispatched before the customer/booking checks.
+    if (SUBSCRIPTION_OWNER_TELEGRAM_TYPES.has(type)) {
+      return this.deliverSubscriptionOwnerTelegram(delivery, chatId, now);
+    }
 
     // Owner proof verification (Prompt 23): photo/document send with Accept and
     // Reject inline action tokens, executed from chat-originated callbacks.
@@ -604,6 +635,35 @@ export class NotificationDispatcher {
       delivery.business.name,
     );
     return this.deliverSubscriptionEmail(delivery, email, now);
+  }
+
+  /**
+   * Subscription reminder over the business owner's Telegram chat (REQ-139).
+   * Stale-safe: the derived reminder decision must STILL hold at processing
+   * time, exactly like the email twin — a reminder queued before a payment or
+   * trial boundary moved is suppressed instead of misleading the owner.
+   */
+  private async deliverSubscriptionOwnerTelegram(
+    delivery: DeliveryRowView,
+    chatId: bigint,
+    now: Date,
+  ): Promise<'sent' | 'failed' | 'suppressed' | 'deadLettered'> {
+    const type = delivery.notification.type;
+    if (isSubscriptionReminderType(type)) {
+      const subscription = await this.readSubscriptionFor(delivery.business.id);
+      const decision = subscription ? reminderDecision(subscription) : null;
+      if (decision?.kind !== subscriptionReminderKindOf(type)) {
+        return this.finalizeSuppressed(delivery, 'stale subscription reminder', now);
+      }
+    }
+    const text = renderSubscriptionOwnerTelegram(
+      type,
+      readPayload(delivery.notification.payload),
+      delivery.business.name,
+    ).text;
+    const failure = await this.telegram.sendMessage({ chatId, text });
+    if (failure === null) return this.finalizeSent(delivery, now);
+    return this.finalizeFailure(delivery, failure, undefined, now);
   }
 
   private async deliverSubscriptionEmail(

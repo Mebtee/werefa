@@ -310,6 +310,49 @@ export function renderSubscriptionAdminEmail(payload: Record<string, unknown>): 
 }
 
 /**
+ * Owner-facing subscription reminder text for the business Telegram chat
+ * (REQ-139). Plain text only — the Telegram channel never carries HTML or
+ * followable links. Delivered only when the derived reminder decision still
+ * holds (stale-safe check in the dispatcher).
+ */
+export function renderSubscriptionOwnerTelegram(
+  type: string,
+  payload: Record<string, unknown>,
+  businessName: string | undefined,
+): { text: string } {
+  const boundary = readPayloadString(payload, 'boundaryAt');
+  const when = boundary ? ` (${formatBookingLine(new Date(boundary))})` : '';
+  const business = businessName ?? 'your business';
+
+  switch (type) {
+    case SUBSCRIPTION_NOTIFICATION_TYPE.reminderPaidEnd:
+      return {
+        text:
+          `Your paid subscription for ${business} ends soon${when}. ` +
+          `Submit your monthly payment now to keep bookings open.`,
+      };
+    case SUBSCRIPTION_NOTIFICATION_TYPE.reminderTrialEnd:
+      return {
+        text:
+          `The free trial for ${business} ends soon${when}. ` +
+          `Subscribe to a monthly payment to keep collecting bookings.`,
+      };
+    case SUBSCRIPTION_NOTIFICATION_TYPE.reminderPaidGrace:
+      return {
+        text:
+          `The paid period for ${business} has ended${when} and your subscription is now ` +
+          `in its 5-day grace period. Renew now — bookings stop once the grace period expires.`,
+      };
+    default:
+      return {
+        text:
+          `The free trial for ${business} has ended${when}. You have a 3-day grace period to ` +
+          `subscribe — bookings stay open until it expires.`,
+      };
+  }
+}
+
+/**
  * Owner-facing subscription emails (REQ-137/138/139). The reminder texts are
  * delivered only when the derived decision still holds (stale-safe check in the
  * dispatcher).

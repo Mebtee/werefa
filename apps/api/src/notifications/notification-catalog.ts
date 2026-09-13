@@ -13,9 +13,12 @@ import { SCHEDULE_AFFECTED_TYPE } from '../schedule/schedule.service';
  *    are SMS/Telegram-to-customer; Telegram is the single customer channel this
  *    prompt implements, doc 12). If the booking has no active connection the
  *    intent is SUPPRESSED (delivery rows exist so fan-out stays idempotent).
- *  - `SCHEDULE_AFFECTED_OWNER` and the subscription owner types are EMAIL to
- *    the business contact (REQ-093/094; REQ-137/138/139/140); a business without
- *    a contact email is SUPPRESSED.
+ *  - `SCHEDULE_AFFECTED_OWNER` is EMAIL to the business contact (REQ-093/094).
+ *  - Subscription owner events are delivered over EMAIL (REQ-137/138/140); the
+ *    REMINDER types additionally fan out to every ACTIVE owner Telegram chat of
+ *    the business (REQ-139 — "by email and to the business Telegram"; the
+ *    Telegram/email partner is doc 10 REQ-142). A business without a contact
+ *    email or without a connected owner chat is SUPPRESSED per channel.
  *  - `SUBSCRIPTION_PAYMENT_SUBMITTED_ADMIN` fans out to the (exactly) two Admin
  *    platform accounts over EMAIL (REQ-140 — takes the two earliest admins).
  *  - `BOOKING_NEW_PROOF_OWNER` fans out to every ACTIVE owner Telegram chat of
@@ -40,6 +43,18 @@ export const DELIVERY_EXCLUDED_TYPES = new Set<string>([]);
 
 /** Outbox types fanned out to the OWNER's Telegram chats (REQ-065/066). */
 export const OWNER_TELEGRAM_TYPES = new Set<string>([BOOKING_NOTIFICATION_TYPE.newProofOwner]);
+
+/**
+ * Subscription REMINDER types also delivered to the business owner's Telegram
+ * chats (REQ-139 — email stays the parallel channel). Aggregate-only: a single
+ * message per connected owner chat, never customer-scoped.
+ */
+export const SUBSCRIPTION_OWNER_TELEGRAM_TYPES = new Set<string>([
+  SUBSCRIPTION_NOTIFICATION_TYPE.reminderPaidEnd,
+  SUBSCRIPTION_NOTIFICATION_TYPE.reminderTrialEnd,
+  SUBSCRIPTION_NOTIFICATION_TYPE.reminderPaidGrace,
+  SUBSCRIPTION_NOTIFICATION_TYPE.reminderTrialGrace,
+]);
 
 /** Outbox types fanned out to TELEGRAM when a chat connection exists (REQ-060+). */
 export const CUSTOMER_TELEGRAM_TYPES = new Set<string>([
