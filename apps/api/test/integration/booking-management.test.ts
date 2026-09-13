@@ -22,6 +22,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Client } from 'pg';
 import { PrismaService } from '../../src/database/prisma.service';
+import { TELEGRAM_PROVIDER, FakeTelegramProvider } from '../../src/notifications/providers';
 import {
   TEST_EMAILS,
   TEST_PASSWORDS,
@@ -87,7 +88,9 @@ let prisma: PrismaService;
 let superuser: Client;
 let businessId: string;
 let serviceId: string;
+let telegram: FakeTelegramProvider;
 let phoneSeq = 0;
+let updateSeq = 0;
 
 async function login(email: string, password: string): Promise<string> {
   const res = await supertest(server)
@@ -114,6 +117,14 @@ function wholeMinuteInFuture(hoursFromNow: number): string {
   const d = new Date(Date.now() + hoursFromNow * 3_600_000);
   d.setSeconds(0, 0);
   return d.toISOString();
+}
+
+async function securityEventCount(type: string): Promise<number> {
+  const res = await superuser.query<{ c: number }>(
+    'SELECT count(*)::int AS c FROM security_event WHERE type = $1',
+    [type],
+  );
+  return res.rows[0].c;
 }
 
 function createBookingBody(
@@ -178,6 +189,9 @@ beforeAll(async () => {
   process.env.STORAGE_PROVIDER = 'memory';
   process.env.AUTH_RATE_LIMIT_MAX = '100';
   process.env.COOKIE_SECURE = 'false';
+  process.env.TELEGRAM_ENABLED = 'true';
+  process.env.TG_BOT_USERNAME = 'werefa_test_bot';
+  process.env.TG_WEBHOOK_SECRET = 'test-webhook-secret';
   process.env.DATABASE_URL = withDb(process.env.DATABASE_URL ?? FILE_ENV.DATABASE_URL, TEST_DB)!;
   process.env.DATABASE_MIGRATOR_URL = withDb(
     process.env.DATABASE_MIGRATOR_URL ?? FILE_ENV.DATABASE_MIGRATOR_URL ?? FILE_ENV.DATABASE_URL,
@@ -194,6 +208,7 @@ beforeAll(async () => {
   await app.init();
   server = app.getHttpServer();
   prisma = app.get(PrismaService);
+  telegram = app.get(TELEGRAM_PROVIDER) as FakeTelegramProvider;
 
   const supertestModule = await import('supertest');
   supertest = (supertestModule.default ?? supertestModule) as typeof import('supertest');
@@ -222,6 +237,7 @@ beforeEach(async () => {
   await superuser.query(
     'TRUNCATE "booking", "service", "service_variation", "add_on", "security_event" CASCADE',
   );
+  telegram.reset();
 });
 
 async function seedService(): Promise<string> {
@@ -474,24 +490,60 @@ describe('C: owner lifecycle', () => {
 });
 
 describe('D: rejected-proof resubmission security', () => {
-  async function rejectedBooking(): Promise<{ token: string; bookingId: string; phone: string }> {
+  /** Bind the customer's Telegram chat for a booking (public connect + webhook). */
+  async function connectChat(bookingId: string, phone: string): Promise<number> {
+    const started = await supertest(server)
+      .post(`/api/v1/public/businesses/${SLUG}/bookings/${bookingId}/telegram/connect`)
+      .send({ phone })
+      .set(CSRF);
+    expect([200, 201]).toContain(started.status);
+    const token = (started.body as { token?: string }).token;
+    expect(typeof token).toBe('string');
+    const chatId = 900000000 + updateSeq;
+    const bound = await supertest(server)
+      .post('/api/v1/telegram/webhook')
+      .send({ update_id: ++updateSeq, message: { chat: { id: chatId }, text: `/start ${token}` } })
+      .set('x-telegram-bot-api-secret-token', process.env.TG_WEBHOOK_SECRET!)
+      .set(CSRF);
+    expect([200, 201]).toContain(bound.status);
+    return chatId;
+  }
+
+  async function rejectedBooking(): Promise<{
+    token: string;
+    bookingId: string;
+    phone: string;
+    chatId: number;
+  }> {
+    await seedService();
+    const token = await ownerToken();
+    const body = createBookingBody();
+    const { body: payload } = await publicCreate(body);
+    const chatId = await connectChat(payload.booking!.id, body.customerPhone as string);
+    await postOwner(token, `${payload.booking!.id}/reject`, { reason: 'Blurry receipt' });
+    return { token, bookingId: payload.booking!.id, phone: body.customerPhone as string, chatId };
+  }
+
+  async function rejectedBookingUnconnected(): Promise<{ bookingId: string; phone: string }> {
     await seedService();
     const token = await ownerToken();
     const body = createBookingBody();
     const { body: payload } = await publicCreate(body);
     await postOwner(token, `${payload.booking!.id}/reject`, { reason: 'Blurry receipt' });
-    return { token, bookingId: payload.booking!.id, phone: body.customerPhone as string };
+    return { bookingId: payload.booking!.id, phone: body.customerPhone as string };
   }
 
   async function requestCode(phone: string) {
-    const { InMemoryVerificationCodeChannel } =
-      await import('../../src/booking/verification-code.channel');
-    const channel = app.get(InMemoryVerificationCodeChannel);
-    const sentBefore = channel.sent.length;
+    const sentBefore = telegram.sent.length;
     const res = await supertest(server)
       .post(`/api/v1/public/businesses/${SLUG}/resubmissions/request-code`)
       .send({ phone });
-    return { res, code: channel.sent.at(-1)?.code ?? null, sentBefore, channel };
+    const messages = telegram.sent.slice(sentBefore);
+    const code =
+      messages
+        .map((m) => m.text.match(/\b\d{6}\b/)?.[0])
+        .find((c): c is string => typeof c === 'string') ?? null;
+    return { res, code, messages };
   }
 
   async function resubmitWith(phone: string, code: string) {
@@ -549,11 +601,10 @@ describe('D: rejected-proof resubmission security', () => {
   });
 
   it('request-code is enumeration-safe for unknown phones (no code issued)', async () => {
-    const { res, code, sentBefore, channel } = await requestCode(freshPhone());
+    const { res, code, messages } = await requestCode(freshPhone());
     expect(res.status).toBe(200);
-    const deliveredSince = channel.sent.length > sentBefore ? code : null;
-    expect(deliveredSince).toBeNull();
-    expect(channel.sent.length).toBe(sentBefore);
+    expect(messages).toHaveLength(0);
+    expect(code).toBeNull();
   });
 
   it('a code for one phone cannot be consumed by another phone', async () => {
@@ -578,6 +629,76 @@ describe('D: rejected-proof resubmission security', () => {
       [businessId, phone],
     );
     expect(attempts.rows[0].attempts).toBe(5);
+  });
+
+  it('delivers the code over the booking-connected Telegram chat with no API/log leak (REQ-230)', async () => {
+    const { phone, chatId } = await rejectedBooking();
+    const { res, code, messages } = await requestCode(phone);
+    expect(res.status).toBe(200);
+    expect(code).toMatch(/^\d{6}$/);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].chatId).toBe(BigInt(chatId));
+    expect(messages[0].text).toContain(code!);
+    expect(res.body.expiresAt ?? null).not.toBeNull();
+
+    // The plaintext code never reaches the API response, the audit trail, or
+    // any outbox row — the Telegram message is its ONLY occurrence.
+    expect(JSON.stringify(res.body)).not.toContain(code!);
+    const events = await superuser.query<{ haystack: string }>(
+      `SELECT coalesce(result, '') || coalesce(metadata::text, '') AS haystack FROM security_event`,
+    );
+    expect(events.rows.every((r) => !r.haystack.includes(code!))).toBe(true);
+    const stored = await superuser.query<{ code_hash: string }>(
+      'SELECT code_hash FROM resubmission_verification WHERE business_id = $1 AND phone = $2',
+      [businessId, phone],
+    );
+    expect(stored.rows[0].code_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(stored.rows[0].code_hash).not.toContain(code!);
+  });
+
+  it('voids the code when the booking has no approved Telegram path (doc 08 §9.2)', async () => {
+    const { phone, bookingId } = await rejectedBookingUnconnected();
+    const beforeEvents = await securityEventCount('BOOKING_VERIFICATION_CODE_NO_CHANNEL');
+    const { res, code, messages } = await requestCode(phone);
+    expect(res.status).toBe(200);
+    expect(code).toBeNull();
+    expect(messages).toHaveLength(0);
+    expect(res.body.expiresAt ?? null).toBeNull();
+
+    // The just-issued row was voided: attempts can never start, and the API
+    // answer stays indistinguishable from an unknown phone (400, not 409).
+    const row = await superuser.query<{ used_at: Date | null }>(
+      'SELECT used_at FROM resubmission_verification WHERE business_id = $1 AND phone = $2',
+      [businessId, phone],
+    );
+    expect(row.rows).toHaveLength(1);
+    expect(row.rows[0].used_at).not.toBeNull();
+    expect(await securityEventCount('BOOKING_VERIFICATION_CODE_NO_CHANNEL')).toBe(beforeEvents + 1);
+
+    const denied = await resubmitWith(phone, '000000');
+    expect(denied.status).toBe(400);
+    expect(denied.body.error?.code).toBe('VALIDATION_ERROR');
+    void bookingId;
+  });
+
+  it('a provider failure on the real channel voids the code, never leaving a usable one', async () => {
+    const { phone } = await rejectedBooking();
+    telegram.mode = 'fail-all';
+    const { res, code, messages } = await requestCode(phone);
+    expect(res.status).toBe(200);
+    expect(code).toBeNull();
+    expect(messages).toHaveLength(0);
+    expect(res.body.expiresAt ?? null).toBeNull();
+    const row = await superuser.query<{ used_at: Date | null }>(
+      'SELECT used_at FROM resubmission_verification WHERE business_id = $1 AND phone = $2',
+      [businessId, phone],
+    );
+    expect(row.rows[0].used_at).not.toBeNull();
+
+    // Once the provider recovers, a fresh request actually delivers again.
+    telegram.mode = 'ok';
+    const again = await requestCode(phone);
+    expect(again.code).toMatch(/^\d{6}$/);
   });
 });
 
