@@ -65,7 +65,7 @@ function service(input: {
   basePrice: Money
   baseDurationMinutes: number
 }): Service {
-  return { ...input, variations: [], addOns: [] }
+  return { ...input, variations: [], addOns: [], isActive: true }
 }
 
 const salonServices: Service[] = [
@@ -88,6 +88,7 @@ const salonServices: Service[] = [
       { id: 'hair-wash', name: 'Deep-conditioning wash', price: 15000, durationMinutes: 15 },
       { id: 'blowdry', name: 'Blow-dry finish', price: 10000, durationMinutes: 10 },
     ],
+    isActive: true,
   },
   {
     id: 'mens-haircut',
@@ -99,6 +100,7 @@ const salonServices: Service[] = [
       { id: 'fade', name: 'Skin fade', priceDelta: 10000, durationDeltaMinutes: 10 },
     ],
     addOns: [{ id: 'beard-trim', name: 'Beard trim', price: 15000, durationMinutes: 15 }],
+    isActive: true,
   },
   {
     id: 'mani-pedi',
@@ -113,6 +115,7 @@ const salonServices: Service[] = [
     addOns: [
       { id: 'paraffin', name: 'Paraffin treatment', price: 20000, durationMinutes: 10 },
     ],
+    isActive: true,
   },
   {
     id: 'facial',
@@ -127,6 +130,7 @@ const salonServices: Service[] = [
     addOns: [
       { id: 'dermaplane', name: 'Express dermaplaning', price: 25000, durationMinutes: 15 },
     ],
+    isActive: true,
   },
 ]
 
@@ -144,6 +148,7 @@ const autoCareServices: Service[] = [
     addOns: [
       { id: 'tyre-pressure', name: 'Tyre pressure check (all 4)', price: 20000, durationMinutes: 20 },
     ],
+    isActive: true,
   },
   service({ id: 'hand-wash', name: 'Exterior Hand Wash', basePrice: 50000, baseDurationMinutes: 30 }),
   service({
@@ -186,7 +191,7 @@ function seedBookings(slug: string, date: DateString): readonly BlockedPeriod[] 
   }
 }
 
-function buildPages(): readonly BusinessPage[] {
+export function buildPages(): readonly BusinessPage[] {
   const today = toDateString(new Date())
 
   return [
@@ -197,7 +202,7 @@ function buildPages(): readonly BusinessPage[] {
         category: 'salon-barber',
         tagline: 'Hair, skin and nails — booked in under a minute.',
         description:
-          'Addis Beauty Lounge is a full-service salon and barber. Every booking is confirmed by our team by phone, so you always know where you stand.',
+          'Addis Beauty Lounge is a full-service salon and barber. Book online, pay any requested deposit, and your booking is confirmed as soon as your payment is reviewed.',
         accentColor: '#b4457f',
         address: 'Bole Road, Addis Ababa (opposite the roundabout)',
         lat: 9.0108,
@@ -340,10 +345,6 @@ function buildPages(): readonly BusinessPage[] {
 const PAGES: readonly BusinessPage[] = buildPages()
 
 export const MOCK_BUSINESS_PAGES: readonly BusinessPage[] = PAGES
-
-export function findBusinessPage(slug: string): BusinessPage | undefined {
-  return PAGES.find((page) => page.business.slug === slug)
-}
 
 /**
  * Mock-only: deterministic "already taken" bookings for a business+date.

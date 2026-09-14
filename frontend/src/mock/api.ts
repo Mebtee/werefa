@@ -11,7 +11,8 @@ import {
   computeBookingDates,
   type BookingDate,
 } from '@/mock/availability'
-import { findBusinessPage, mockRaceSlot } from '@/mock/data'
+import { mockRaceSlot } from '@/mock/data'
+import { getBusinessPage as readBusinessPage } from '@/mock/store'
 
 /**
  * The frontend's data-access seam.
@@ -50,7 +51,14 @@ const delay = (ms: number): Promise<void> =>
 export const mockApi: BookingApi = {
   async getBusinessPage(slug) {
     await delay(latency())
-    return findBusinessPage(slug) ?? null
+    const page = readBusinessPage(slug)
+    if (!page) return null
+    // The public page only publishes active services (REQ-079). Deactivated
+    // ones remain in the shared store so the owner portal can reactivate them.
+    return {
+      business: page.business,
+      services: page.services.filter((service) => service.isActive),
+    }
   },
 
   async getBookingDates(business, durationMinutes) {

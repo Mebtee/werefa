@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { BusinessDetails } from '@/types/models'
-import { findBusinessPage } from '@/mock/data'
+import { getBusinessPage } from '@/mock/store'
 import { computeAvailableTimes, periodsForDate } from '@/mock/availability'
 
 // Self-contained fixture: deterministic dates far in the future, so the
@@ -118,7 +118,7 @@ describe('mock data sanity', () => {
   })
 
   it('the primary demo business exists', () => {
-    const page = findBusinessPage('addis-beauty-lounge')
+    const page = getBusinessPage('addis-beauty-lounge')
     expect(page?.business.name).toBe('Addis Beauty Lounge')
     expect(page?.services.length).toBeGreaterThan(0)
   })

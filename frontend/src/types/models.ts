@@ -120,6 +120,8 @@ export interface Service {
   baseDurationMinutes: number
   variations: readonly ServiceVariation[]
   addOns: readonly ServiceAddOn[]
+  /** Owner-deactivated services are hidden from the public page (REQ-079). */
+  isActive: boolean
 }
 
 /** A business page plus its published services (REQ-214). */
