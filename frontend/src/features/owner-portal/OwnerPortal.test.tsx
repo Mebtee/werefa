@@ -13,7 +13,6 @@ import { appRoutes } from '@/routes'
 import { resetStore, getBusiness } from '@/mock/store'
 import { computeAvailableTimes } from '@/mock/availability'
 import { PRIMARY_BUSINESS_SLUG } from '@/mock/data'
-import { formatMoney } from '@/lib/format'
 
 const user = userEvent.setup()
 
@@ -32,7 +31,7 @@ beforeEach(() => {
 
 describe('owner dashboard', () => {
   it('renders the business status, public link, service count and today summary', async () => {
-    const { router } = renderAt('/owner')
+    renderAt('/owner')
 
     await screen.findByRole('heading', { name: 'Dashboard' })
     expect(screen.getAllByText('Addis Beauty Lounge').length).toBeGreaterThan(0)
@@ -178,7 +177,7 @@ describe('services', () => {
     ).not.toBeInTheDocument()
 
     router.navigate('/owner/services')
-    await screen.findByRole('heading', { name: 'Services' })
+    await screen.findByRole('heading', { name: 'Services', level: 1 })
     const rowAgain = screen
       .getByRole('heading', { name: 'Men’s Cut' })
       .closest('.service-row') as HTMLElement
@@ -191,8 +190,9 @@ describe('services', () => {
     })
 
     router.navigate('/p/addis-beauty-lounge')
+    await screen.findByRole('heading', { name: 'Book now' })
     expect(
-      await screen.findByRole('heading', { name: 'Men’s Cut' }),
+      screen.getByRole('heading', { name: 'Men’s Cut' }),
     ).toBeInTheDocument()
   })
 
@@ -210,9 +210,12 @@ describe('services', () => {
     ).toBeInTheDocument()
 
     router.navigate('/p/addis-beauty-lounge')
-    await screen.findByRole('heading', { name: 'Facial Massage' })
-    expect(screen.getByText(formatMoney(25000, 'ETB'))).toBeInTheDocument()
-    expect(screen.getByText('45 min')).toBeInTheDocument()
+    await screen.findByRole('heading', { name: 'Book now' })
+    const card = screen
+      .getByRole('heading', { name: 'Facial Massage' })
+      .closest('.service-card') as HTMLElement
+    expect(within(card).getByText(/ETB 250\.00/)).toBeInTheDocument()
+    expect(within(card).getByText('45 min')).toBeInTheDocument()
   })
 
   it('blocks saving a service without a price or duration', async () => {
@@ -246,11 +249,11 @@ describe('services', () => {
     ).toBeInTheDocument()
 
     router.navigate('/p/addis-beauty-lounge')
-    const heading = await screen.findByRole('heading', {
-      name: 'Women’s Haircut & Styling',
-    })
-    const card = heading.closest('.service-card') as HTMLElement
-    expect(within(card).getByText(formatMoney(12000, 'ETB'))).toBeInTheDocument()
+    await screen.findByRole('heading', { name: 'Book now' })
+    const card = screen
+      .getByRole('heading', { name: 'Women’s Haircut & Styling' })
+      .closest('.service-card') as HTMLElement
+    expect(within(card).getByText(/ETB 120\.00/)).toBeInTheDocument()
     expect(within(card).getByText('40 min')).toBeInTheDocument()
   })
 })
@@ -290,7 +293,10 @@ describe('schedule', () => {
       .getAllByLabelText(/^Special date \d+$/)
       .find((input) => (input as HTMLInputElement).value === '') as HTMLInputElement
     fireEvent.change(newDateInput, { target: { value: MONDAY } })
-    const specialRow = newDateInput.closest('.special-day') as HTMLElement
+    const specialRow = screen
+      .getAllByLabelText(/^Special date \d+$/)
+      .find((input) => (input as HTMLInputElement).value === MONDAY)!
+      .closest('.special-day') as HTMLElement
     await user.click(within(specialRow).getByRole('radio', { name: 'Closed' }))
 
     await user.click(screen.getByRole('button', { name: 'Save schedule' }))
