@@ -9,6 +9,7 @@ import {
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { appRoutes } from '@/routes'
+import { toDateString } from '@/lib/time'
 
 const user = userEvent.setup()
 
@@ -26,9 +27,16 @@ async function pickFirstAvailableSlot(container: HTMLElement) {
   const chips = Array.from(
     container.querySelectorAll<HTMLButtonElement>('.date-chip'),
   )
-  const firstEnabled = chips.find((chip) => !chip.disabled)
-  if (!firstEnabled) throw new Error('no enabled date chip found')
-  await user.click(firstEnabled)
+  const enabled = chips.filter((chip) => !chip.disabled)
+  // The mock race simulation only ever targets today's next 30-minute slot, so
+  // book on a later date to keep the happy path deterministic.
+  const today = toDateString(new Date())
+  const target = enabled.find((chip) => {
+    const dateLabel = chip.querySelector('.date-chip__date')
+    return dateLabel && dateLabel.textContent !== today
+  }) ?? enabled[0]
+  if (!target) throw new Error('no enabled date chip found')
+  await user.click(target)
 
   await waitFor(() => {
     expect(
@@ -55,6 +63,21 @@ async function reachCustomerStep(container: HTMLElement) {
   await user.click(screen.getByRole('button', { name: /^continue$/i }))
 
   await screen.findByRole('heading', { name: 'Your details', level: 2 })
+}
+
+/** Add the first service and land on the Date & time step (no time selected). */
+async function reachDateStep(container: HTMLElement) {
+  const addButtons = await screen.findAllByRole('button', {
+    name: /add to booking/i,
+  })
+  await user.click(addButtons[0])
+  await user.click(
+    screen.getByRole('button', { name: /continue[\s–—-]*\d+ selected/i }),
+  )
+  await screen.findByRole('heading', { name: 'Pick a date and time', level: 2 })
+  await waitFor(() => {
+    expect(container.querySelectorAll('.date-chip').length).toBeGreaterThan(0)
+  })
 }
 
 describe('public booking flow', () => {
@@ -173,7 +196,7 @@ describe('public booking flow', () => {
     })
 
     const continueButton = screen.getByRole('button', {
-      name: /^pick an available time$/i,
+      name: /^continue$/i,
     })
     expect(continueButton).toBeDisabled()
 
@@ -190,7 +213,7 @@ describe('public booking flow', () => {
       ).toBeGreaterThan(0)
     })
     expect(
-      screen.getByRole('button', { name: /^pick an available time$/i }),
+      screen.getByRole('button', { name: /^continue$/i }),
     ).toBeDisabled()
 
     const slots = Array.from(
@@ -228,5 +251,88 @@ describe('public booking flow', () => {
     expect(
       within(disclosure as HTMLElement).getByText('Women’s Haircut & Styling'),
     ).toBeInTheDocument()
+  })
+})
+
+describe('date & time step navigation', () => {
+  it('shows a Continue button on the date & time step', async () => {
+    const { container } = renderPage()
+
+    await screen.findByRole('heading', { name: 'Addis Beauty Lounge' })
+    await reachDateStep(container)
+
+    const continueButton = screen.getByRole('button', { name: /^continue$/i })
+    expect(continueButton).toBeInTheDocument()
+    expect(continueButton).toBeDisabled()
+  })
+
+  it('keeps Continue disabled before a valid time is selected', async () => {
+    const { container } = renderPage()
+
+    await screen.findByRole('heading', { name: 'Addis Beauty Lounge' })
+    await reachDateStep(container)
+
+    expect(
+      screen.getByRole('button', { name: /^continue$/i }),
+    ).toBeDisabled()
+  })
+
+  it('enables Continue after an available time is selected', async () => {
+    const { container } = renderPage()
+
+    await screen.findByRole('heading', { name: 'Addis Beauty Lounge' })
+    await reachDateStep(container)
+
+    const chips = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('.date-chip'),
+    )
+    const enabledChips = chips.filter((chip) => !chip.disabled)
+    if (!enabledChips[0]) throw new Error('no enabled date chip found')
+    await user.click(enabledChips[0])
+
+    await waitFor(() => {
+      expect(
+        container.querySelectorAll('.time-grid__item button').length,
+      ).toBeGreaterThan(0)
+    })
+
+    const slots = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('.time-grid__item button'),
+    )
+    await user.click(slots[0])
+
+    expect(
+      screen.getByRole('button', { name: /^continue$/i }),
+    ).not.toBeDisabled()
+  })
+
+  it('moves to Your details when Continue is clicked with a valid time', async () => {
+    const { container } = renderPage()
+
+    await screen.findByRole('heading', { name: 'Addis Beauty Lounge' })
+    await reachDateStep(container)
+
+    await pickFirstAvailableSlot(container)
+    await user.click(screen.getByRole('button', { name: /^continue$/i }))
+
+    expect(
+      await screen.findByRole('heading', { name: 'Your details', level: 2 }),
+    ).toBeInTheDocument()
+  })
+
+  it('does not advance when Continue is clicked without a valid time', async () => {
+    const { container } = renderPage()
+
+    await screen.findByRole('heading', { name: 'Addis Beauty Lounge' })
+    await reachDateStep(container)
+
+    await user.click(screen.getByRole('button', { name: /^continue$/i }))
+
+    expect(
+      screen.getByRole('heading', { name: 'Pick a date and time', level: 2 }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('heading', { name: 'Your details', level: 2 }),
+    ).not.toBeInTheDocument()
   })
 })
