@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import type { BusinessDetails, Service } from '@/types/models'
-import { buildLineItems, prepaymentAmount, totalDurationMinutes, totalPrice } from '@/lib/format'
+import { buildLineItems, formatMoney, prepaymentAmount, totalDurationMinutes, totalPrice } from '@/lib/format'
 import { Stepper } from '@/components/ui/Stepper'
 import { BookingSummary } from '@/features/public-booking/components/BookingSummary'
 import {
@@ -160,6 +160,27 @@ export function BookingWizard({ business, services }: BookingWizardProps) {
           />
         </aside>
         <div className="wizard__main" ref={mainRef}>
+          {lineItems.length > 0 && (
+            <div className="wizard__mobile-summary">
+              <details className="summary-disclosure">
+                <summary>
+                  <span>
+                    {lineItems.length} service{lineItems.length === 1 ? '' : 's'}{' '}
+                    · {formatMoney(total, business.currency)} · {duration} min
+                  </span>
+                  <span className="summary-disclosure__meta">View summary</span>
+                </summary>
+                <BookingSummary
+                  business={business}
+                  services={services}
+                  selections={flow.selections}
+                  date={flow.date}
+                  time={flow.time}
+                  customer={flow.customer}
+                />
+              </details>
+            </div>
+          )}
           {showStepper && <Stepper steps={BOOKING_STEP_LABELS} current={flow.step} />}
           {content}
         </div>

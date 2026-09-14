@@ -19,13 +19,15 @@ export function ServicesReadOnly({
             <article className="card service-card">
               <div className="service-card__head">
                 <h3 className="service-card__name">{service.name}</h3>
-                <span className="service-card__price">
-                  {formatMoney(service.basePrice, business.currency)}
+                <span className="service-card__priceblock">
+                  <span className="service-card__price">
+                    {formatMoney(service.basePrice, business.currency)}
+                  </span>
+                  <span className="service-card__meta">
+                    {service.baseDurationMinutes} min
+                  </span>
                 </span>
               </div>
-              <p className="service-card__meta">
-                {service.baseDurationMinutes} minutes
-              </p>
               {service.description && (
                 <p className="service-card__desc">{service.description}</p>
               )}

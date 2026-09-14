@@ -201,4 +201,32 @@ describe('public booking flow', () => {
       screen.getByRole('button', { name: /^continue$/i }),
     ).not.toBeDisabled()
   })
+
+  it('shows the compact mobile summary disclosure once a service is added', async () => {
+    const { container } = renderPage()
+
+    await screen.findByRole('heading', { name: 'Addis Beauty Lounge' })
+
+    const disclosureBefore = container.querySelector('.summary-disclosure')
+    expect(disclosureBefore).not.toBeInTheDocument()
+
+    const addButtons = await screen.findAllByRole('button', {
+      name: /add to booking/i,
+    })
+    await user.click(addButtons[0])
+
+    const disclosure = container.querySelector('.summary-disclosure')
+    expect(disclosure).toBeInTheDocument()
+    const details = within(disclosure as HTMLElement)
+    const summary = details.getByText(/view summary/i).closest('summary')
+    expect(summary).toBeInTheDocument()
+    expect(within(summary as HTMLElement).getByText(/1 service ·/i)).toBeInTheDocument()
+    expect(within(summary as HTMLElement).getByText(/· 60 min/i)).toBeInTheDocument()
+    expect(details.getByText(/view summary/i)).toBeInTheDocument()
+
+    await user.click(details.getByText(/view summary/i))
+    expect(
+      within(disclosure as HTMLElement).getByText('Women’s Haircut & Styling'),
+    ).toBeInTheDocument()
+  })
 })

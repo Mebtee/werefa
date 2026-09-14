@@ -47,52 +47,56 @@ export function ServicesStep({
               <article className="card service-card">
                 <div className="service-card__head">
                   <h3 className="service-card__name">{service.name}</h3>
-                  <span className="service-card__price">
-                    {formatMoney(service.basePrice, business.currency)}
+                  <span className="service-card__priceblock">
+                    <span className="service-card__price">
+                      {formatMoney(service.basePrice, business.currency)}
+                    </span>
+                    <span className="service-card__meta">
+                      {service.baseDurationMinutes} min
+                    </span>
                   </span>
                 </div>
-                <p className="service-card__meta">
-                  {service.baseDurationMinutes} minutes
-                </p>
                 {service.description && (
                   <p className="service-card__desc">{service.description}</p>
                 )}
 
-                {service.variations.length > 0 && (
+                {(service.variations.length > 0 || service.addOns.length > 0) && (
                   <div className="service-card__options">
-                    <fieldset className="option-group">
-                      <legend className="option-group__title">
-                        {service.name} — option
-                        {isSelected ? '' : ' (add the service first)'}
-                      </legend>
-                      <div className="option-group__list">
-                        {service.variations.map((variation) => {
-                          const active =
-                            isSelected &&
-                            selection?.variationId === variation.id
-                          const delta =
-                            variation.priceDelta > 0
-                              ? ` +${formatMoney(variation.priceDelta, business.currency)}`
-                              : ''
-                          return (
-                            <li key={variation.id}>
-                              <button
-                                type="button"
-                                className="chip"
-                                aria-pressed={active}
-                                disabled={!isSelected}
-                                onClick={() =>
-                                  setVariation(service.id, active ? null : variation.id)
-                                }
-                              >
-                                {variation.name}
-                                {delta}
-                              </button>
-                            </li>
-                          )
-                        })}
-                      </div>
-                    </fieldset>
+                    {service.variations.length > 0 && (
+                      <fieldset className="option-group">
+                        <legend className="option-group__title">
+                          {service.name} — option
+                          {isSelected ? '' : ' (add the service first)'}
+                        </legend>
+                        <div className="option-group__list">
+                          {service.variations.map((variation) => {
+                            const active =
+                              isSelected &&
+                              selection?.variationId === variation.id
+                            const delta =
+                              variation.priceDelta > 0
+                                ? ` +${formatMoney(variation.priceDelta, business.currency)}`
+                                : ''
+                            return (
+                              <li key={variation.id}>
+                                <button
+                                  type="button"
+                                  className="chip"
+                                  aria-pressed={active}
+                                  disabled={!isSelected}
+                                  onClick={() =>
+                                    setVariation(service.id, active ? null : variation.id)
+                                  }
+                                >
+                                  {variation.name}
+                                  {delta}
+                                </button>
+                              </li>
+                            )
+                          })}
+                        </div>
+                      </fieldset>
+                    )}
 
                     {service.addOns.length > 0 && (
                       <fieldset className="option-group">
@@ -128,16 +132,9 @@ export function ServicesStep({
                   </div>
                 )}
 
-                {service.variations.length === 0 && service.addOns.length === 0 && (
-                  <div className="service-card__options">
-                    <p className="option-group__title">No options</p>
-                  </div>
-                )}
-
                 <div className="service-card__toggle">
                   <Button
-                    variant={isSelected ? 'outline' : 'primary'}
-                    block
+                    variant="outline"
                     aria-pressed={isSelected}
                     onClick={() => toggleService(service.id)}
                   >
