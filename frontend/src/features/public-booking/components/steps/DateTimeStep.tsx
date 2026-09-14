@@ -195,12 +195,18 @@ export function DateTimeStep({
         </>
       )}
 
+      {!timeValid && (
+        <p className="field__hint" style={{ marginTop: 'var(--space-4)' }}>
+          Pick an available date and time to continue.
+        </p>
+      )}
+
       <nav className="wizard__nav" aria-label="Date and time step actions">
         <Button variant="outline" onClick={onBack}>
           Back
         </Button>
         <Button variant="primary" disabled={!timeValid} onClick={onNext}>
-          {timeValid ? 'Continue' : 'Pick an available time'}
+          Continue
         </Button>
       </nav>
     </>
