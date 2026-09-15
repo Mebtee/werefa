@@ -65,6 +65,42 @@
   font-size: var(--text-lg);
 }
 
+.btn--sm {
+  min-height: 32px;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
+.btn--ghost:hover {
+  background: var(--color-surface-muted);
+  color: var(--color-text);
+}
+
+.btn--accent {
+  background: var(--accent);
+  color: #fff;
+}
+
+.btn--accent:hover {
+  background: var(--accent-strong);
+}
+
+.btn--danger {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+.btn--danger:hover {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
 /* ---------------------------------------------------------------------------
  * Form fields
  * ------------------------------------------------------------------------- */
@@ -283,6 +319,7 @@
 .hero__desc {
   font-size: var(--text-base);
   max-width: 68ch;
+  overflow-wrap: anywhere;
 }
 
 .hero__facts {
@@ -313,6 +350,157 @@
 
 .hero__action {
   margin-top: var(--space-5);
+}
+
+/* ---------------------------------------------------------------------------
+ * Hero cover photo (public page, optional)
+ * ------------------------------------------------------------------------- */
+
+.hero__cover {
+  display: block;
+  width: 100%;
+  height: 200px;
+  object-fit: cover;
+  border-radius: 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.hero__logo-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+/* ---------------------------------------------------------------------------
+ * Image picker (owner branding section)
+ * ------------------------------------------------------------------------- */
+
+.image-picker {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  background: var(--color-surface);
+}
+
+.image-picker__label {
+  font-weight: 600;
+  margin-bottom: var(--space-2);
+}
+
+.image-picker__preview {
+  display: block;
+  width: 100%;
+  max-width: 240px;
+  max-height: 140px;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-muted);
+  margin-bottom: var(--space-3);
+}
+
+.image-picker__placeholder {
+  width: 100%;
+  max-width: 240px;
+  height: 80px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--color-border-strong);
+  background: var(--color-surface-muted);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-3);
+}
+
+.image-picker__actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.image-picker__error {
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+  margin-top: var(--space-2);
+}
+
+/* ---------------------------------------------------------------------------
+ * Public URL / QR card (owner portal)
+ * ------------------------------------------------------------------------- */
+
+.public-url-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.public-url-card__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.public-url-card__link {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--text-sm);
+  color: var(--accent);
+  word-break: break-all;
+}
+
+.public-url-card__qr {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.qr-svg {
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+
+.public-url-card__qr-hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.map-link {
+  font-size: var(--text-sm);
+}
+
+.map-link a {
+  color: var(--accent);
+  word-break: break-all;
+}
+
+/* ---------------------------------------------------------------------------
+ * Branding section (owner portal)
+ * ------------------------------------------------------------------------- */
+
+.branding-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.branding-section__pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+@media (max-width: 520px) {
+  .branding-section__pair {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ---------------------------------------------------------------------------
@@ -434,6 +622,7 @@ fieldset.option-group legend {
 }
 
 .stepper__step {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
@@ -485,6 +674,10 @@ fieldset.option-group legend {
   display: grid;
   grid-template-columns: 1fr;
   gap: var(--space-5);
+}
+
+.wizard__main {
+  min-width: 0;
 }
 
 .wizard__nav {
@@ -1051,6 +1244,280 @@ fieldset.option-group legend {
   color: var(--color-success);
 }
 
+/* ---------------------------------------------------------------------------
+ * Bookings (owner) — PROMPT 32 review flow
+ * ------------------------------------------------------------------------- */
+
+.booking-filters {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+}
+
+.booking-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 40px;
+  padding: var(--space-1) var(--space-3);
+  border: 1.5px solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.booking-pill:hover {
+  border-color: var(--accent);
+}
+
+.booking-pill[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.booking-pill__count {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+
+.booking-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.booking-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  text-decoration: none;
+  color: var(--color-text);
+  min-height: 0;
+}
+
+.booking-card:hover {
+  border-color: var(--accent);
+}
+
+.booking-card__main,
+.booking-card__time,
+.booking-card__status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.booking-card__status {
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+
+.booking-card__meta {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.booking-chip {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  background: var(--color-surface-muted);
+  color: var(--color-text-muted);
+}
+
+.booking-chip--active {
+  background: var(--color-info-bg);
+  color: var(--color-info);
+}
+
+.booking-chip--confirmed {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.booking-chip--rejected,
+.booking-chip--cancelled,
+.booking-chip--no-show {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+.booking-chip--completed {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.booking-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-3);
+}
+
+.booking-breadcrumb a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.booking-detail__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+}
+
+.booking-detail__title {
+  margin-bottom: 0;
+}
+
+.booking-detail__status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.booking-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.booking-value {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  margin-bottom: var(--space-2);
+  overflow-wrap: anywhere;
+}
+
+.booking-line-items {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.booking-line-items li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: var(--space-3);
+  align-items: baseline;
+}
+
+.booking-line-items__meta {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.booking-totals {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  border-top: 1px solid var(--color-border);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+}
+
+.proof-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface-muted);
+  border-radius: var(--radius-md);
+  overflow-wrap: anywhere;
+}
+
+.booking-actions {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: var(--space-3);
+}
+
+.booking-reason {
+  min-height: 0;
+  font-family: inherit;
+}
+
+.booking-history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  counter-reset: history;
+}
+
+.booking-history li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding-left: var(--space-5);
+  position: relative;
+}
+
+.booking-history li::before {
+  counter-increment: history;
+  content: counter(history);
+  position: absolute;
+  left: 0;
+  top: 0.15em;
+  width: var(--space-4);
+  height: var(--space-4);
+  border-radius: 50%;
+  background: var(--color-surface-muted);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.booking-history__state {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.booking-history__meta {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.booking-history__marker {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1345,6 +1812,267 @@ fieldset.option-group legend {
   gap: var(--space-1);
 }
 
+/* ---------------------------------------------------------------------------
+ * Schedule editor: blocked days & periods, reason, special-day periods
+ * (PROMPT 37 — REQ-084/085, REQ-086/087, REQ-164)
+ * ------------------------------------------------------------------------- */
+
+.subsection__subtitle {
+  font-size: var(--text-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  margin: 0 0 var(--space-2);
+}
+
+.special-day__periods {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-start;
+  width: 100%;
+}
+
+.block-editor {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+}
+
+.block-editor__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.block-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  background: var(--color-surface-muted);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  min-width: 0;
+}
+
+.block-row__label {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.block-add {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.block-add__date {
+  width: 160px;
+  min-width: 0;
+}
+
+.block-add--periods .input:not(.block-add__date) {
+  width: 120px;
+  min-width: 0;
+}
+
+.schedule-reason {
+  max-width: 520px;
+}
+
+/* ---------------------------------------------------------------------------
+ * Schedule conflict warning panel (PROMPT 37 — REQ-091/092/093/099/159/160)
+ * ------------------------------------------------------------------------- */
+
+.conflict-panel {
+  border: 1px solid var(--color-warning-border, var(--color-border-strong));
+}
+
+.conflict-list {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.conflict-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.conflict-row__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.conflict-row__when,
+.conflict-row__reason {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.conflict-row__reason {
+  color: var(--color-text);
+  min-width: 0;
+}
+
+.conflict-row__exception {
+  margin-left: auto;
+}
+
+.conflict-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-top: var(--space-2);
+}
+
+.conflict-row__error {
+  margin-top: var(--space-2);
+}
+
+.conflict-inline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-3);
+}
+
+.conflict-inline__note {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.conflict-keep-reason {
+  max-width: 520px;
+}
+
+.reschedule-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-3);
+}
+
+.reschedule-form__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+  max-width: 520px;
+}
+
+/* ---------------------------------------------------------------------------
+ * Schedule history (PROMPT 37 — REQ-162/163/165/166/169)
+ * ------------------------------------------------------------------------- */
+
+.history-list {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.history-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-block: var(--space-3);
+  border-top: 1px solid var(--color-border);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.history-row:first-child {
+  border-top: 0;
+}
+
+.history-row__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.history-row__change {
+  font-size: var(--text-sm);
+  min-width: 0;
+}
+
+.history-row__reason {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  min-width: 0;
+}
+
+.version-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border-strong);
+  font-size: var(--text-xs, 11px);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.version-chip--active {
+  background: var(--color-success-soft, var(--accent-soft));
+  border-color: var(--color-success);
+  color: var(--color-success);
+}
+
+.version-chip--pending {
+  color: var(--color-warning);
+}
+
+.version-chip--superseded {
+  color: var(--color-text-muted);
+}
+
+/* Schedule Exception badge on the booking queue (REQ-160 AC4) */
+.booking-card__exception {
+  font-weight: 700;
+  font-size: var(--text-sm);
+  color: var(--color-warning);
+}
+
+@media (max-width: 760px) {
+  .block-editor {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .reschedule-form__row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .pause-actions__row {
   display: flex;
   gap: var(--space-2);
@@ -1402,4 +2130,244 @@ fieldset.option-group legend {
   .owner-session__public {
     display: none;
   }
+}
+
+/* ---------------------------------------------------------------------------
+ * Customer status lookup (PROMPT 34) — public booking status by phone
+ * ------------------------------------------------------------------------- */
+
+.hero__actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-top: var(--space-4);
+}
+
+.status-page__header {
+  margin-bottom: var(--space-5);
+}
+
+.status-page__form {
+  padding: var(--space-5);
+  max-width: var(--content-max);
+  margin-bottom: var(--space-5);
+}
+
+.status-page__results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.status-page__results:focus {
+  outline: none;
+}
+
+.status-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.status-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.status-card__title {
+  font-size: var(--text-lg);
+  margin-bottom: 0;
+}
+
+.status-card__chips {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.status-card__chips .booking-chip {
+  white-space: nowrap;
+}
+
+.status-card__explanation {
+  color: var(--color-text-muted);
+}
+
+.status-card__details dl {
+  margin: 0;
+}
+
+.status-card__detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-block: var(--space-2);
+  border-top: 1px solid var(--color-border);
+}
+
+.status-card__detail:first-child {
+  border-top: 0;
+}
+
+.status-card__detail dt {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+.status-card__detail dd {
+  margin: 0;
+}
+
+.status-card__services {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Mobile: cards and their content stack cleanly, no page-level overflow */
+@media (max-width: 640px) {
+  .status-card__header {
+    flex-direction: column;
+  }
+
+  .status-card__chips .booking-chip {
+    white-space: normal;
+  }
+}
+
+/* Customer Telegram notification panel (Notification catalog N01–N08) */
+.telegram-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.telegram-panel__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.telegram-panel__head-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.telegram-panel__title {
+  font-size: var(--text-lg);
+  margin-bottom: 0;
+}
+
+.telegram-panel__status {
+  margin: 0;
+}
+
+/* Status is communicated by the text label itself, never by color alone. */
+.telegram-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 700;
+}
+
+.telegram-status::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--color-border-strong);
+}
+
+.telegram-status[data-connected="true"]::before {
+  background: var(--color-success);
+}
+
+.telegram-status[data-connected="false"]::before {
+  background: var(--color-warning);
+}
+
+.telegram-panel__note {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.telegram-panel__inbox {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.telegram-panel__inbox-title {
+  font-size: var(--text-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.telegram-panel__empty {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  margin: 0;
+}
+
+.telegram-notices {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.telegram-notice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-block: var(--space-3);
+  border-top: 1px solid var(--color-border);
+  min-width: 0;
+}
+
+.telegram-notice:first-child {
+  border-top: 0;
+}
+
+.telegram-notice__type {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  margin: 0;
+}
+
+.telegram-notice__message {
+  margin: 0;
+}
+
+.telegram-notice__reason {
+  margin: 0;
+  color: var(--color-danger);
+}
+
+.telegram-notice__meta {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
 }
