@@ -1,4 +1,4 @@
-import type { Money, Service, ServiceSelection, TimeOfDay } from '@/types/models'
+import type { ImageAsset, MapProvider, Money, Service, ServiceSelection, TimeOfDay } from '@/types/models'
 
 export function formatMoney(amount: Money, currency: string): string {
   const birr = amount / 100
@@ -90,4 +90,34 @@ export function prepaymentAmount(config: {
     return Math.ceil((total * percent) / 100)
   }
   return null
+}
+
+/** Deterministic map link built from coordinates and provider (REQ-212). */
+export function mapUrl(lat: number, lng: number, provider: MapProvider): string {
+  const coords = `${lat},${lng}`
+  return provider === 'google'
+    ? `https://www.google.com/maps/search/?api=1&query=${coords}`
+    : `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=16/${lat}/${lng}`
+}
+
+/** Absolute public booking page URL derived from the current slug. */
+export function publicPageUrl(slug: string): string {
+  return `${window.location.origin}/p/${slug}`
+}
+
+/** Tiny inline SVG data-URI placeholder used when no logo or cover is set. */
+export function initialsDataUrl(name: string): string {
+  const parts = name.trim().split(/\s+/)
+  const chars =
+    parts.length > 1
+      ? `${parts[0][0] ?? ''}${parts[parts.length - 1][0] ?? ''}`
+      : parts[0]?.slice(0, 2) ?? ''
+  const label = chars.toUpperCase() || '?'
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128"><rect width="128" height="128" rx="16" fill="%23b4457f"/><text x="64" y="64" dy=".35em" text-anchor="middle" fill="%23fff" font-family="system-ui,sans-serif" font-size="48" font-weight="700">${label}</text></svg>`
+  return `data:image/svg+xml,${svg}`
+}
+
+/** Safe `<img>` src: returns the data-URL when the asset exists, null otherwise. */
+export function imageSrc(asset: ImageAsset | null): string | null {
+  return asset?.dataUrl ?? null
 }

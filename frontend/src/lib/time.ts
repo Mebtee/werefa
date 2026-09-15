@@ -1,4 +1,4 @@
-import type { DateString, TimeOfDay } from '@/types/models'
+import type { DateString, TimeOfDay, Timestamp } from '@/types/models'
 
 /**
  * Date/time helpers.
@@ -49,6 +49,16 @@ export function weekdayLabel(date: DateString): string {
   )
 }
 
+/** Long-ish date label, e.g. "Tue, Sep 16 2026". */
+export function formatDateLong(date: DateString): string {
+  return new Intl.DateTimeFormat('en-US', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }).format(parseDate(date))
+}
+
 export function isPastSlot(date: DateString, time: TimeOfDay): boolean {
   if (!isToday(date)) return false
   const now = new Date()
@@ -67,4 +77,22 @@ export function periodLengthInMinutes(period: {
   end: TimeOfDay
 }): number {
   return minutesOf(period.end) - minutesOf(period.start)
+}
+
+/** The current instant as "HH:MM" in the 24-hour clock. */
+export function timeOfDayNow(date: Date = new Date()): TimeOfDay {
+  const h = String(date.getHours()).padStart(2, '0')
+  const m = String(date.getMinutes()).padStart(2, '0')
+  return `${h}:${m}`
+}
+
+/** The current instant as "YYYY-MM-DDTHH:MM" (minute precision, REQ-226). */
+export function nowTimestamp(date: Date = new Date()): Timestamp {
+  return `${toDateString(date)}T${timeOfDayNow(date)}`
+}
+
+/** Human label for a "YYYY-MM-DDTHH:MM" timestamp, e.g. "Tue, Sep 16 2026 at 11:30". */
+export function formatTimestamp(timestamp: Timestamp): string {
+  const [date, time] = timestamp.split('T')
+  return `${formatDateLong(date)} at ${time}`
 }

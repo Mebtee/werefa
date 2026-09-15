@@ -5,6 +5,25 @@ export interface ValidationResult {
   errors: Partial<Record<keyof CustomerDetails, string>>
 }
 
+/** Phone shape used on both the booking form and the status lookup (REQ-054). */
+export const PHONE_PATTERN = /^\+?[0-9][0-9\s()-]{6,15}$/
+
+export function isValidPhone(phone: string): boolean {
+  return PHONE_PATTERN.test(phone.trim())
+}
+
+/**
+ * Normalizes a phone number for comparison: strip every non-digit character
+ * (spaces, hyphens, parentheses, the leading "+" in international notation).
+ * Formatting differences therefore never prevent a match — two entries whose
+ * digits are identical are considered the same number. This is deliberately
+ * reversible-safe (digits-only) and not an attempt to canonicalize country
+ * codes or leading zeros, which would be guesswork.
+ */
+export function normalizePhoneForMatch(phone: string): string {
+  return phone.replace(/\D/g, '')
+}
+
 /** Very basic non-empty check. The backend is the authoritative validator. */
 export function validateCustomerDetails(
   customer: CustomerDetails,
@@ -21,7 +40,7 @@ export function validateCustomerDetails(
   const phone = customer.phone.trim()
   if (!phone) {
     errors.phone = 'Please enter your phone number. We use it to identify your booking.'
-  } else if (!/^\+?[0-9][0-9\s()-]{6,15}$/.test(phone)) {
+  } else if (!isValidPhone(phone)) {
     errors.phone = 'That phone number does not look valid.'
   }
 
