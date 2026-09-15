@@ -7,8 +7,7 @@ import { computeAvailableTimes, periodsForDate } from '@/mock/availability'
 // results never depend on which day of the week the test suite runs.
 function makeBusiness(overrides: Partial<BusinessDetails> = {}): BusinessDetails {
   return {
-    slug: 'unit-test-business',
-    name: 'Unit Test Shop',
+    slug: 'unit-test-business',    name: 'Unit Test Shop',
     category: 'other',
     tagline: '',
     description: '',
@@ -41,6 +40,9 @@ function makeBusiness(overrides: Partial<BusinessDetails> = {}): BusinessDetails
     paymentInstructions: { methods: [] },
     currency: 'ETB',
     bookingWindowDays: 30,
+    telegramConnected: false,
+    logo: null,
+    coverPhoto: null,
     ...overrides,
   }
 }

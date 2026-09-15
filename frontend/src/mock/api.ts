@@ -2,6 +2,7 @@ import type {
   BookingDraft,
   BusinessDetails,
   BusinessPage,
+  CustomerBookingStatus,
   DateString,
   SubmitResult,
   TimeOfDay,
@@ -12,7 +13,21 @@ import {
   type BookingDate,
 } from '@/mock/availability'
 import { mockRaceSlot } from '@/mock/data'
-import { getBusinessPage as readBusinessPage } from '@/mock/store'
+import {
+  createBookingEntry,
+  getBookingsByPhone,
+  getBusinessPage as readBusinessPage,
+  getOccupiedBlocks,
+  getServices,
+  isCustomerTelegramConnected,
+  setCustomerTelegramConnected,
+} from '@/mock/store'
+import {
+  buildLineItems,
+  prepaymentAmount,
+  totalDurationMinutes,
+  totalPrice,
+} from '@/lib/format'
 
 /**
  * The frontend's data-access seam.
@@ -39,6 +54,25 @@ export interface BookingApi {
     business: BusinessDetails,
     durationMinutes: number,
   ): Promise<SubmitResult>
+  /**
+   * Customer booking status lookup (REQ-109). Scoped to the business and
+   * keyed by a normalized phone number; returns customer-safe projections
+   * that never include the internal Booking ID or status history.
+   */
+  lookupBookingsByPhone(
+    businessSlug: string,
+    phone: string,
+  ): Promise<readonly CustomerBookingStatus[]>
+  /**
+   * Demo-only connect/disconnect of the customer Telegram side-channel for a
+   * business + phone (canonical §18). Mock behavior — no real Telegram
+   * authorization occurs. See store.isCustomerTelegramConnected.
+   */
+  setCustomerTelegramConnected(
+    businessSlug: string,
+    phone: string,
+    connected: boolean,
+  ): Promise<boolean>
 }
 
 function latency(): number {
@@ -63,12 +97,21 @@ export const mockApi: BookingApi = {
 
   async getBookingDates(business, durationMinutes) {
     await delay(latency())
-    return computeBookingDates(business, durationMinutes)
+    return computeBookingDates(
+      business,
+      durationMinutes,
+      (date) => getOccupiedBlocks(business.slug, date),
+    )
   },
 
   async getSlotTimes(business, date, durationMinutes) {
     await delay(latency())
-    return computeAvailableTimes(business, date, durationMinutes)
+    return computeAvailableTimes(
+      business,
+      date,
+      durationMinutes,
+      getOccupiedBlocks(business.slug, date),
+    )
   },
 
   async createBooking(draft, business, durationMinutes) {
@@ -84,16 +127,93 @@ export const mockApi: BookingApi = {
       return { status: 'unavailable' }
     }
 
-    // Re-check against the current schedule (the backend will authoritatively).
-    const times = computeAvailableTimes(business, draft.date, durationMinutes)
+    // Re-check against the current schedule and live bookings (T1 claim).
+    const times = computeAvailableTimes(
+      business,
+      draft.date,
+      durationMinutes,
+      getOccupiedBlocks(business.slug, draft.date),
+    )
     if (!times.includes(draft.time)) {
       return { status: 'unavailable' }
     }
 
-    const prepaid = business.prepayment.mode !== 'none'
+    if (business.prepayment.mode === 'none') {
+      // No prepayment: no payment proof exists to review, so no stored
+      // Payment Pending booking is created in this slice (the business
+      // confirms directly; dashboard booking management covers prepayment).
+      return {
+        status: 'created',
+        disposition: 'pending-confirmation',
+      }
+    }
+
+    if (draft.paymentMethod === null || draft.proof === null) {
+      return { status: 'unavailable' }
+    }
+
+    const services = getServices(business.slug)
+    const lineItems = buildLineItems(services, draft.selections)
+    const total = totalPrice(lineItems)
+    const deposit = prepaymentAmount(business.prepayment, total) ?? 0
+
+    const created = createBookingEntry({
+      businessSlug: business.slug,
+      lineItems: lineItems.map((item) => ({
+        name: item.name,
+        unitPrice: item.unitPrice,
+        durationMinutes: item.durationMinutes,
+      })),
+      total,
+      totalDurationMinutes: totalDurationMinutes(lineItems),
+      deposit,
+      customer: draft.customer,
+      date: draft.date,
+      time: draft.time,
+      paymentMethod: draft.paymentMethod,
+      proof: draft.proof,
+    })
+
+    if (!created.ok) {
+      return { status: 'unavailable' }
+    }
+
     return {
       status: 'created',
-      disposition: prepaid ? 'payment-pending' : 'pending-confirmation',
+      disposition: 'payment-pending',
     }
+  },
+
+  async lookupBookingsByPhone(businessSlug, phone) {
+    await delay(latency())
+    const page = readBusinessPage(businessSlug)
+    if (!page) return []
+    const telegramConnected = isCustomerTelegramConnected(businessSlug, phone)
+    return getBookingsByPhone(businessSlug, phone).map((booking) => ({
+      business: { slug: page.business.slug, name: page.business.name },
+      customerName: booking.customer.name,
+      lineItems: booking.lineItems,
+      date: booking.date,
+      time: booking.time,
+      bookingState: booking.state,
+      paymentState: booking.paymentState,
+      rejectionReason: booking.rejectionReason,
+      createdAt: booking.createdAt,
+      telegramConnected,
+      telegramNotifications: booking.telegramNotices.map((notice) => ({
+        type: notice.type,
+        message: notice.message,
+        date: notice.date,
+        time: notice.time,
+        rejectionReason: notice.rejectionReason,
+        at: notice.createdAt,
+      })),
+    }))
+  },
+
+  async setCustomerTelegramConnected(businessSlug, phone, connected) {
+    await delay(latency())
+    const result = setCustomerTelegramConnected(businessSlug, phone, connected)
+    return result.ok ? result.value : false
   },
 }
