@@ -130,6 +130,7 @@ export function BookingWizard({ business, services }: BookingWizardProps) {
           result={flow.result}
           submitting={flow.submitting}
           customer={flow.customer}
+          businessSlug={business.slug}
           onChooseAnotherTime={() => {
             flow.selectTime(null)
             jumpTo(STEP_DATE_TIME)

@@ -1,4 +1,5 @@
 import type { CustomerDetails, SubmitResult } from '@/types/models'
+import { Link } from 'react-router-dom'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
@@ -7,6 +8,7 @@ interface DoneStepProps {
   result: SubmitResult | null
   submitting: boolean
   customer: CustomerDetails
+  businessSlug: string
   onChooseAnotherTime: () => void
   onChangeServices: () => void
   onRestart: () => void
@@ -17,6 +19,7 @@ export function DoneStep({
   result,
   submitting,
   customer,
+  businessSlug,
   onChooseAnotherTime,
   onChangeServices,
   onRestart,
@@ -66,6 +69,9 @@ export function DoneStep({
           <Button variant="outline" onClick={onRestart}>
             Book another appointment
           </Button>
+          <Link className="btn btn--primary" to={`/p/${businessSlug}/status`}>
+            Check my booking status
+          </Link>
         </nav>
       </>
     )

@@ -335,4 +335,36 @@ describe('date & time step navigation', () => {
       screen.queryByRole('heading', { name: 'Your details', level: 2 }),
     ).not.toBeInTheDocument()
   })
+
+  it('renders Back and Continue together in the step nav', async () => {
+    const { container } = renderPage()
+
+    await screen.findByRole('heading', { name: 'Addis Beauty Lounge' })
+    await reachDateStep(container)
+
+    const nav = container.querySelector('.wizard__nav')
+    if (!nav) throw new Error('step nav missing')
+    const navButtons = within(nav as HTMLElement)
+
+    expect(navButtons.getByRole('button', { name: /^back$/i })).not.toBeDisabled()
+    expect(
+      navButtons.getByRole('button', { name: /^continue$/i }),
+    ).toBeDisabled()
+  })
+
+  it('goes back to the services step from the date & time step', async () => {
+    const { container } = renderPage()
+
+    await screen.findByRole('heading', { name: 'Addis Beauty Lounge' })
+    await reachDateStep(container)
+
+    await user.click(screen.getByRole('button', { name: /^back$/i }))
+
+    expect(
+      await screen.findByRole('heading', {
+        name: 'Choose your services',
+        level: 2,
+      }),
+    ).toBeInTheDocument()
+  })
 })

@@ -1,5 +1,7 @@
 import type { BusinessDetails } from '@/types/models'
+import { Link } from 'react-router-dom'
 import { Alert } from '@/components/ui/Alert'
+import { imageSrc, mapUrl } from '@/lib/format'
 
 const CATEGORY_LABEL: Record<BusinessDetails['category'], string> = {
   'salon-barber': 'Salon & Barber',
@@ -14,20 +16,32 @@ function initialsOf(name: string): string {
   return chars.toUpperCase()
 }
 
-function mapUrl(business: BusinessDetails): string {
-  const coords = `${business.lat},${business.lng}`
-  return business.mapProvider === 'google'
-    ? `https://www.google.com/maps/search/?api=1&query=${coords}`
-    : `https://www.openstreetmap.org/?mlat=${business.lat}&mlon=${business.lng}#map=16/${business.lat}/${business.lng}`
-}
-
 export function BusinessHero({ business }: { business: BusinessDetails }) {
+  const logoSrc = imageSrc(business.logo)
+  const coverSrc = imageSrc(business.coverPhoto)
+
   return (
     <header className="hero">
+      {coverSrc && (
+        <img
+          className="hero__cover"
+          src={coverSrc}
+          alt={business.coverPhoto?.alt ?? `${business.name} cover`}
+        />
+      )}
+
       <div className="container">
         <div className="hero__top">
           <div className="hero__logo" aria-hidden="true">
-            {initialsOf(business.name)}
+            {logoSrc ? (
+              <img
+                className="hero__logo-img"
+                src={logoSrc}
+                alt={business.logo?.alt ?? business.name}
+              />
+            ) : (
+              initialsOf(business.name)
+            )}
           </div>
           <div>
             <span className="badge">{CATEGORY_LABEL[business.category]}</span>
@@ -46,7 +60,7 @@ export function BusinessHero({ business }: { business: BusinessDetails }) {
                 {business.address}
                 {' · '}
                 <a
-                  href={mapUrl(business)}
+                  href={mapUrl(business.lat, business.lng, business.mapProvider)}
                   target="_blank"
                   rel="noreferrer"
                 >
@@ -75,6 +89,12 @@ export function BusinessHero({ business }: { business: BusinessDetails }) {
             </Alert>
           </div>
         )}
+
+        <div className="hero__actions">
+          <Link className="btn btn--outline" to={`/p/${business.slug}/status`}>
+            Check my booking status
+          </Link>
+        </div>
       </div>
     </header>
   )
