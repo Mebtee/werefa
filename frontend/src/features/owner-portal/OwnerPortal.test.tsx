@@ -10,7 +10,7 @@ import {
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { appRoutes } from '@/routes'
-import { resetStore, getBusiness } from '@/mock/store'
+import { resetStore, getBusiness, setPause, listScheduleHistory, getOpenConflicts, createBookingEntry, acceptBooking, getBooking } from '@/mock/store'
 import { computeAvailableTimes } from '@/mock/availability'
 import { PRIMARY_BUSINESS_SLUG } from '@/mock/data'
 
@@ -18,6 +18,30 @@ const user = userEvent.setup()
 
 // A known future Monday (used by the availability fixture).
 const MONDAY = '2030-03-04'
+const TUESDAY = '2030-03-05'
+
+function seedConfirmedBooking(
+  date: string,
+  time: string,
+  name = 'Test Customer',
+): { id: string } {
+  const created = createBookingEntry({
+    businessSlug: PRIMARY_BUSINESS_SLUG,
+    lineItems: [{ name: 'Haircut & blowout', unitPrice: 10000, durationMinutes: 60 }],
+    total: 10000,
+    totalDurationMinutes: 60,
+    deposit: 0,
+    customer: { name, phone: '+251900000001', note: '' },
+    date,
+    time,
+    paymentMethod: 'bank-transfer',
+    proof: { fileName: 'proof.png', sizeBytes: 100, mimeType: 'image/png' },
+  })
+  if (!created.ok) throw new Error('seed booking failed')
+  const accepted = acceptBooking(PRIMARY_BUSINESS_SLUG, created.booking.id)
+  if (!accepted.ok) throw new Error('seed accept failed')
+  return { id: accepted.value.id }
+}
 
 function renderAt(path: string): RenderResult & { router: ReturnType<typeof createMemoryRouter> } {
   const router = createMemoryRouter(appRoutes, { initialEntries: [path] })
@@ -238,6 +262,10 @@ describe('services', () => {
 
     const priceInput = screen.getByLabelText('Price (Birr)')
     const durationInput = screen.getByLabelText('Duration (minutes)')
+    await waitFor(() => {
+      expect(priceInput).not.toHaveValue('')
+      expect(durationInput).not.toHaveValue('')
+    })
     await user.clear(priceInput)
     await user.type(priceInput, '120')
     await user.clear(durationInput)
@@ -382,5 +410,575 @@ describe('pause and resume', () => {
     expect(
       screen.queryByText('We are currently closed to new bookings'),
     ).not.toBeInTheDocument()
+  })
+})
+
+describe('business branding and public preview', () => {
+  function fakeImage(seed = 1): File {
+    const bytes = new Uint8Array(64)
+    for (let i = 0; i < bytes.length; i++) bytes[i] = (i * seed) % 256
+    return new File([bytes], 'image.png', { type: 'image/png' })
+  }
+
+  function pickImage(container: HTMLElement, picker: number, file: File) {
+    const input = container.querySelectorAll<HTMLInputElement>(
+      'input[type="file"]',
+    )[picker]
+    fireEvent.change(input, { target: { files: [file] } })
+  }
+
+  it('uploads a logo and cover photo and the public page renders both', async () => {
+    const { container, router } = renderAt('/owner/business')
+
+    await screen.findByRole('heading', { name: 'Business profile' })
+    await screen.findByRole('heading', { name: 'Branding', level: 2 })
+
+    pickImage(container, 0, fakeImage(1))
+    await user.click(await screen.findByRole('button', { name: 'Keep' }))
+    expect(await screen.findByText(/Branding updated/)).toBeInTheDocument()
+
+    await waitFor(() => {
+      const stored = getBusiness(PRIMARY_BUSINESS_SLUG)!
+      expect(stored.logo?.dataUrl).toMatch(/^data:image\/png;base64/)
+    })
+
+    pickImage(container, 1, fakeImage(2))
+    await user.click(await screen.findByRole('button', { name: 'Keep' }))
+    await waitFor(() => {
+      const stored = getBusiness(PRIMARY_BUSINESS_SLUG)!
+      expect(stored.coverPhoto?.dataUrl).toMatch(/^data:image\/png;base64/)
+    })
+
+    router.navigate('/p/addis-beauty-lounge')
+    await screen.findByRole('heading', { name: 'Addis Beauty Lounge' })
+    const logoImg = container.querySelector('.hero__logo-img') as HTMLImageElement
+    expect(logoImg).not.toBeNull()
+    expect(logoImg.src).toMatch(/^data:image\/png;base64/)
+    const coverImg = container.querySelector('.hero__cover') as HTMLImageElement
+    expect(coverImg).not.toBeNull()
+    expect(coverImg.src).toMatch(/^data:image\/png;base64/)
+  })
+
+  it('keeps exactly one logo: replacing removes the old image (no gallery)', async () => {
+    const { container } = renderAt('/owner/business')
+
+    await screen.findByRole('heading', { name: 'Business profile' })
+
+    pickImage(container, 0, fakeImage(1))
+    await user.click(await screen.findByRole('button', { name: 'Keep' }))
+    await screen.findByText(/Branding updated/)
+
+    const firstDataUrl = getBusiness(PRIMARY_BUSINESS_SLUG)!.logo!.dataUrl
+    expect(firstDataUrl).toBeTruthy()
+    expect(container.querySelectorAll('.image-picker__preview')).toHaveLength(1)
+
+    pickImage(container, 0, fakeImage(2))
+    await user.click(await screen.findByRole('button', { name: 'Keep' }))
+    await waitFor(() => {
+      const stored = getBusiness(PRIMARY_BUSINESS_SLUG)!
+      expect(stored.logo).not.toBeNull()
+      expect(stored.logo!.dataUrl).not.toBe(firstDataUrl)
+    })
+
+    // No gallery surface: a single preview replaces the previous one.
+    expect(container.querySelectorAll('.image-picker__preview')).toHaveLength(1)
+  })
+
+  it('removing the logo falls back to initials on the public page', async () => {
+    const { container, router } = renderAt('/owner/business')
+
+    await screen.findByRole('heading', { name: 'Business profile' })
+
+    pickImage(container, 0, fakeImage(1))
+    await user.click(await screen.findByRole('button', { name: 'Keep' }))
+    await screen.findByText(/Branding updated/)
+
+    await user.click(screen.getByRole('button', { name: 'Remove' }))
+    expect(await screen.findByText(/Branding updated/)).toBeInTheDocument()
+    expect(getBusiness(PRIMARY_BUSINESS_SLUG)!.logo).toBeNull()
+
+    router.navigate('/p/addis-beauty-lounge')
+    await screen.findByRole('heading', { name: 'Addis Beauty Lounge' })
+    expect(container.querySelector('.hero__logo-img')).toBeNull()
+    expect(screen.getByText('AL')).toBeInTheDocument()
+  })
+
+  it('previews the public URL, opens the public page, and shows the map link', async () => {
+    const { router } = renderAt('/owner/business')
+
+    await screen.findByRole('heading', { name: 'Business profile' })
+    expect(screen.getByTestId('public-page-link')).toHaveTextContent(
+      'werefa.app/p/addis-beauty-lounge',
+    )
+    expect(screen.getByTestId('open-public-page')).toHaveAttribute(
+      'href',
+      '/p/addis-beauty-lounge',
+    )
+    expect(screen.getByRole('link', { name: /OpenStreetMap preview/ })).toHaveAttribute(
+      'href',
+      'https://www.openstreetmap.org/?mlat=9.0108&mlon=38.7612#map=16/9.0108/38.7612',
+    )
+
+    router.navigate('/p/addis-beauty-lounge')
+    expect(
+      await screen.findByRole('heading', { name: 'Addis Beauty Lounge' }),
+    ).toBeInTheDocument()
+  })
+
+  it('regenerates the QR mock when the public link changes', async () => {
+    renderAt('/owner/business')
+
+    await screen.findByRole('heading', { name: 'Business profile' })
+    const first = screen
+      .getByRole('img', { name: 'QR code' })
+      .querySelector('g') as SVGElement
+    const firstInner = first.innerHTML
+
+    const slugInput = screen.getByLabelText('Public booking link')
+    await user.clear(slugInput)
+    await user.type(slugInput, 'adie-urban-lounge')
+    await user.click(screen.getByRole('button', { name: 'Save link' }))
+    expect(await screen.findByText('Public link updated.')).toBeInTheDocument()
+
+    await waitFor(() => {
+      const next = screen
+        .getByRole('img', { name: 'QR code' })
+        .querySelector('g') as SVGElement
+      expect(next.innerHTML).not.toBe(firstInner)
+    })
+    expect(screen.getByTestId('public-page-link')).toHaveTextContent(
+      'werefa.app/p/adie-urban-lounge',
+    )
+  })
+
+  it('serves the same public page regardless of which owner owns it; another business is untouched', async () => {
+    const { container, router } = renderAt('/owner/business')
+
+    await screen.findByRole('heading', { name: 'Business profile' })
+    pickImage(container, 0, fakeImage(3))
+    await user.click(await screen.findByRole('button', { name: 'Keep' }))
+    await screen.findByText(/Branding updated/)
+
+    const business = getBusiness(PRIMARY_BUSINESS_SLUG)!
+    expect(business.logo).not.toBeNull()
+
+    const others = [getBusiness('marathon-auto-care')!, getBusiness('riverside-dry-cleaning')!]
+    for (const other of others) expect(other.logo).toBeNull()
+
+    router.navigate('/p/riverside-dry-cleaning')
+    await screen.findByRole('heading', { name: 'Riverside Dry Cleaning' })
+    expect(container.querySelector('.hero__logo-img')).toBeNull()
+  })
+
+  it('lets the owner pause bookings from the business profile page', async () => {
+    const { router } = renderAt('/owner/business')
+
+    await screen.findByRole('heading', { name: 'Business profile' })
+    await user.click(screen.getByRole('button', { name: 'Pause bookings' }))
+
+    await user.click(screen.getByRole('radio', { name: /until a chosen date/i }))
+    fireEvent.change(screen.getByLabelText('Reopen date'), {
+      target: { value: '2030-07-01' },
+    })
+    await user.click(screen.getByRole('button', { name: 'Save pause' }))
+    await user.click(
+      await screen.findByRole('button', { name: 'Yes, pause bookings' }),
+    )
+    expect(
+      await screen.findByText('Bookings are paused on your public page.'),
+    ).toBeInTheDocument()
+
+    router.navigate('/p/addis-beauty-lounge')
+    expect(
+      await screen.findByText('We are currently closed to new bookings'),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Book now' })).not.toBeInTheDocument()
+  })
+})
+
+describe('schedule editor: blocked days & periods (REQ-084/085)', () => {
+  it('blocks a whole day through the editor and saves it', async () => {
+    renderAt('/owner/schedule')
+    await screen.findByRole('heading', { name: 'Working hours' })
+
+    fireEvent.change(screen.getByLabelText('Blocked day date'), {
+      target: { value: MONDAY },
+    })
+    await user.click(screen.getByRole('button', { name: 'Add blocked day' }))
+    expect(screen.getByText('Closed all day — 2030-03-04')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Save schedule' }))
+    expect(await screen.findByText(/Schedule saved\./)).toBeInTheDocument()
+
+    const business = getBusiness(PRIMARY_BUSINESS_SLUG)!
+    expect(business.blockedDays).toContain(MONDAY)
+    expect(computeAvailableTimes(business, MONDAY, 30)).toEqual([])
+  })
+
+  it('adds and removes a blocked period; only a saved one reaches the store', async () => {
+    renderAt('/owner/schedule')
+    await screen.findByRole('heading', { name: 'Working hours' })
+
+    fireEvent.change(screen.getByLabelText('Blocked period date'), {
+      target: { value: MONDAY },
+    })
+    fireEvent.change(screen.getByLabelText('Blocked period start'), {
+      target: { value: '09:30' },
+    })
+    fireEvent.change(screen.getByLabelText('Blocked period end'), {
+      target: { value: '10:30' },
+    })
+    await user.click(screen.getByRole('button', { name: 'Add blocked period' }))
+    expect(
+      screen.getByText(/Blocked 09:30.*10:30 on 2030-03-04/),
+    ).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Save schedule' }))
+    expect(await screen.findByText(/Schedule saved\./)).toBeInTheDocument()
+    expect(
+      getBusiness(PRIMARY_BUSINESS_SLUG)!.blockedPeriods,
+    ).toContainEqual({ date: MONDAY, start: '09:30', end: '10:30' })
+
+    await user.click(
+      screen.getByRole('button', { name: `Remove blocked period on ${MONDAY}` }),
+    )
+    expect(screen.queryByText(/Blocked 09:30.*10:30 on 2030-03-04/)).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Save schedule' }))
+    expect(await screen.findByText(/Schedule saved\./)).toBeInTheDocument()
+    expect(
+      getBusiness(PRIMARY_BUSINESS_SLUG)!.blockedPeriods,
+    ).not.toContainEqual({ date: MONDAY, start: '09:30', end: '10:30' })
+  })
+
+  it('rejects overlapping weekly periods with a focused error', async () => {
+    renderAt('/owner/schedule')
+    await screen.findByRole('heading', { name: 'Working hours' })
+
+    const monday = screen
+      .getByText('Monday')
+      .closest('.hours-day') as HTMLElement
+    await user.click(within(monday).getByRole('button', { name: 'Add period' }))
+    // Default 09:00–13:00 plus added 09:00–12:00 overlap.
+    await user.click(screen.getByRole('button', { name: 'Save schedule' }))
+    expect(
+      await screen.findByText('Working periods must not overlap.'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Schedule saved\./)).not.toBeInTheDocument()
+  })
+})
+
+describe('schedule editor: multi-period special days (REQ-083/PHC-002)', () => {
+  it('saves a special day with two periods the public page offers', async () => {
+    renderAt('/owner/schedule')
+    await screen.findByRole('heading', { name: 'Working hours' })
+
+    await user.click(screen.getByRole('button', { name: 'Add special date' }))
+    const empty = screen
+      .getAllByLabelText(/^Special date \d+$/)
+      .find((input) => (input as HTMLInputElement).value === '') as HTMLInputElement
+    const index = ((empty.getAttribute('aria-label') as string).match(/\d+/) as string[])[0]
+    fireEvent.change(empty, { target: { value: MONDAY } })
+
+    const specialRow = screen
+      .getByLabelText(`Special date ${index}`)
+      .closest('.special-day') as HTMLElement
+    await user.click(within(specialRow).getByRole('button', { name: 'Add period' }))
+    await user.click(within(specialRow).getByRole('button', { name: 'Add period' }))
+
+    fireEvent.change(
+      screen.getByLabelText(`Special date ${index} period 1 start`),
+      { target: { value: '08:00' } },
+    )
+    fireEvent.change(
+      screen.getByLabelText(`Special date ${index} period 1 end`),
+      { target: { value: '10:00' } },
+    )
+    fireEvent.change(
+      screen.getByLabelText(`Special date ${index} period 2 start`),
+      { target: { value: '15:00' } },
+    )
+    fireEvent.change(
+      screen.getByLabelText(`Special date ${index} period 2 end`),
+      { target: { value: '16:00' } },
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Save schedule' }))
+    expect(await screen.findByText(/Schedule saved\./)).toBeInTheDocument()
+
+    const business = getBusiness(PRIMARY_BUSINESS_SLUG)!
+    expect(business.specialDays[MONDAY]).toEqual({
+      kind: 'hours',
+      periods: [
+        { start: '08:00', end: '10:00' },
+        { start: '15:00', end: '16:00' },
+      ],
+    })
+    const times = computeAvailableTimes(business, MONDAY, 60)
+    expect(times).toContain('08:00')
+    expect(times).toContain('15:00')
+    expect(times).not.toContain('10:00')
+  })
+})
+
+describe('schedule history + reason (REQ-162/163/164/166/169)', () => {
+  it('records a version without a reason and shows no reason line', async () => {
+    renderAt('/owner/schedule')
+    await screen.findByRole('heading', { name: 'Working hours' })
+    await user.click(screen.getByRole('button', { name: 'Save schedule' }))
+    expect(await screen.findByText(/Schedule saved\./)).toBeInTheDocument()
+
+    const history = listScheduleHistory(PRIMARY_BUSINESS_SLUG)
+    expect(history).toHaveLength(1)
+    expect(history[0].reason).toBeNull()
+    expect(screen.getByText('Schedule history')).toBeInTheDocument()
+    expect(await screen.findByText('Initial schedule.')).toBeInTheDocument()
+    expect(screen.queryByText(/Reason:/)).not.toBeInTheDocument()
+  })
+
+  it('shows the owner reason and newest-first status on the history card', async () => {
+    const { router } = renderAt('/owner/schedule')
+    await screen.findByRole('heading', { name: 'Working hours' })
+
+    await user.type(
+      screen.getByLabelText('Reason (optional)'),
+      'Q3 opening hours',
+    )
+    await user.click(screen.getByRole('button', { name: 'Save schedule' }))
+    expect(await screen.findByText(/Schedule saved\./)).toBeInTheDocument()
+
+    const monday = screen
+      .getByText('Monday')
+      .closest('.hours-day') as HTMLElement
+    fireEvent.change(within(monday).getByLabelText('Monday period 2 end'), {
+      target: { value: '17:00' },
+    })
+    await user.type(
+      screen.getByLabelText('Reason (optional)'),
+      'Evening slots for students',
+    )
+    await user.click(screen.getByRole('button', { name: 'Save schedule' }))
+    expect(await screen.findByText(/Schedule saved\./)).toBeInTheDocument()
+
+    const history = listScheduleHistory(PRIMARY_BUSINESS_SLUG)
+    expect(history).toHaveLength(2)
+    expect(history[0].reason).toBe('Evening slots for students')
+
+    const list = screen.getByText('Schedule history').closest('section')!
+    await within(list).findByText(/Weekly hours changed\./)
+    const chips = within(list).getAllByText(
+      /^(Active|Superseded|Pending)$/,
+    )
+    expect(chips[0]).toHaveTextContent('Active')
+    expect(chips[1]).toHaveTextContent('Superseded')
+    expect(
+      within(list).getByText(/Reason:.*Evening slots for students/),
+    ).toBeInTheDocument()
+    expect(
+      within(list).getByText(/Reason:.*Q3 opening hours/),
+    ).toBeInTheDocument()
+    expect(within(list).getByText(/Weekly hours changed\./)).toBeInTheDocument()
+
+    router.navigate('/owner/business')
+    expect(
+      await screen.findByRole('heading', { name: 'Business profile' }),
+    ).toBeInTheDocument()
+  })
+})
+
+describe('saving while paused (REQ-147/150)', () => {
+  it('warns and stores the save as a pending version, activated on resume', async () => {
+    setPause(PRIMARY_BUSINESS_SLUG, { kind: 'indefinite', message: 'Holiday' })
+    renderAt('/owner/schedule')
+    await screen.findByRole('heading', { name: 'Working hours' })
+
+    expect(
+      screen.getByText('Changes you save here are recorded as a pending schedule and apply when you resume bookings.'),
+    ).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Booking interval'), {
+      target: { value: '45' },
+    })
+    await user.click(screen.getByRole('button', { name: 'Save schedule' }))
+    expect(
+      await screen.findByText(/Schedule saved and recorded as pending/),
+    ).toBeInTheDocument()
+
+    const history = listScheduleHistory(PRIMARY_BUSINESS_SLUG)
+    expect(history[0].status).toBe('pending')
+    expect(history[0].snapshot.bookingIntervalMinutes).toBe(45)
+    expect(getOpenConflicts(PRIMARY_BUSINESS_SLUG)).toEqual([])
+
+    setPause(PRIMARY_BUSINESS_SLUG, null)
+    const after = listScheduleHistory(PRIMARY_BUSINESS_SLUG)
+    expect(after[0].automatic).toBe(true)
+    expect(after[0].status).toBe('active')
+    expect(
+      getBusiness(PRIMARY_BUSINESS_SLUG)!.bookingIntervalMinutes,
+    ).toBe(45)
+  })
+})
+
+describe('schedule conflicts (REQ-091/092/093/099/159/160)', () => {
+  it('warns about a future booking made impossible by closing its day', async () => {
+    seedConfirmedBooking(MONDAY, '10:00')
+    renderAt('/owner/schedule')
+    await screen.findByRole('heading', { name: 'Working hours' })
+
+    const monday = screen
+      .getByText('Monday')
+      .closest('.hours-day') as HTMLElement
+    await user.click(within(monday).getByRole('button', { name: 'Open' }))
+    await user.click(screen.getByRole('button', { name: 'Save schedule' }))
+    expect(await screen.findByText(/Schedule saved\./)).toBeInTheDocument()
+
+    const panel = (await screen.findByRole('heading', { name: 'Affected bookings' }))
+      .closest('section') as HTMLElement
+    expect(await within(panel).findByText('Test Customer')).toBeInTheDocument()
+    expect(
+      within(panel).getByText('The business is closed on 2030-03-04.'),
+    ).toBeInTheDocument()
+    expect(
+      within(panel).getByText(/existing booking/),
+    ).toBeInTheDocument()
+  })
+
+  it('resolving via Cancel releases the booking and clears the panel', async () => {
+    seedConfirmedBooking(MONDAY, '10:00')
+    const { router } = renderAt('/owner/schedule')
+    await screen.findByRole('heading', { name: 'Working hours' })
+    const monday = screen
+      .getByText('Monday')
+      .closest('.hours-day') as HTMLElement
+    await user.click(within(monday).getByRole('button', { name: 'Open' }))
+    await user.click(screen.getByRole('button', { name: 'Save schedule' }))
+    expect(await screen.findByText(/Schedule saved\./)).toBeInTheDocument()
+
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }))
+    expect(
+      screen.getByText(/Cancel this booking\?/),
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Confirm cancellation' }))
+
+    await waitFor(() =>
+      expect(getOpenConflicts(PRIMARY_BUSINESS_SLUG)).toEqual([]),
+    )
+    await waitFor(() => {
+      expect(screen.queryByText('Affected bookings')).not.toBeInTheDocument()
+    })
+
+    router.navigate('/owner/bookings')
+    const card = (await screen.findByText('Test Customer'))
+      .closest('.booking-card') as HTMLElement
+    expect(within(card).getByText('Cancelled')).toBeInTheDocument()
+  })
+
+  it('Keep Booking records a Schedule Exception visible on the booking', async () => {
+    const { id } = seedConfirmedBooking(MONDAY, '10:00')
+    const { router } = renderAt('/owner/schedule')
+    await screen.findByRole('heading', { name: 'Working hours' })
+    const monday = screen
+      .getByText('Monday')
+      .closest('.hours-day') as HTMLElement
+    await user.click(within(monday).getByRole('button', { name: 'Open' }))
+    await user.click(screen.getByRole('button', { name: 'Save schedule' }))
+    expect(await screen.findByText(/Schedule saved\./)).toBeInTheDocument()
+
+    await user.click(await screen.findByRole('button', { name: 'Keep Booking' }))
+    await user.type(
+      screen.getByLabelText('Reason / details (optional)'),
+      'Confirmed by phone.',
+    )
+    await user.click(screen.getByRole('button', { name: 'Keep this booking' }))
+
+    await waitFor(() =>
+      expect(getOpenConflicts(PRIMARY_BUSINESS_SLUG)).toEqual([]),
+    )
+    await waitFor(() => {
+      expect(screen.queryByText('Affected bookings')).not.toBeInTheDocument()
+    })
+
+    router.navigate('/owner/bookings')
+    const card = await screen
+      .findByText('Test Customer')
+      .then((node) => node.closest('.booking-card') as HTMLElement)
+    expect(within(card).getByText('Schedule Exception')).toBeInTheDocument()
+
+    router.navigate(`/owner/bookings/${id}`)
+    expect(
+      await screen.findByRole('heading', { name: 'Schedule Exception' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Confirmed by phone.')).toBeInTheDocument()
+  })
+
+  it('Reschedule moves the affected booking to a free slot and clears the conflict', async () => {
+    const { id: bookingId } = seedConfirmedBooking(MONDAY, '10:00')
+    const { router } = renderAt('/owner/schedule')
+    await screen.findByRole('heading', { name: 'Working hours' })
+    const monday = screen
+      .getByText('Monday')
+      .closest('.hours-day') as HTMLElement
+    await user.click(within(monday).getByRole('button', { name: 'Open' }))
+    await user.click(screen.getByRole('button', { name: 'Save schedule' }))
+    expect(await screen.findByText(/Schedule saved\./)).toBeInTheDocument()
+
+    await user.click(await screen.findByRole('button', { name: 'Reschedule' }))
+    fireEvent.change(screen.getByLabelText('New date'), {
+      target: { value: TUESDAY },
+    })
+
+    const timeSelect = (await screen.findByLabelText('New time')) as HTMLSelectElement
+    await waitFor(() => {
+      expect(Array.from(timeSelect.options).some((o) => o.value === '14:00')).toBe(true)
+    })
+    fireEvent.change(timeSelect, { target: { value: '14:00' } })
+    await user.click(screen.getByRole('button', { name: 'Confirm reschedule' }))
+
+    await waitFor(() =>
+      expect(getOpenConflicts(PRIMARY_BUSINESS_SLUG)).toEqual([]),
+    )
+    await waitFor(() => {
+      expect(screen.queryByText('Affected bookings')).not.toBeInTheDocument()
+    })
+
+    router.navigate(`/owner/bookings/${bookingId}`)
+    expect(
+      await screen.findByText(/at 14:00/),
+    ).toBeInTheDocument()
+  })
+
+  it('exceptions are attributed to the schedule version that caused the conflict and are not re-flagged later', async () => {
+    const { id } = seedConfirmedBooking(MONDAY, '10:00')
+    renderAt('/owner/schedule')
+    await screen.findByRole('heading', { name: 'Working hours' })
+    const monday = screen
+      .getByText('Monday')
+      .closest('.hours-day') as HTMLElement
+    await user.click(within(monday).getByRole('button', { name: 'Open' }))
+    await user.click(screen.getByRole('button', { name: 'Save schedule' }))
+    expect(await screen.findByText(/Schedule saved\./)).toBeInTheDocument()
+
+    await user.click(await screen.findByRole('button', { name: 'Keep Booking' }))
+    await user.click(screen.getByRole('button', { name: 'Keep this booking' }))
+    await waitFor(() =>
+      expect(getOpenConflicts(PRIMARY_BUSINESS_SLUG)).toEqual([]),
+    )
+
+    const booking = getBooking(PRIMARY_BUSINESS_SLUG, id)!
+    const version = listScheduleHistory(PRIMARY_BUSINESS_SLUG).find(
+      (v) => v.status === 'active',
+    )
+    expect(version).toBeDefined()
+    expect(booking.scheduleException).not.toBeNull()
+    expect(booking.scheduleException!.scheduleVersionId).toBe(version!.id)
+
+    // Closing a different (demo-free) day afterwards does not re-flag the kept
+    // Monday booking.
+    const saturday = screen
+      .getByText('Saturday')
+      .closest('.hours-day') as HTMLElement
+    await user.click(within(saturday).getByRole('button', { name: 'Open' }))
+    await user.click(screen.getByRole('button', { name: 'Save schedule' }))
+    expect(await screen.findByText(/Schedule saved\./)).toBeInTheDocument()
+    expect(getOpenConflicts(PRIMARY_BUSINESS_SLUG)).toEqual([])
   })
 })

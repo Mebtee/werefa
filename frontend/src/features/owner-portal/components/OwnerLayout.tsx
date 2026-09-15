@@ -4,6 +4,7 @@ import { ownerSession } from '@/mock/ownerSession'
 
 const NAV_ITEMS = [
   { to: '/owner', label: 'Dashboard', end: true },
+  { to: '/owner/bookings', label: 'Bookings', end: false },
   { to: '/owner/business', label: 'Business', end: false },
   { to: '/owner/services', label: 'Services', end: false },
   { to: '/owner/schedule', label: 'Schedule', end: false },

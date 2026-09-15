@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import type { BusinessCategory, MapProvider } from '@/types/models'
 import { useOwnedBusiness } from '@/features/owner-portal/state/useOwnedBusiness'
 import { LoadState } from '@/features/owner-portal/components/LoadState'
+import { ImagePicker } from '@/features/owner-portal/components/ImagePicker'
+import { MockQrCode } from '@/features/owner-portal/components/MockQrCode'
+import { PauseCard } from '@/features/owner-portal/components/PauseCard'
 import { CATEGORY_LABEL } from '@/features/owner-portal/lib/labels'
-import { mockOwnerApi } from '@/mock/ownerApi'
+import { mockOwnerApi, type BrandingPatch } from '@/mock/ownerApi'
 import { validatePublicSlug } from '@/mock/store'
+import { mapUrl } from '@/lib/format'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { Field } from '@/components/ui/Field'
@@ -77,6 +82,30 @@ export function BusinessProfilePage() {
   const [slugError, setSlugError] = useState<string | null>(null)
   const [slugSuccess, setSlugSuccess] = useState(false)
   const [savingSlug, setSavingSlug] = useState(false)
+
+  // Branding (logo / cover photo)
+  const [brandingBusy, setBrandingBusy] = useState(false)
+  const [brandingError, setBrandingError] = useState<string | null>(null)
+  const [brandingSuccess, setBrandingSuccess] = useState(false)
+
+  const saveBranding = async (patch: BrandingPatch) => {
+    setBrandingBusy(true)
+    setBrandingError(null)
+    setBrandingSuccess(false)
+    try {
+      const result = await mockOwnerApi.saveBranding(patch)
+      if (!result.ok) {
+        setBrandingError(result.error)
+        return
+      }
+      setBrandingSuccess(true)
+      await reload()
+    } catch {
+      setBrandingError('Could not save the image. Please try again.')
+    } finally {
+      setBrandingBusy(false)
+    }
+  }
 
   useEffect(() => {
     if (initialized.current || !business) return
@@ -427,6 +456,46 @@ export function BusinessProfilePage() {
       <section className="card card--padded" style={{ marginTop: 'var(--space-4)' }}>
         <div className="card__header">
           <div>
+            <h2 className="card__title">Branding</h2>
+            <p className="card__subtitle">
+              Your logo and one cover photo are shown on the public page. Image
+              files are stored as inline previews in this demo.
+            </p>
+          </div>
+        </div>
+
+        {brandingError && (
+          <div style={{ marginBottom: 'var(--space-4)' }}>
+            <Alert tone="danger">{brandingError}</Alert>
+          </div>
+        )}
+        {brandingSuccess && (
+          <div style={{ marginBottom: 'var(--space-4)' }}>
+            <Alert tone="success" live="polite">
+              Branding updated. Your public page is up to date.
+            </Alert>
+          </div>
+        )}
+
+        <div className="branding-section__pair">
+          <ImagePicker
+            current={business.logo}
+            onSaved={(asset) => void saveBranding({ logo: asset })}
+            label="Logo"
+            busy={brandingBusy}
+          />
+          <ImagePicker
+            current={business.coverPhoto}
+            onSaved={(asset) => void saveBranding({ coverPhoto: asset })}
+            label="Cover photo"
+            busy={brandingBusy}
+          />
+        </div>
+      </section>
+
+      <section className="card card--padded" style={{ marginTop: 'var(--space-4)' }}>
+        <div className="card__header">
+          <div>
             <h2 className="card__title">Public booking link</h2>
             <p className="card__subtitle">
               Exactly one link per business (REQ-007). Customers book at{' '}
@@ -471,7 +540,48 @@ export function BusinessProfilePage() {
             Save link
           </Button>
         </div>
+
+        <div className="public-url-card" style={{ marginTop: 'var(--space-4)' }}>
+          <div className="public-url-card__row">
+            <span className="public-url-card__link" data-testid="public-page-link">
+              werefa.app/p/{business.slug}
+            </span>
+            <Link
+              className="btn btn--outline btn--sm"
+              to={`/p/${business.slug}`}
+              data-testid="open-public-page"
+            >
+              Open public page
+            </Link>
+          </div>
+
+          <p className="map-link">
+            Location link:{' '}
+            <a
+              href={mapUrl(business.lat, business.lng, business.mapProvider)}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {business.mapProvider === 'google'
+                ? 'Google Maps'
+                : 'OpenStreetMap'}{' '}
+              preview
+            </a>
+          </p>
+
+          <div className="public-url-card__qr">
+            <MockQrCode slug={business.slug} className="qr-svg" />
+            <p className="public-url-card__qr-hint">
+              QR code mock — encodes this link; updates if the link changes.
+              A real QR encoder is added at integration time.
+            </p>
+          </div>
+        </div>
       </section>
+
+      <div style={{ marginTop: 'var(--space-4)' }}>
+        <PauseCard business={business} onChanged={reload} />
+      </div>
     </>
   )
 }

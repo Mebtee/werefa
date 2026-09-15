@@ -1,4 +1,9 @@
-import type { BusinessCategory } from '@/types/models'
+import type {
+  BookingState,
+  BusinessCategory,
+  CustomerNotificationType,
+  PaymentState,
+} from '@/types/models'
 
 export const CATEGORY_LABEL: Record<BusinessCategory, string> = {
   'salon-barber': 'Salon & Barber',
@@ -14,3 +19,49 @@ export const WEEKDAY_NAMES = [
   'Friday',
   'Saturday',
 ] as const
+
+/** User-facing labels for the booking state machine (REQ-101). */
+export const BOOKING_STATE_LABEL: Record<BookingState, string> = {
+  'payment-pending': 'Payment Pending',
+  confirmed: 'Confirmed',
+  completed: 'Completed',
+  'no-show': 'No Show',
+  cancelled: 'Cancelled',
+  rejected: 'Rejected',
+}
+
+/** Payment status labels — exactly Pending, Accepted, Rejected (REQ-100). */
+export const PAYMENT_STATE_LABEL: Record<PaymentState, string> = {
+  pending: 'Pending',
+  accepted: 'Accepted',
+  rejected: 'Rejected',
+}
+
+/** Chip tone per booking state, so a confirming review reads at a glance. */
+export const BOOKING_STATE_CHIP: Record<BookingState, string> = {
+  'payment-pending': 'booking-chip--active',
+  confirmed: 'booking-chip--confirmed',
+  completed: 'booking-chip--completed',
+  'no-show': 'booking-chip--rejected',
+  cancelled: 'booking-chip--rejected',
+  rejected: 'booking-chip--rejected',
+}
+
+/** Chip tone per payment status (REQ-100). */
+export const PAYMENT_STATE_CHIP: Record<PaymentState, string> = {
+  pending: 'booking-chip--active',
+  accepted: 'booking-chip--confirmed',
+  rejected: 'booking-chip--rejected',
+}
+
+/** User-facing labels for the customer Telegram notification catalog (N01–N08). */
+export const TELEGRAM_NOTICE_LABEL: Record<CustomerNotificationType, string> = {
+  'payment-proof-received': 'Payment proof received',
+  'booking-confirmed': 'Booking confirmed',
+  'payment-rejected': 'Payment rejected',
+  'reminder-24h': '24-hour reminder',
+  'reminder-1h': '1-hour reminder',
+  'no-show': 'No Show',
+  cancelled: 'Cancelled',
+  reschedule: 'Reschedule',
+}
