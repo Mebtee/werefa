@@ -17,7 +17,7 @@ if (!url) {
 
 // --fileParallelism=false: the DB-gated specs share one werefa_test database;
 // running them in parallel workers would race each other's reset/insert loops.
-const result = spawnSync('npx vitest run src/database src/domain --fileParallelism=false', {
+const result = spawnSync('npx vitest run src/database src/domain src/api --fileParallelism=false', {
   shell: true,
   stdio: 'inherit',
   cwd: process.cwd(),

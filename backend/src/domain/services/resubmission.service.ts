@@ -81,6 +81,41 @@ export class ResubmissionService {
     return { verificationId: verification.id, expiresAt };
   }
 
+  /**
+   * Customer-scoped code request (Prompt 42 §15, REQ-109 end).
+   *
+   * Customers carry NO booking reference (REQ-109); the target booking is the
+   * most recent booking for the given phone whose disposition is "rejected",
+   * so the code is unambiguous without leaking an internal booking id.
+   */
+  async requestCodeForCustomer(input: { businessSlug: string; phone: string }): Promise<{ verificationId: string; expiresAt: Date }> {
+    const biz = await this.businessRepo.findBySlug(input.businessSlug);
+    if (!biz) throw domainErrors.businessNotFound();
+    const booking = await this.latestRejected(biz.id, input.phone);
+    return this.requestCode({ businessSlug: input.businessSlug, phone: input.phone, bookingId: booking.id });
+  }
+
+  async resubmitForCustomer(
+    input: { businessSlug: string; phone: string; code: string; submissionKey: string },
+  ): Promise<{ booking: BookingWithRelations; events: BookingNotificationEvent[] }> {
+    const biz = await this.businessRepo.findBySlug(input.businessSlug);
+    if (!biz) throw domainErrors.businessNotFound();
+    return this.resubmit({
+      businessSlug: input.businessSlug,
+      phone: input.phone,
+      bookingId: (await this.latestRejected(biz.id, input.phone)).id,
+      code: input.code,
+      submissionKey: input.submissionKey,
+    });
+  }
+
+  private async latestRejected(businessId: string, phone: string): Promise<BookingWithRelations> {
+    const list = await this.bookingRepo.findByPhone(businessId, phone, { statusIn: ['REJECTED'], limit: 1 });
+    const booking = list[0];
+    if (!booking) throw domainErrors.businessNotFound('Booking not found.');
+    return booking;
+  }
+
   async resubmit(
     input: { businessSlug: string; phone: string; bookingId: number; code: string; submissionKey: string },
   ): Promise<{ booking: BookingWithRelations; events: BookingNotificationEvent[] }> {

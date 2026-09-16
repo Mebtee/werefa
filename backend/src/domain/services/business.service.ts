@@ -182,6 +182,33 @@ export class BusinessService {
     return this.businessRepo.listByOwner(ctx.actorUserId);
   }
 
+  /** Public profile composition (business + settings) for the public page. */
+  async getPublicProfile(slug: string) {
+    const business = await this.businessRepo.findBySlug(slug);
+    if (!business) return null;
+    const settings = await this.businessRepo.getSettings(business.id);
+    return { business, settings };
+  }
+
+  /** Owner profile composition (business + settings) for owner management. */
+  async getOwnedProfile(ctx: ActorContext, businessId: string) {
+    const business = await this.tenantGuard.requireOwnedBusiness(ctx, businessId);
+    const settings = await this.businessRepo.getSettings(businessId);
+    return { business, settings };
+  }
+
+  /** Owner businesses + settings for the owner dashboard list. */
+  async listOwnedWithSettings(ctx: ActorContext): Promise<Array<{ business: BusinessWithOwner; settings: import('@prisma/client').BusinessSettings | null }>> {
+    const businesses = await this.listByOwner(ctx);
+    const withSettings = await Promise.all(
+      businesses.map(async (business) => ({
+        business,
+        settings: await this.businessRepo.getSettings(business.id),
+      })),
+    );
+    return withSettings;
+  }
+
   private async promoteLatestPending(
     tx: import('@prisma/client').Prisma.TransactionClient,
     businessId: string,

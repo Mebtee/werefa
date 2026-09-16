@@ -57,6 +57,21 @@ export interface BookingWithRelations extends Booking {
   } | null;
 }
 
+export interface BookingStatusHistoryRow {
+  id: string;
+  fromStatus: BookingState | null;
+  toStatus: BookingState;
+  actorType: ActorType;
+  actorUserId: string | null;
+  reason: string | null;
+  occurredAt: Date;
+}
+
+export interface BookingWithHistory extends BookingWithRelations {
+  statusHistory: BookingStatusHistoryRow[];
+  proofsSubmittedAt: Date[];
+}
+
 export interface OverlapCheck {
   businessId: string;
   startAt: Date;
@@ -98,8 +113,10 @@ export interface BookingRepository {
   ): Promise<BookingWithRelations[]>;
   listByBusiness(
     businessId: string,
-    opts?: { statusIn?: BookingState[]; after?: Date; before?: Date; limit?: number },
+    opts?: { statusIn?: BookingState[]; after?: Date; before?: Date; search?: string; order?: 'asc' | 'desc'; limit?: number },
   ): Promise<BookingWithRelations[]>;
+  /** Booking + components + payment + statusHistory + proof submission timestamps (owner detail). */
+  findByIdWithHistory(businessId: string, id: number): Promise<BookingWithHistory | null>;
   listDueForCompletion(businessId: string, upTo: Date, limit?: number): Promise<Booking[]>;
   hasServiceFutureBookings(businessId: string, serviceId: string): Promise<boolean>;
   hasActiveOverlap(tx: Prisma.TransactionClient, check: OverlapCheck): Promise<boolean>;

@@ -19,6 +19,7 @@ import { PRISMA_CLIENT } from '../../config/config.constants';
 import { withBusinessAdvisoryLock } from '../transactions/business-advisory-lock';
 import { CatalogService } from './catalog.service';
 import { AvailabilityService } from './availability.service';
+import { BookingWithHistory } from '../repositories/booking.repository.port';
 
 /**
  * Booking creation service (Prompt 41 §9; REQ-050/051/054/055/100/101/109/121).
@@ -59,6 +60,7 @@ export class BookingService {
       note?: string;
       startAt: Date;
       submissionKey: string;
+      paymentMethod?: 'BANK_TRANSFER' | 'TELEBIRR_MOBILE_MONEY';
     },
   ): Promise<{ booking: BookingWithRelations; events: NotificationResult }> {
     const biz = await this.businessRepo.findBySlug(input.businessSlug);
@@ -116,7 +118,7 @@ export class BookingService {
           endAt,
           slotDate: this.clock.slotDate(startAt),
           submissionKey: input.submissionKey,
-          paymentMethod: 'BANK_TRANSFER',
+          paymentMethod: input.paymentMethod ?? 'BANK_TRANSFER',
           prepaidMinor: prepaid,
           components,
         });
@@ -283,6 +285,22 @@ export class BookingService {
         await this.bookingRepo.releaseSlotLock(tx, { businessId, bookingId, releasedBy: ctx.actorUserId ?? 'system' });
       });
     });
+  }
+
+  async listForOwner(
+    ctx: ActorContext,
+    businessId: string,
+    opts: { statusIn?: import('@prisma/client').BookingState[]; after?: Date; before?: Date; search?: string; limit?: number } = {},
+  ) {
+    await this.tenantGuard.requireOwnedBusiness(ctx, businessId);
+    return this.bookingRepo.listByBusiness(businessId, { ...opts, order: 'desc' });
+  }
+
+  async getForOwner(ctx: ActorContext, businessId: string, bookingId: number): Promise<BookingWithHistory> {
+    await this.tenantGuard.requireOwnedBusiness(ctx, businessId);
+    const booking = await this.bookingRepo.findByIdWithHistory(businessId, bookingId);
+    if (!booking) throw domainErrors.businessNotFound('Booking not found.');
+    return booking;
   }
 
   async reschedule(

@@ -30,7 +30,7 @@ export interface BusinessRepository {
   createForOwner(tx: Prisma.TransactionClient, args: CreateBusinessArgs): Promise<Business>;
   findBySlug(slug: string): Promise<BusinessWithOwner | null>;
   findById(id: string): Promise<BusinessWithOwner | null>;
-  listByOwner(userId: string): Promise<Business[]>;
+  listByOwner(userId: string): Promise<BusinessWithOwner[]>;
   getSettings(businessId: string): Promise<BusinessSettings | null>;
   updateProfile(
     tx: Prisma.TransactionClient,

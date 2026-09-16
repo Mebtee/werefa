@@ -4,6 +4,7 @@ import { PRISMA_CLIENT } from '../../config/config.constants';
 import {
   BookingRepository,
   BookingStatusHistoryInput,
+  BookingWithHistory,
   BookingWithRelations,
   CreateBookingArgs,
   OverlapCheck,
@@ -120,7 +121,7 @@ export class PrismaBookingRepository implements BookingRepository {
 
   async listByBusiness(
     businessId: string,
-    opts: { statusIn?: BookingState[]; after?: Date; before?: Date; limit?: number } = {},
+    opts: { statusIn?: BookingState[]; after?: Date; before?: Date; search?: string; order?: 'asc' | 'desc'; limit?: number } = {},
   ): Promise<BookingWithRelations[]> {
     return this.prisma.booking.findMany({
       where: {
@@ -128,14 +129,56 @@ export class PrismaBookingRepository implements BookingRepository {
         status: opts.statusIn ? { in: opts.statusIn } : undefined,
         startAt: opts.after ? { gte: opts.after } : undefined,
         endAt: opts.before ? { lte: opts.before } : undefined,
+        ...(opts.search
+          ? {
+              OR: [
+                { customerName: { contains: opts.search, mode: 'insensitive' as const } },
+                { customerPhone: { startsWith: opts.search } },
+              ],
+            }
+          : {}),
       },
       include: {
         components: true,
         payment: { select: { id: true, status: true, method: true, prepaidMinor: true } },
       },
-      orderBy: { id: 'asc' },
+      orderBy: { id: opts.order === 'asc' ? 'asc' : 'desc' },
       take: opts.limit,
     });
+  }
+
+  async findByIdWithHistory(businessId: string, id: number): Promise<BookingWithHistory | null> {
+    const booking = await this.prisma.booking.findFirst({
+      where: { id, businessId },
+      include: {
+        components: true,
+        payment: { select: { id: true, status: true, method: true, prepaidMinor: true } },
+        statusHistory: {
+          orderBy: { occurredAt: 'asc' },
+          select: {
+            id: true,
+            fromStatus: true,
+            toStatus: true,
+            actorType: true,
+            actorUserId: true,
+            reason: true,
+            occurredAt: true,
+          },
+        },
+      },
+    });
+    if (!booking) return null;
+    const paymentId = booking.payment?.id;
+    const proofsSubmittedAt = paymentId
+      ? (
+          await this.prisma.paymentProof.findMany({
+            where: { paymentId },
+            select: { submittedAt: true },
+            orderBy: { submittedAt: 'asc' },
+          })
+        ).map((p) => p.submittedAt)
+      : [];
+    return { ...booking, proofsSubmittedAt } as unknown as BookingWithHistory;
   }
 
   async listDueForCompletion(businessId: string, upTo: Date, limit = 100): Promise<Booking[]> {

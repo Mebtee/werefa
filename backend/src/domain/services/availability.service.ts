@@ -28,6 +28,9 @@ export class AvailabilityService {
     businessId: string,
     args: { dateKey: string; durationMinutes: number; fromMinutes?: number; untilMinutes?: number },
   ): Promise<SlotStart[]> {
+    const biz = await this.prisma.business.findUnique({ where: { id: businessId }, select: { deactivatedAt: true } });
+    if (!biz || biz.deactivatedAt) return [];
+
     const settings = await this.prisma.businessSettings.findUnique({ where: { businessId } });
     if (!settings || settings.isPaused) return [];
 

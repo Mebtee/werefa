@@ -50,9 +50,13 @@ export class PrismaBusinessRepository implements BusinessRepository {
     });
   }
 
-  async listByOwner(userId: string): Promise<Business[]> {
+  async listByOwner(userId: string): Promise<BusinessWithOwner[]> {
     return this.prisma.business.findMany({
       where: { owners: { some: { userId } } },
+      include: {
+        owners: { select: { userId: true, createdAt: true } },
+        category: true,
+      },
       orderBy: { createdAt: 'asc' },
     });
   }

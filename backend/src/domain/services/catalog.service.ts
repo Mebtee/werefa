@@ -139,6 +139,25 @@ export class CatalogService {
     });
   }
 
+  /** All services (incl. inactive) for owner management (REQ-079 owner sees all). */
+  async listServicesForOwner(ctx: ActorContext, businessId: string) {
+    await this.tenantGuard.requireOwnedBusiness(ctx, businessId);
+    return this.prisma.service.findMany({
+      where: { businessId },
+      include: { variations: true, addOns: true },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  /** Single service (owner incl. inactive) with variations/add-ons. */
+  async getServiceForOwner(ctx: ActorContext, businessId: string, serviceId: string) {
+    await this.tenantGuard.requireOwnedBusiness(ctx, businessId);
+    return this.prisma.service.findFirst({
+      where: { id: serviceId, businessId },
+      include: { variations: true, addOns: true },
+    });
+  }
+
   /**
    * Validate a service/variation/addon combination and return immutable
    * component snapshots + totals (REQ-074/076). Inactive items are rejected.

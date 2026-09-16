@@ -9,6 +9,7 @@ import { AllExceptionsFilter } from './common/errors/all-exceptions.filter';
 import { buildGlobalValidationPipe } from './common/validation/validation-setup';
 import { createHttpLogger } from './common/logging/pino.factory';
 import { requestContext } from './common/context/request-context.middleware';
+import { setupOpenApi } from './api/openapi';
 
 /**
  * Central application configuration — security defaults, logging, error
@@ -76,4 +77,9 @@ export async function configureApp(app: NestExpressApplication, config: AppConfi
 
   // Graceful shutdown on SIGTERM/SIGINT
   app.enableShutdownHooks();
+
+  // OpenAPI docs + Swagger UI (non-production, non-test only; Prompt 42 §21)
+  if (config.nodeEnv !== 'production' && config.nodeEnv !== 'test') {
+    setupOpenApi(app);
+  }
 }

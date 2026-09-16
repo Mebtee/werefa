@@ -6,6 +6,7 @@ import { DatabaseModule } from './database/database.module';
 import { DomainModule } from './domain/domain.module';
 import { DomainServicesModule } from './domain/domain-services.module';
 import { SystemModule } from './system/system.module';
+import { ApiModule } from './api/api.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { SystemModule } from './system/system.module';
     DatabaseModule,
     DomainModule,
     DomainServicesModule,
+    ApiModule,
     SystemModule,
   ],
 })

@@ -23,7 +23,8 @@ export class FakeDatabase implements DatabasePort {
 
 export interface TestAppOptions {
   env?: Record<string, string | undefined>;
-  database?: DatabasePort;
+  /** Provide a DatabasePort override (default FakeDatabase). Pass 'real' to keep the real Prisma-backed port. */
+  database?: DatabasePort | 'real';
 }
 
 export async function createTestApp(options: TestAppOptions = {}): Promise<{ app: INestApplication; config: AppConfig }> {
@@ -34,12 +35,13 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<{ app
   };
   const config = loadAndValidateConfig(env);
 
-  const moduleRef = await Test.createTestingModule({
+  let moduleBuilder = Test.createTestingModule({
     imports: [AppModule.forRoot(config)],
-  })
-    .overrideProvider(DATABASE)
-    .useValue(options.database ?? new FakeDatabase())
-    .compile();
+  });
+  if (options.database !== 'real') {
+    moduleBuilder = moduleBuilder.overrideProvider(DATABASE).useValue(options.database ?? new FakeDatabase());
+  }
+  const moduleRef = await moduleBuilder.compile();
 
   const app: NestExpressApplication = moduleRef.createNestApplication<NestExpressApplication>({ bufferLogs: true });
   await configureApp(app, config);
