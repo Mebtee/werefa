@@ -79,6 +79,13 @@ function closeMonday(): ScheduleSnapshot {
   return { ...base, workingHours: hours }
 }
 
+function closeTuesday(): ScheduleSnapshot {
+  const base = snapshotOf()
+  const hours = base.workingHours.map((day) => day.map((p) => ({ ...p })))
+  hours[2] = []
+  return { ...base, workingHours: hours }
+}
+
 beforeEach(() => {
   resetStore()
 })
@@ -318,6 +325,29 @@ describe('conflict resolution + Keep Booking (REQ-099/159/160/161)', () => {
     const completed = done.value.find((b) => b.id === booking.id)
     expect(completed?.state).toBe('completed')
     expect(completed?.scheduleException?.reason).toBe('Kept.')
+  })
+
+  it('refuses to keep a booking that is not affected by any open conflict (REQ-159)', () => {
+    const booking = acceptedOn(MONDAY, '10:00')
+    saveSchedule(SLUG, closeTuesday())
+    const kept = keepBooking(SLUG, booking.id, 'No conflict here.')
+    expect(kept.ok).toBe(false)
+    expect(booking.scheduleException).toBeNull()
+    expect(booking.history).toHaveLength(2)
+    expect(getOpenConflicts(SLUG)).toEqual([])
+  })
+
+  it('keeping twice is rejected after the first keep resolves the conflict', () => {
+    const booking = acceptedOn(MONDAY, '10:00')
+    saveSchedule(SLUG, closeMonday())
+    const first = keepBooking(SLUG, booking.id, 'Kept.')
+    expect(first.ok).toBe(true)
+    const len = booking.history.length
+    const again = keepBooking(SLUG, booking.id, 'Kept again.')
+    expect(again.ok).toBe(false)
+    expect(booking.scheduleException?.reason).toBe('Kept.')
+    expect(booking.history).toHaveLength(len)
+    expect(getOpenConflicts(SLUG)).toEqual([])
   })
 })
 

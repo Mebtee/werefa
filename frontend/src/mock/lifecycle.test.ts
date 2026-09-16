@@ -7,6 +7,7 @@ import {
   createBookingEntry,
   getOccupiedBlocks,
   getServices,
+  keepBooking,
   listBookings,
   markNoShowBooking,
   rejectBooking,
@@ -297,6 +298,84 @@ describe('idempotent double actions and tenant mutation guard rails (Prompt 38)'
     ).toHaveLength(1)
   })
 
+  it('rejecting twice records one rejected transition/notice and keeps the reason', () => {
+    setCustomerTelegramConnected(PRIMARY_BUSINESS_SLUG, '+251911111111', true)
+    const created = createBookingEntry(fakeBooking())
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    const first = rejectBooking(PRIMARY_BUSINESS_SLUG, created.booking.id, 'Blurry photo')
+    expect(first.ok).toBe(true)
+    const len = created.booking.history.length
+    const notices = created.booking.telegramNotices.length
+    const again = rejectBooking(PRIMARY_BUSINESS_SLUG, created.booking.id, 'Blurry photo')
+    expect(again.ok).toBe(false)
+    expect(created.booking.rejectionReason).toBe('Blurry photo')
+    expect(created.booking.history).toHaveLength(len)
+    expect(created.booking.telegramNotices).toHaveLength(notices)
+    expect(
+      created.booking.telegramNotices.filter((n) => n.type === 'payment-rejected'),
+    ).toHaveLength(1)
+  })
+
+  it('releasing a rejected booking twice records one transition and releases the slot once', () => {
+    const created = createBookingEntry(fakeBooking())
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    rejectBooking(PRIMARY_BUSINESS_SLUG, created.booking.id, 'Wrong amount')
+    const first = releaseRejectedBooking(PRIMARY_BUSINESS_SLUG, created.booking.id)
+    expect(first.ok).toBe(true)
+    const len = created.booking.history.length
+    const again = releaseRejectedBooking(PRIMARY_BUSINESS_SLUG, created.booking.id)
+    expect(again.ok).toBe(false)
+    expect(created.booking.state).toBe('cancelled')
+    expect(created.booking.slotReleased).toBe(true)
+    expect(created.booking.history).toHaveLength(len)
+  })
+
+  it('cancelling a Payment Pending booking twice is rejected with the slot still blocked', () => {
+    const created = createBookingEntry(fakeBooking())
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    const first = cancelPaymentPendingBooking(PRIMARY_BUSINESS_SLUG, created.booking.id)
+    expect(first.ok).toBe(true)
+    const len = created.booking.history.length
+    const again = cancelPaymentPendingBooking(PRIMARY_BUSINESS_SLUG, created.booking.id)
+    expect(again.ok).toBe(false)
+    expect(created.booking.history).toHaveLength(len)
+    expect(created.booking.slotReleased).toBe(false)
+    expect(created.booking.telegramNotices).toHaveLength(0)
+  })
+
+  it('resubmitting proof twice is rejected; only the first proof is kept', () => {
+    setCustomerTelegramConnected(PRIMARY_BUSINESS_SLUG, '+251911111111', true)
+    const created = createBookingEntry(fakeBooking())
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    expect(rejectBooking(PRIMARY_BUSINESS_SLUG, created.booking.id, 'Rejected').ok).toBe(true)
+    const first = resubmitRejectedProof(PRIMARY_BUSINESS_SLUG, created.booking.id, {
+      fileName: 'a.png',
+      sizeBytes: 10,
+      mimeType: 'image/png',
+    })
+    expect(first.ok).toBe(true)
+    const len = created.booking.history.length
+    const notices = created.booking.telegramNotices.length
+    const again = resubmitRejectedProof(PRIMARY_BUSINESS_SLUG, created.booking.id, {
+      fileName: 'b.png',
+      sizeBytes: 20,
+      mimeType: 'image/png',
+    })
+    expect(again.ok).toBe(false)
+    expect(created.booking.state).toBe('payment-pending')
+    expect(created.booking.proof.fileName).toBe('a.png')
+    expect(created.booking.history).toHaveLength(len)
+    expect(created.booking.telegramNotices).toHaveLength(notices)
+    // Two proof-received events are legitimate: creation and the first resubmit.
+    expect(
+      created.booking.telegramNotices.filter((n) => n.type === 'payment-proof-received'),
+    ).toHaveLength(2)
+  })
+
   it('another businesss booking cannot be mutated by this owner session', () => {
     const services = getServices(SECONDARY_SLUG)
     const service = services[0]
@@ -330,5 +409,64 @@ describe('idempotent double actions and tenant mutation guard rails (Prompt 38)'
     expect(created.booking.state).toBe('payment-pending')
     expect(created.booking.paymentState).toBe('pending')
     expect(listBookings(SECONDARY_SLUG).find((b) => b.id === id)!.state).toBe('payment-pending')
+  })
+
+  it('every other mutation is tenant-isolated with a generic error and no side effects', () => {
+    setCustomerTelegramConnected(SECONDARY_SLUG, '+251988776655', true)
+    setCustomerTelegramConnected(PRIMARY_BUSINESS_SLUG, '+251911111111', true)
+    // A Confirmed booking in the secondary business, connected to Telegram.
+    const services = getServices(SECONDARY_SLUG)
+    const service = services[0]
+    const created = createBookingEntry({
+      businessSlug: SECONDARY_SLUG,
+      lineItems: [
+        { name: service.name, unitPrice: service.basePrice, durationMinutes: service.baseDurationMinutes },
+      ],
+      total: service.basePrice,
+      totalDurationMinutes: service.baseDurationMinutes,
+      deposit: 0,
+      customer: { name: 'Other Biz Customer', phone: '+251988776655', note: '' },
+      date: DATE,
+      time: FREE,
+      paymentMethod: 'bank-transfer' as const,
+      proof: { fileName: 'receipt.png', sizeBytes: 100, mimeType: 'image/png' },
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    const secondary = created.booking
+    expect(acceptBooking(SECONDARY_SLUG, secondary.id).ok).toBe(true)
+
+    const rescheduleResult = rescheduleBooking(PRIMARY_BUSINESS_SLUG, secondary.id, DATE, '14:00')
+    expect(rescheduleResult.ok).toBe(false)
+    if (!rescheduleResult.ok) expect(rescheduleResult.error).toBe('Booking not found.')
+    expect(cancelPaymentPendingBooking(PRIMARY_BUSINESS_SLUG, secondary.id).ok).toBe(false)
+    expect(releaseRejectedBooking(PRIMARY_BUSINESS_SLUG, secondary.id).ok).toBe(false)
+    const resubmitResult = resubmitRejectedProof(PRIMARY_BUSINESS_SLUG, secondary.id, {
+      fileName: 'x.png',
+      sizeBytes: 1,
+      mimeType: 'image/png',
+    })
+    expect(resubmitResult.ok).toBe(false)
+    expect(keepBooking(PRIMARY_BUSINESS_SLUG, secondary.id, 'keep').ok).toBe(false)
+    // Auto-complete is scoped: a due-time secondary booking is not completed by
+    // a primary-session completion sweep, and vice versa.
+    expect(secondary.state).toBe('confirmed')
+    const completed = completeDueBookings(PRIMARY_BUSINESS_SLUG, new Date('2030-04-04T10:00:00Z').toISOString())
+    expect(completed.ok).toBe(true)
+    expect(listBookings(SECONDARY_SLUG).find((b) => b.id === secondary.id)?.state).toBe('confirmed')
+    // No cross-tenant Telegram notification was generated on the secondary booking.
+    // It carries only its own proof-received (create) and confirmation notices.
+    expect(secondary.telegramNotices).toHaveLength(2)
+    expect(secondary.telegramNotices.filter((n) => n.type === 'booking-confirmed')).toHaveLength(1)
+    expect(secondary.telegramNotices.filter((n) => n.type === 'payment-proof-received')).toHaveLength(1)
+    expect(
+      secondary.telegramNotices.some(
+        (n) =>
+          n.type === 'reschedule' ||
+          n.type === 'cancelled' ||
+          n.type === 'no-show' ||
+          n.type === 'payment-rejected',
+      ),
+    ).toBe(false)
   })
 })

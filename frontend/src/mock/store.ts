@@ -471,12 +471,6 @@ export function getScheduleConflicts(slug: string): readonly ScheduleConflict[] 
   return scheduleConflicts.filter((conflict) => conflict.businessSlug === slug)
 }
 
-function latestActiveVersion(slug: string): ScheduleVersion | undefined {
-  return scheduleVersions
-    .filter((v) => v.businessSlug === slug && v.status === 'active')
-    .slice(-1)[0]
-}
-
 function resolveConflictsForBooking(
   slug: string,
   bookingId: string,
@@ -522,6 +516,10 @@ function promotePendingSchedule(slug: string): void {
  * reason/details. It persists after the appointment completes, never alters
  * the normal schedule, and issues no customer notification. The decision is
  * recorded in the booking's audit history.
+ *
+ * Only a booking affected by an open schedule conflict can be kept (REQ-159):
+ * the exception is attributed to the schedule version that caused the conflict
+ * and cannot be created arbitrarily for an unaffected booking.
  */
 export function keepBooking(
   slug: string,
@@ -539,10 +537,13 @@ export function keepBooking(
       conflict.bookingId === id &&
       conflict.status === 'open',
   )
+  if (!open) {
+    return { ok: false, error: 'Only a booking affected by an open schedule conflict can be kept.' }
+  }
   booking.scheduleException = {
     at: nowTimestamp(),
     reason: (reason ?? '').trim() || 'Kept as a schedule exception.',
-    scheduleVersionId: open?.versionId ?? latestActiveVersion(slug)?.id ?? '',
+    scheduleVersionId: open.versionId,
   }
   booking.updatedAt = nowTimestamp()
   recordTransition(booking, booking.state, booking.state)
