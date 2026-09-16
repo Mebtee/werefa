@@ -80,3 +80,67 @@ describe('public booking layout overflow guards', () => {
     expect(link).toMatch(/word-break:\s*break-all/)
   })
 })
+
+describe('bookings workspace layout overflow guards', () => {
+  it('wraps the filter/sort toolbar instead of overflowing', async () => {
+    // The toolbar is a flex row holding date inputs, search and the sort
+    // control; without wrapping it would push past the viewport on mobile.
+    expect(await ruleFor('.booking-toolbar')).toMatch(/flex-wrap:\s*wrap/)
+  })
+
+  it('lets search and date fields shrink below their content width', async () => {
+    // Each toolbar control is a flex column inside the wrapping toolbar;
+    // without an explicit min-width the inputs cannot shrink below their
+    // intrinsic width on narrow screens.
+    const css = await readFile(CSS_FILE, 'utf8')
+    const field = css.match(
+      /\.booking-field,\s*\.booking-search\s*\{([^}]*)\}/,
+    )
+    expect(field).not.toBeNull()
+    expect(field![1]).toMatch(/min-width:\s*0/)
+  })
+
+  it('signals a selected status pill with a filled dot, not colour alone', async () => {
+    // Software engineers must be able to tell selected from unselected pills
+    // without relying on hue; the pressed pseudo-element draws a filled dot.
+    const base = await ruleFor('.booking-pill::before')
+    expect(base).toMatch(/border-radius:\s*50%/)
+    const pressed = await ruleFor('.booking-pill[aria-pressed="true"]::before')
+    expect(pressed).toMatch(/background:\s*var\(--accent-strong\)/)
+  })
+
+  it('wraps over-long customer names inside booking cards', async () => {
+    // A very long customer name or phone must wrap inside the card rather
+    // than widen the page on narrow viewports.
+    expect(await ruleFor('.booking-card__name')).toMatch(/overflow-wrap:\s*anywhere/)
+  })
+
+  it('lets booking cards shrink below their content width', async () => {
+    expect(await ruleFor('.booking-card')).toMatch(/min-width:\s*0/)
+  })
+
+  it('wraps label/value rows on the booking detail page', async () => {
+    const row = await ruleFor('.booking-detail__row')
+    expect(row).toMatch(/flex-wrap:\s*wrap/)
+    expect(row).toMatch(/overflow-wrap:\s*anywhere/)
+  })
+
+  it('signals the Telegram connection with a shape, not colour alone', async () => {
+    expect(await ruleFor('.telegram-state::before')).toMatch(/border-radius:\s*50%/)
+  })
+
+  it('centers the empty-state prompt without stretching the page', async () => {
+    const empty = await ruleFor('.booking-empty')
+    expect(empty).toMatch(/align-items:\s*center/)
+    expect(empty).toMatch(/flex-direction:\s*column/)
+  })
+
+  it('stacks toolbar controls full-width inside the narrow-screen media query', async () => {
+    const css = await readFile(CSS_FILE, 'utf8')
+    const lastMobile = css.lastIndexOf('@media (max-width: 640px)')
+    expect(lastMobile).toBeGreaterThan(-1)
+    const block = css.slice(lastMobile)
+    expect(block).toMatch(/\.booking-field/)
+    expect(block).toMatch(/flex: 1 1 100%;/)
+  })
+})

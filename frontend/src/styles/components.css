@@ -1304,6 +1304,7 @@ fieldset.option-group legend {
   text-decoration: none;
   color: var(--color-text);
   min-height: 0;
+  min-width: 0;
 }
 
 .booking-card:hover {
@@ -2370,4 +2371,248 @@ fieldset.option-group legend {
   margin: 0;
   font-size: var(--text-sm);
   color: var(--color-text-muted);
+}
+
+/* ---------------------------------------------------------------------------
+ * Bookings workspace (owner) — filter/sort/review polish (PROMPT 38)
+ * ------------------------------------------------------------------------- */
+
+/* The whole filter + toolbar + results strip sits on one grouped surface. */
+.booking-workspace {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.booking-workspace .booking-filters {
+  margin-bottom: var(--space-4);
+}
+
+/* Selected status pills: never by colour alone — the filled dot plus the
+ * ARIA state give a colour-blind-safe signal. */
+.booking-pill::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-border-strong);
+  background: transparent;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.booking-pill[aria-pressed="true"]::before {
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
+}
+
+.booking-pill[aria-pressed="true"] {
+  color: var(--accent-strong);
+}
+
+/* Filter/sort toolbar: labels above their control, controls lay out as a
+ * wrapping row of equal-weight columns that never overflow the viewport. */
+.booking-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.booking-field,
+.booking-search {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1 1 170px;
+  min-width: 0;
+}
+
+.booking-search {
+  flex-grow: 2;
+  flex-basis: 220px;
+}
+
+.booking-field__label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.booking-date,
+.booking-sort__select {
+  min-width: 0;
+}
+
+.booking-sort__direction {
+  white-space: nowrap;
+}
+
+/* Live results caption sits under the toolbar, inside the workspace surface. */
+.booking-results {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+/* Empty state — centered, with any reset action below the message. */
+.booking-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  text-align: center;
+}
+
+.booking-empty .subsection__empty {
+  margin: 0;
+}
+
+.booking-empty__action {
+  margin: 0;
+}
+
+/* Long customer names, phones, service labels and totals must wrap inside
+ * the card instead of widening the page. */
+.booking-card,
+.booking-card__main,
+.booking-card__time {
+  min-width: 0;
+}
+
+.booking-card__name {
+  overflow-wrap: anywhere;
+}
+
+.booking-card__meta {
+  overflow-wrap: anywhere;
+}
+
+.booking-card__status {
+  flex-shrink: 0;
+}
+
+/* Booking detail: label/value rows inside cards. */
+.booking-detail__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-3);
+  flex-wrap: wrap;
+  padding-block: var(--space-2);
+  border-top: 1px solid var(--color-border);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.booking-detail__row:first-of-type {
+  border-top: 0;
+}
+
+.booking-detail__label {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+.booking-note {
+  font-style: italic;
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+/* Payment proof rejection notice. */
+.booking-rejection {
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-danger-bg);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 30%, transparent);
+  border-radius: var(--radius-md);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.booking-rejection__text {
+  margin: 0;
+  color: var(--color-danger);
+}
+
+/* Telegram connection state on the detail page (never colour alone). */
+.telegram-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 700;
+}
+
+.telegram-state::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--color-border-strong);
+}
+
+.telegram-state--on::before {
+  background: var(--color-success);
+}
+
+.telegram-state--on {
+  color: var(--color-success);
+}
+
+.telegram-notice-list {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/* Narrow: toolbar columns tighten before stacking completely. */
+@media (max-width: 760px) {
+  .booking-field,
+  .booking-search {
+    flex-basis: 150px;
+  }
+}
+
+/* Mobile: everything full-width, cards stack vertically. */
+@media (max-width: 640px) {
+  .booking-workspace {
+    padding: var(--space-3);
+  }
+
+  .booking-toolbar,
+  .booking-field,
+  .booking-search {
+    align-items: stretch;
+  }
+
+  .booking-field,
+  .booking-search {
+    flex: 1 1 100%;
+  }
+
+  .booking-card {
+    align-items: flex-start;
+  }
+
+  .booking-card__status {
+    align-items: flex-start;
+    align-self: flex-start;
+  }
+
+  .booking-detail__head {
+    flex-direction: column;
+  }
 }
