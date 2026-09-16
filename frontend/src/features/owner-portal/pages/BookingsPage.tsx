@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { Booking, BookingState } from '@/types/models'
 import { mockOwnerApi } from '@/mock/ownerApi'
@@ -12,22 +12,44 @@ import {
 } from '@/features/owner-portal/lib/labels'
 import { formatDateLong } from '@/lib/time'
 import { formatMoney } from '@/lib/format'
+import {
+  BOOKING_STATE_ORDER,
+  DEFAULT_BOOKING_SORT,
+  filterBookings,
+  sortBookings,
+  type BookingSortField,
+  type BookingSort,
+} from '@/features/owner-portal/lib/bookingQuery'
 
-const FILTER_ORDER: readonly (BookingState | 'all')[] = [
-  'all',
-  'payment-pending',
-  'confirmed',
-  'completed',
-  'no-show',
-  'cancelled',
-  'rejected',
-]
+const SORT_FIELD_LABEL: Record<BookingSortField, string> = {
+  'date-time': 'Date & time',
+  'booking-id': 'Booking ID',
+  customer: 'Customer name',
+  status: 'Booking status',
+  actor: 'Actor',
+  'payment-status': 'Payment status',
+}
+
+/** Human-readable label for the active ordering (never color-coded alone). */
+function directionLabel(sort: BookingSort): string {
+  if (sort.field === 'date-time') {
+    return sort.direction === 'desc' ? 'Newest first' : 'Oldest first'
+  }
+  return sort.direction === 'asc' ? 'A–Z' : 'Z–A'
+}
 
 export function BookingsPage() {
   const { business, loading, error, reload } = useOwnedBusiness()
   const [bookings, setBookings] = useState<readonly Booking[] | null>(null)
-  const [filter, setFilter] = useState<BookingState | 'all'>('all')
   const [failed, setFailed] = useState(false)
+
+  // Filter state (REQ-184). Status is multi-select with OR semantics; the
+  // other categories combine with AND (REQ-185).
+  const [statuses, setStatuses] = useState<ReadonlySet<BookingState>>(new Set())
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [query, setQuery] = useState('')
+  const [sort, setSort] = useState<BookingSort>(DEFAULT_BOOKING_SORT)
 
   const load = useCallback(async () => {
     setFailed(false)
@@ -43,13 +65,40 @@ export function BookingsPage() {
     void load()
   }, [load])
 
-  const filtered =
-    bookings?.filter((b) => filter === 'all' || b.state === filter) ?? []
+  const toggleStatus = (value: BookingState) => {
+    setStatuses((current) => {
+      const next = new Set(current)
+      if (next.has(value)) next.delete(value)
+      else next.add(value)
+      return next
+    })
+  }
 
-  const countFor = (value: BookingState | 'all') =>
-    value === 'all'
-      ? bookings?.length ?? 0
-      : bookings?.filter((b) => b.state === value).length ?? 0
+  const resetFilters = () => {
+    setStatuses(new Set())
+    setDateFrom('')
+    setDateTo('')
+    setQuery('')
+    setSort(DEFAULT_BOOKING_SORT)
+  }
+
+  const visible = useMemo(
+    () =>
+      bookings
+        ? sortBookings(
+            filterBookings(bookings, { statuses, dateFrom, dateTo, query }),
+            sort,
+          )
+        : [],
+    [bookings, statuses, dateFrom, dateTo, query, sort],
+  )
+
+  const total = bookings?.length ?? 0
+  const filtersActive =
+    statuses.size > 0 || dateFrom !== '' || dateTo !== '' || query.trim() !== ''
+
+  const countFor = (value: BookingState) =>
+    bookings?.filter((b) => b.state === value).length ?? 0
 
   return (
     <LoadState
@@ -65,36 +114,141 @@ export function BookingsPage() {
             Review the proof here, then confirm or reject.
           </p>
 
-          <div
-            className="booking-filters"
-            role="group"
-            aria-label="Filter bookings by status"
+          <form
+            className="booking-workspace"
+            aria-label="Filter and sort bookings"
+            onSubmit={(event) => event.preventDefault()}
           >
-            {FILTER_ORDER.map((value) => (
+            <div
+              className="booking-filters"
+              role="group"
+              aria-label="Filter by status"
+            >
               <button
-                key={value}
                 type="button"
                 className="booking-pill"
-                aria-pressed={filter === value}
-                onClick={() => setFilter(value)}
+                aria-pressed={statuses.size === 0}
+                onClick={() => setStatuses(new Set())}
               >
-                {value === 'all' ? 'All' : BOOKING_STATE_LABEL[value]}
-                <span className="booking-pill__count">{countFor(value)}</span>
+                All
+                <span className="booking-pill__count">{total}</span>
               </button>
-            ))}
-          </div>
+              {BOOKING_STATE_ORDER.map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  className="booking-pill"
+                  aria-pressed={statuses.has(value)}
+                  onClick={() => toggleStatus(value)}
+                >
+                  {BOOKING_STATE_LABEL[value]}
+                  <span className="booking-pill__count">{countFor(value)}</span>
+                </button>
+              ))}
+            </div>
 
-          {filtered.length === 0 ? (
-            <div className="card card--padded">
-              <p className="subsection__empty">
-                {filter === 'all'
+            <div className="booking-toolbar">
+              <label className="booking-field">
+                <span className="booking-field__label">From date</span>
+                <input
+                  type="date"
+                  className="input booking-date"
+                  value={dateFrom}
+                  onChange={(event) => setDateFrom(event.target.value)}
+                />
+              </label>
+              <label className="booking-field">
+                <span className="booking-field__label">To date</span>
+                <input
+                  type="date"
+                  className="input booking-date"
+                  value={dateTo}
+                  onChange={(event) => setDateTo(event.target.value)}
+                />
+              </label>
+              <label className="booking-search">
+                <span className="booking-field__label">Customer search</span>
+                <input
+                  type="search"
+                  className="input"
+                  placeholder="Name or phone"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                />
+              </label>
+              <label className="booking-field">
+                <span className="booking-field__label">Sort by</span>
+                <select
+                  className="input booking-sort__select"
+                  value={sort.field}
+                  onChange={(event) => {
+                    const field = event.target.value as BookingSortField
+                    setSort({
+                      field,
+                      direction:
+                        field === 'date-time' ? 'desc' : 'asc',
+                    })
+                  }}
+                >
+                  {(Object.keys(SORT_FIELD_LABEL) as BookingSortField[]).map(
+                    (field) => (
+                      <option key={field} value={field}>
+                        {SORT_FIELD_LABEL[field]}
+                      </option>
+                    ),
+                  )}
+                </select>
+              </label>
+              <button
+                type="button"
+                className="btn btn--outline booking-sort__direction"
+                aria-label={`Sort direction: ${directionLabel(sort)}`}
+                onClick={() =>
+                  setSort((current) => ({
+                    ...current,
+                    direction: current.direction === 'asc' ? 'desc' : 'asc',
+                  }))
+                }
+              >
+                {directionLabel(sort)}
+              </button>
+              <button
+                type="button"
+                className="btn btn--outline"
+                onClick={resetFilters}
+              >
+                Reset filters
+              </button>
+            </div>
+
+            <p className="booking-results" role="status" aria-live="polite">
+              Showing {visible.length} of {total} bookings ·{' '}
+              {directionLabel(sort)}
+            </p>
+          </form>
+
+          {visible.length === 0 ? (
+            <div className="card card--padded booking-empty">
+              <p className="subsection__empty booking-empty__text">
+                {total === 0
                   ? 'No bookings yet. They appear here once a customer pays and attaches proof.'
-                  : `No ${BOOKING_STATE_LABEL[filter as BookingState].toLowerCase()} bookings yet.`}
+                  : 'No bookings match the current filters.'}
               </p>
+              {filtersActive && (
+                <p className="booking-empty__action">
+                  <button
+                    type="button"
+                    className="btn btn--outline"
+                    onClick={resetFilters}
+                  >
+                    Reset filters
+                  </button>
+                </p>
+              )}
             </div>
           ) : (
             <ul className="booking-list">
-              {filtered.map((booking) => (
+              {visible.map((booking) => (
                 <li key={booking.id}>
                   <Link
                     className="card card--padded booking-card"
