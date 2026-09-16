@@ -118,7 +118,7 @@ export function BookingDetailPage() {
     return (
       <LoadState
         loading={(loading && business === null) || (!missing && booking === null)}
-        error={(error && business === null) || missing}
+        error={error && business === null}
         onRetry={reload}
       >
         {missing && (
@@ -194,7 +194,7 @@ export function BookingDetailPage() {
         onNoShow={markNoShow}
         onCancelPending={cancelPending}
         onRelease={releaseRejected}
-        onRescheduleDone={() => void onMutationSucceeded()}
+        onRescheduleDone={onMutationSucceeded}
       />
 
       <div className="booking-grid">
