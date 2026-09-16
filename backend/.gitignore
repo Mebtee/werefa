@@ -1,0 +1,21 @@
+# Environment / secrets — NEVER commit real credentials
+.env
+.env.local
+.env.*.local
+
+# Build output
+dist/
+
+# Dependencies
+node_modules/
+
+# Prisma generated client
+/src/generated/
+prisma/generated/
+
+# Compiled / generated
+*.tsbuildinfo
+
+# Playwright / vitest artifacts
+test-results/
+coverage/

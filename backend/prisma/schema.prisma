@@ -1,0 +1,820 @@
+// Werefa backend — Prisma schema (domain model & database schema foundation)
+//
+// Source of truth: docs/WEREFA-COMPLETE-SPECIFICATION.md §29 (Data Model,
+// Logical) and docs/architecture/07-database-design.md (physical design).
+//
+// Scope (Prompt 40): real persistent domain foundation for a multi-tenant
+// booking SaaS. MIGRATIONS run as the 'migrator' role (DDL, RLS-bypass);
+// the runtime 'app' role operates under RLS (doc 07 §1/§4) with
+// SELECT/INSERT/UPDATE/DELETE grants applied by the migration.
+//
+// Deliberate deferrals (auth phase): User stores identity foundation only;
+// EmailVerification, OneTimeToken, Session, PasswordReset, EmergencyRecovery,
+// recovery tokens, and all auth flows are NOT yet modeled.
+// Unresolved product decisions (spec §46) are intentionally NOT resolved;
+// the schema only anticipates them (e.g., prepayment_mode is selectable,
+// subscription prices are nullable/absent, single global timezone with no
+// per-tenant column).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums (REQ-100, REQ-101, REQ-112, REQ-111, REQ-215, doc 07 §2)
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  OWNER
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum BusinessType {
+  SALON_AND_BARBER
+  OTHER
+}
+
+enum PrepaymentMode {
+  NONE
+  PERCENTAGE
+  FIXED
+}
+
+enum BookingState {
+  PAYMENT_PENDING
+  CONFIRMED
+  REJECTED
+  COMPLETED
+  NO_SHOW
+  CANCELLED
+}
+
+enum PaymentState {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+enum PaymentMethod {
+  BANK_TRANSFER
+  TELEBIRR_MOBILE_MONEY
+}
+
+enum BookingComponentType {
+  SERVICE
+  VARIATION
+  ADD_ON
+}
+
+enum SlotLockState {
+  LOCKED
+  ALLOCATED
+  RELEASED
+}
+
+enum SpecialDateKind {
+  CLOSED
+  CUSTOM
+}
+
+enum ScheduleVersionStatus {
+  PENDING
+  ACTIVE
+}
+
+enum SubscriptionStatus {
+  NONE
+  TRIAL
+  TRIAL_GRACE
+  ACTIVE
+  PAID_GRACE
+  EXPIRED
+}
+
+enum SubscriptionReviewState {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum SubscriptionReminderKind {
+  TRIAL_ENDING
+  SUBSCRIPTION_ENDING
+  SUBSCRIPTION_EXPIRED
+}
+
+enum ActorType {
+  SYSTEM
+  CUSTOMER
+  OWNER
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum TelegramConnectionKind {
+  BUSINESS_OWNER
+  CUSTOMER
+}
+
+enum TelegramConnectionState {
+  PENDING_VERIFICATION
+  CONNECTED
+  REVOKED
+}
+
+enum NotificationChannel {
+  EMAIL
+  TELEGRAM
+}
+
+enum NotificationDeliveryState {
+  PENDING
+  SENDING
+  SENT
+  FAILED
+  DEAD_LETTERED
+  SUPPRESSED
+}
+
+enum FileCategory {
+  CUSTOMER_PROOF
+  SUBSCRIPTION_PROOF
+  LOGO
+  COVER
+  REPORT_PDF
+}
+
+// ---------------------------------------------------------------------------
+// Identity foundation (auth phase will add sessions/tokens/recovery)
+// ---------------------------------------------------------------------------
+
+model User {
+  id              String    @id @default(uuid()) @db.Uuid
+  email           String    @unique @db.VarChar(320)
+  passwordHash    String    @map("password_hash") @db.VarChar(255)
+  role            UserRole  @default(OWNER)
+  isEmailVerified Boolean   @default(false) @map("is_email_verified")
+  isLockedUntil   DateTime? @map("is_locked_until") @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  businesses BusinessOwner[]
+  auditLogs  AuditEvent[]
+
+  @@map("user")
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy: business + category + owner membership + settings (doc 07 §2)
+// ---------------------------------------------------------------------------
+
+model BusinessCategory {
+  code       String     @id @db.VarChar(32)
+  label      String     @db.VarChar(128)
+  businesses Business[]
+
+  @@map("business_category")
+}
+
+model Business {
+  id                      String    @id @default(uuid()) @db.Uuid
+  publicSlug              String    @unique @map("public_slug") @db.VarChar(64)
+  categoryCode            String    @map("category_code") @db.VarChar(32)
+  name                    String    @db.VarChar(160)
+  logoFileId              String?   @map("logo_file_id") @db.Uuid
+  coverFileId             String?   @map("cover_file_id") @db.Uuid
+  description             String?   @db.VarChar(2000)
+  address                 String?   @db.VarChar(400)
+  latitude                Decimal?  @db.Decimal(10, 8)
+  longitude               Decimal?  @db.Decimal(11, 8)
+  phonePublic             String?   @map("phone_public") @db.VarChar(32)
+  deactivatedAt           DateTime? @map("deactivated_at") @db.Timestamptz(6)
+  activeScheduleVersionId String?   @map("active_schedule_version_id") @db.Uuid
+  createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  category                  BusinessCategory            @relation(fields: [categoryCode], references: [code], onDelete: Restrict)
+  activeScheduleVersion     ScheduleVersion?            @relation("ActiveScheduleVersion", fields: [activeScheduleVersionId], references: [id], onDelete: SetNull)
+  owners                    BusinessOwner[]
+  settings                  BusinessSettings?
+  services                  Service[]
+  serviceVariations         ServiceVariation[]          @relation("BusinessVariations")
+  addOns                    AddOn[]
+  scheduleVersions          ScheduleVersion[]           @relation("BusinessScheduleVersions")
+  workingPeriods            WorkingPeriod[]             @relation("BusinessWorkingPeriods")
+  blockedPeriods            BlockedPeriod[]             @relation("BusinessBlockedPeriods")
+  specialDates              SpecialDate[]               @relation("BusinessSpecialDates")
+  bookings                  Booking[]
+  bookingComponents         BookingComponent[]          @relation("BusinessBookingComponents")
+  bookingStatusHistory      BookingStatusHistory[]      @relation("BusinessBookingStatusHistory")
+  payments                  Payment[]
+  paymentProofs             PaymentProof[]
+  paymentStatusHistory      PaymentStatusHistory[]      @relation("BusinessPaymentStatusHistory")
+  slotLocks                 SlotLock[]
+  scheduleExceptions        ScheduleException[]
+  resubmissionVerifications ResubmissionVerification[]
+  telegramConnections       TelegramConnection[]
+  notifications             Notification[]
+  subscription              Subscription?
+  subscriptionProofs        SubscriptionProof[]
+  subscriptions             SubscriptionStatusHistory[]
+  subscriptionReminders     SubscriptionReminder[]      @relation("BusinessSubscriptionReminders")
+  securityEvents            SecurityEvent[]
+  auditEvents               AuditEvent[]
+  fileObjects               FileObject[]
+  reportJobs                ReportJob[]
+
+  @@index([categoryCode])
+  @@index([deactivatedAt])
+  @@map("business")
+}
+
+model BusinessOwner {
+  businessId String   @map("business_id") @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@id([businessId, userId])
+  @@index([userId])
+  @@map("business_owner")
+}
+
+model BusinessSettings {
+  businessId           String         @id @map("business_id") @db.Uuid
+  bookingIntervalMins  Int            @map("booking_interval_minutes")
+  prepaymentMode       PrepaymentMode @default(NONE) @map("prepayment_mode")
+  prepaymentPercent    Int?           @map("prepayment_percent")
+  prepaymentFixedMinor BigInt?        @map("prepayment_fixed_minor") @db.BigInt
+  isPaused             Boolean        @default(false) @map("is_paused")
+  pauseMessage         String?        @map("pause_message") @db.VarChar(400)
+  reopenAt             DateTime?      @map("reopen_at") @db.Timestamptz(6)
+  pauseUpdatedAt       DateTime?      @map("pause_updated_at") @db.Timestamptz(6)
+  warningUntil         DateTime?      @map("warning_until") @db.Timestamptz(6)
+  createdAt            DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Restrict)
+
+  @@map("business_settings")
+}
+
+// ---------------------------------------------------------------------------
+// Catalog: services, variations, add-ons (REQ-070 … REQ-081)
+// ---------------------------------------------------------------------------
+
+model Service {
+  id                  String   @id @default(uuid()) @db.Uuid
+  businessId          String   @map("business_id") @db.Uuid
+  name                String   @db.VarChar(160)
+  basePriceMinor      BigInt   @map("base_price_minor") @db.BigInt
+  baseDurationMinutes Int      @map("base_duration_minutes")
+  isActive            Boolean  @default(true) @map("is_active")
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  business          Business           @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  variations        ServiceVariation[]
+  addOns            AddOn[]
+  bookingComponents BookingComponent[]
+
+  @@index([businessId, isActive])
+  @@map("service")
+}
+
+model ServiceVariation {
+  id                   String   @id @default(uuid()) @db.Uuid
+  serviceId            String   @map("service_id") @db.Uuid
+  businessId           String   @map("business_id") @db.Uuid
+  name                 String   @db.VarChar(160)
+  priceDeltaMinor      BigInt   @map("price_delta_minor") @db.BigInt
+  durationDeltaMinutes Int      @map("duration_delta_minutes")
+  isActive             Boolean  @default(true) @map("is_active")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  service  Service   @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  business Business? @relation("BusinessVariations", fields: [businessId], references: [id], onDelete: Restrict)
+
+  @@index([serviceId, isActive])
+  @@index([businessId])
+  @@map("service_variation")
+}
+
+model AddOn {
+  id                   String   @id @default(uuid()) @db.Uuid
+  serviceId            String   @map("service_id") @db.Uuid
+  businessId           String   @map("business_id") @db.Uuid
+  name                 String   @db.VarChar(160)
+  priceDeltaMinor      BigInt   @map("price_delta_minor") @db.BigInt
+  durationDeltaMinutes Int      @map("duration_delta_minutes")
+  isActive             Boolean  @default(true) @map("is_active")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  service  Service  @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Restrict)
+
+  @@index([serviceId, isActive])
+  @@index([businessId])
+  @@map("add_on")
+}
+
+// ---------------------------------------------------------------------------
+// Schedule: versioned working periods, blocked periods, special dates
+// ---------------------------------------------------------------------------
+
+model ScheduleVersion {
+  id         String                @id @default(uuid()) @db.Uuid
+  businessId String                @map("business_id") @db.Uuid
+  versionNo  Int                   @map("version_no")
+  status     ScheduleVersionStatus @default(PENDING)
+  name       String?               @db.VarChar(200)
+  appliedAt  DateTime?             @map("applied_at") @db.Timestamptz(6)
+  appliedBy  String?               @map("applied_by") @db.Uuid
+  reason     String?               @db.VarChar(2000)
+  autoReason String?               @map("auto_reason") @db.VarChar(2000)
+  replacedAt DateTime?             @map("replaced_at") @db.Timestamptz(6)
+  createdAt  DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  business           Business            @relation("BusinessScheduleVersions", fields: [businessId], references: [id], onDelete: Restrict)
+  activeFor          Business[]          @relation("ActiveScheduleVersion")
+  workingPeriods     WorkingPeriod[]
+  blockedPeriods     BlockedPeriod[]
+  specialDates       SpecialDate[]
+  scheduleExceptions ScheduleException[]
+
+  @@unique([businessId, versionNo])
+  @@index([businessId, status])
+  @@map("schedule_version")
+}
+
+model WorkingPeriod {
+  id                String   @id @default(uuid()) @db.Uuid
+  scheduleVersionId String   @map("schedule_version_id") @db.Uuid
+  businessId        String   @map("business_id") @db.Uuid
+  weekday           Int      @db.SmallInt
+  startMinutes      Int      @map("start_minutes")
+  endMinutes        Int      @map("end_minutes")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  scheduleVersion ScheduleVersion @relation(fields: [scheduleVersionId], references: [id], onDelete: Cascade)
+  business        Business?       @relation("BusinessWorkingPeriods", fields: [businessId], references: [id], onDelete: Restrict)
+
+  @@index([scheduleVersionId, weekday])
+  @@index([businessId])
+  @@map("working_period")
+}
+
+model BlockedPeriod {
+  id                String   @id @default(uuid()) @db.Uuid
+  scheduleVersionId String   @map("schedule_version_id") @db.Uuid
+  businessId        String   @map("business_id") @db.Uuid
+  dayOfWeek         Int?     @map("day_of_week") @db.SmallInt
+  startMinutes      Int?     @map("start_minutes")
+  endMinutes        Int?     @map("end_minutes")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  scheduleVersion ScheduleVersion @relation(fields: [scheduleVersionId], references: [id], onDelete: Cascade)
+  business        Business?       @relation("BusinessBlockedPeriods", fields: [businessId], references: [id], onDelete: Restrict)
+
+  @@index([scheduleVersionId])
+  @@index([businessId])
+  @@map("blocked_period")
+}
+
+model SpecialDate {
+  id                String          @id @default(uuid()) @db.Uuid
+  scheduleVersionId String          @map("schedule_version_id") @db.Uuid
+  businessId        String          @map("business_id") @db.Uuid
+  date              DateTime        @db.Date
+  kind              SpecialDateKind
+  startMinutes      Int?            @map("start_minutes")
+  endMinutes        Int?            @map("end_minutes")
+  createdAt         DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  scheduleVersion ScheduleVersion @relation(fields: [scheduleVersionId], references: [id], onDelete: Cascade)
+  business        Business?       @relation("BusinessSpecialDates", fields: [businessId], references: [id], onDelete: Restrict)
+
+  @@unique([scheduleVersionId, date])
+  @@index([businessId])
+  @@map("special_date")
+}
+
+model ScheduleException {
+  id                String   @id @default(uuid()) @db.Uuid
+  businessId        String   @map("business_id") @db.Uuid
+  scheduleVersionId String   @map("schedule_version_id") @db.Uuid
+  bookingId         Int      @map("booking_id")
+  createdBy         String?  @map("created_by") @db.Uuid
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  business        Business        @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  scheduleVersion ScheduleVersion @relation(fields: [scheduleVersionId], references: [id], onDelete: Restrict)
+  booking         Booking         @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@unique([bookingId, scheduleVersionId])
+  @@index([scheduleVersionId])
+  @@index([businessId])
+  @@map("schedule_exception")
+}
+
+// ---------------------------------------------------------------------------
+// Booking, components/snapshots, status history, resubmission, slot locks
+// ---------------------------------------------------------------------------
+
+model Booking {
+  id              Int          @id @default(autoincrement())
+  businessId      String       @map("business_id") @db.Uuid
+  status          BookingState @default(PAYMENT_PENDING)
+  customerName    String       @map("customer_name") @db.VarChar(160)
+  customerPhone   String       @map("customer_phone") @db.VarChar(32)
+  note            String?      @db.VarChar(800)
+  startAt         DateTime     @map("start_at") @db.Timestamptz(6)
+  endAt           DateTime     @map("end_at") @db.Timestamptz(6)
+  createdByUserId String?      @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  business                  Business                   @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  components                BookingComponent[]
+  statusHistory             BookingStatusHistory[]
+  payment                   Payment?
+  slotLocks                 SlotLock[]
+  scheduleExceptions        ScheduleException[]
+  resubmissionVerifications ResubmissionVerification[]
+
+  @@index([businessId, startAt])
+  @@index([businessId, status])
+  @@index([businessId, customerPhone])
+  @@map("booking")
+}
+
+model BookingComponent {
+  id              Int                  @id @default(autoincrement())
+  bookingId       Int                  @map("booking_id")
+  businessId      String               @map("business_id") @db.Uuid
+  serviceId       String?              @map("service_id") @db.Uuid
+  componentType   BookingComponentType @map("component_type")
+  nameSnapshot    String               @map("name_snapshot") @db.VarChar(160)
+  unitPriceMinor  BigInt               @map("unit_price_minor") @db.BigInt
+  durationMinutes Int                  @map("duration_minutes")
+  createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  booking  Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  business Business? @relation("BusinessBookingComponents", fields: [businessId], references: [id], onDelete: Restrict)
+  service  Service?  @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+
+  @@index([bookingId])
+  @@index([businessId])
+  @@map("booking_component")
+}
+
+model BookingStatusHistory {
+  id          Int           @id @default(autoincrement())
+  bookingId   Int           @map("booking_id")
+  businessId  String        @map("business_id") @db.Uuid
+  fromStatus  BookingState? @map("from_status")
+  toStatus    BookingState  @map("to_status")
+  actorType   ActorType     @map("actor_type")
+  actorUserId String?       @map("actor_user_id") @db.Uuid
+  reason      String?       @db.VarChar(800)
+  occurredAt  DateTime      @default(now()) @map("occurred_at") @db.Timestamptz(6)
+
+  booking  Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  business Business? @relation("BusinessBookingStatusHistory", fields: [businessId], references: [id], onDelete: Restrict)
+
+  @@index([bookingId, occurredAt])
+  @@index([businessId, occurredAt])
+  @@map("booking_status_history")
+}
+
+model ResubmissionVerification {
+  id         String    @id @default(uuid()) @db.Uuid
+  bookingId  Int       @map("booking_id")
+  businessId String    @map("business_id") @db.Uuid
+  phone      String    @db.VarChar(32)
+  codeHash   String    @map("code_hash") @db.VarChar(64)
+  purpose    String    @db.VarChar(64)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt     DateTime? @map("used_at") @db.Timestamptz(6)
+  attempts   Int       @default(0)
+
+  booking  Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Restrict)
+
+  @@index([bookingId])
+  @@index([phone, usedAt])
+  @@map("resubmission_verification")
+}
+
+model SlotLock {
+  id         String        @id @default(uuid()) @db.Uuid
+  businessId String        @map("business_id") @db.Uuid
+  bookingId  Int?          @map("booking_id")
+  slotDate   DateTime      @map("slot_date") @db.Date
+  startAt    DateTime      @map("start_at") @db.Timestamptz(6)
+  endAt      DateTime      @map("end_at") @db.Timestamptz(6)
+  state      SlotLockState
+  createdAt  DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  releasedAt DateTime?     @map("released_at") @db.Timestamptz(6)
+  releasedBy String?       @map("released_by") @db.Uuid
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  booking  Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  @@index([businessId, slotDate])
+  @@index([bookingId])
+  @@map("slot_lock")
+}
+
+// ---------------------------------------------------------------------------
+// Payments, proofs, payment-status history (REQ-100 … REQ-124)
+// ---------------------------------------------------------------------------
+
+model Payment {
+  id           String        @id @default(uuid()) @db.Uuid
+  businessId   String        @map("business_id") @db.Uuid
+  bookingId    Int           @unique @map("booking_id")
+  status       PaymentState  @default(PENDING)
+  method       PaymentMethod
+  prepaidMinor BigInt        @map("prepaid_minor") @db.BigInt
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  business Business               @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  booking  Booking                @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  proofs   PaymentProof[]
+  history  PaymentStatusHistory[]
+
+  @@index([businessId, status])
+  @@index([businessId, createdAt])
+  @@map("payment")
+}
+
+model PaymentProof {
+  id                String   @id @default(uuid()) @db.Uuid
+  paymentId         String   @map("payment_id") @db.Uuid
+  businessId        String   @map("business_id") @db.Uuid
+  fileObjectId      String?  @map("file_object_id") @db.Uuid
+  submissionKey     String   @unique @map("submission_key") @db.VarChar(128)
+  submittedAt       DateTime @default(now()) @map("submitted_at") @db.Timestamptz(6)
+  replacedByProofId String?  @map("replaced_by_proof_id") @db.Uuid
+
+  payment        Payment        @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  business       Business       @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  replacedBy     PaymentProof?  @relation("ProofLineage", fields: [replacedByProofId], references: [id], onDelete: SetNull)
+  replacedProofs PaymentProof[] @relation("ProofLineage")
+
+  @@index([paymentId, submittedAt])
+  @@index([businessId, submittedAt])
+  @@map("payment_proof")
+}
+
+model PaymentStatusHistory {
+  id          Int           @id @default(autoincrement())
+  paymentId   String        @map("payment_id") @db.Uuid
+  businessId  String        @map("business_id") @db.Uuid
+  fromStatus  PaymentState? @map("from_status")
+  toStatus    PaymentState  @map("to_status")
+  actorType   ActorType     @map("actor_type")
+  actorUserId String?       @map("actor_user_id") @db.Uuid
+  reason      String?       @db.VarChar(800)
+  occurredAt  DateTime      @default(now()) @map("occurred_at") @db.Timestamptz(6)
+
+  payment  Payment   @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  business Business? @relation("BusinessPaymentStatusHistory", fields: [businessId], references: [id], onDelete: Restrict)
+
+  @@index([paymentId, occurredAt])
+  @@index([businessId, occurredAt])
+  @@map("payment_status_history")
+}
+
+// ---------------------------------------------------------------------------
+// Customer Telegram connections + notification outbox
+// ---------------------------------------------------------------------------
+
+model TelegramConnection {
+  id          String                  @id @default(uuid()) @db.Uuid
+  businessId  String?                 @map("business_id") @db.Uuid
+  userId      String?                 @map("user_id") @db.Uuid
+  chatId      BigInt                  @unique @map("chat_id")
+  kind        TelegramConnectionKind
+  state       TelegramConnectionState @default(PENDING_VERIFICATION)
+  createdAt   DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  connectedAt DateTime?               @map("connected_at") @db.Timestamptz(6)
+  revokedAt   DateTime?               @map("revoked_at") @db.Timestamptz(6)
+
+  business Business? @relation(fields: [businessId], references: [id], onDelete: Restrict)
+
+  @@index([businessId, state])
+  @@map("telegram_connection")
+}
+
+model TelegramUpdate {
+  updateId    BigInt   @id @map("update_id")
+  processedAt DateTime @default(now()) @map("processed_at") @db.Timestamptz(6)
+
+  @@map("telegram_update")
+}
+
+model Notification {
+  id         String   @id @default(uuid()) @db.Uuid
+  businessId String?  @map("business_id") @db.Uuid
+  type       String   @db.VarChar(64)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  business   Business?              @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  deliveries NotificationDelivery[]
+
+  @@index([businessId, createdAt])
+  @@map("notification")
+}
+
+model NotificationDelivery {
+  id             String                    @id @default(uuid()) @db.Uuid
+  notificationId String                    @map("notification_id") @db.Uuid
+  recipientType  String                    @map("recipient_type") @db.VarChar(32)
+  recipientRef   String                    @map("recipient_ref") @db.VarChar(128)
+  channel        NotificationChannel
+  state          NotificationDeliveryState @default(PENDING)
+  attempts       Int                       @default(0)
+  nextAttemptAt  DateTime?                 @map("next_attempt_at") @db.Timestamptz(6)
+  idempotencyKey String                    @unique @map("idempotency_key") @db.VarChar(128)
+  payloadRef     String?                   @map("payload_ref") @db.VarChar(200)
+  sentAt         DateTime?                 @map("sent_at") @db.Timestamptz(6)
+  lastError      String?                   @map("last_error") @db.VarChar(2000)
+  createdAt      DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@index([state, nextAttemptAt])
+  @@index([notificationId])
+  @@map("notification_delivery")
+}
+
+// ---------------------------------------------------------------------------
+// Subscription foundation (REQ-125 … REQ-142; REMINDER lead-time unresolved)
+// ---------------------------------------------------------------------------
+
+model Subscription {
+  id               String             @id @default(uuid()) @db.Uuid
+  businessId       String             @unique @map("business_id") @db.Uuid
+  status           SubscriptionStatus @default(NONE)
+  trialStartedAt   DateTime?          @map("trial_started_at") @db.Timestamptz(6)
+  trialEndsAt      DateTime?          @map("trial_ends_at") @db.Timestamptz(6)
+  trialGraceEndsAt DateTime?          @map("trial_grace_ends_at") @db.Timestamptz(6)
+  periodEndsAt     DateTime?          @map("period_ends_at") @db.Timestamptz(6)
+  paidGraceEndsAt  DateTime?          @map("paid_grace_ends_at") @db.Timestamptz(6)
+  createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  business  Business                    @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  proofs    SubscriptionProof[]
+  history   SubscriptionStatusHistory[]
+  reminders SubscriptionReminder[]
+
+  @@map("subscription")
+}
+
+model SubscriptionProof {
+  id              String                  @id @default(uuid()) @db.Uuid
+  subscriptionId  String                  @map("subscription_id") @db.Uuid
+  businessId      String                  @map("business_id") @db.Uuid
+  requestedAt     DateTime                @default(now()) @map("requested_at") @db.Timestamptz(6)
+  reviewedBy      String?                 @map("reviewed_by") @db.Uuid
+  reviewState     SubscriptionReviewState @default(PENDING) @map("review_state")
+  rejectionReason String?                 @map("rejection_reason") @db.VarChar(800)
+  approvedUntil   DateTime?               @map("approved_until") @db.Timestamptz(6)
+  fileObjectId    String?                 @map("file_object_id") @db.Uuid
+  createdAt       DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  business     Business     @relation(fields: [businessId], references: [id], onDelete: Restrict)
+
+  @@index([businessId, reviewState])
+  @@index([reviewState, createdAt])
+  @@map("subscription_proof")
+}
+
+model SubscriptionReminder {
+  id             String                   @id @default(uuid()) @db.Uuid
+  subscriptionId String                   @map("subscription_id") @db.Uuid
+  businessId     String                   @map("business_id") @db.Uuid
+  kind           SubscriptionReminderKind
+  sentAt         DateTime                 @default(now()) @map("sent_at") @db.Timestamptz(6)
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  business     Business?    @relation("BusinessSubscriptionReminders", fields: [businessId], references: [id], onDelete: Restrict)
+
+  @@unique([businessId, kind])
+  @@index([subscriptionId])
+  @@map("subscription_reminder")
+}
+
+model SubscriptionStatusHistory {
+  id             Int                 @id @default(autoincrement())
+  subscriptionId String              @map("subscription_id") @db.Uuid
+  businessId     String              @map("business_id") @db.Uuid
+  fromStatus     SubscriptionStatus? @map("from_status")
+  toStatus       SubscriptionStatus  @map("to_status")
+  actorType      ActorType           @map("actor_type")
+  actorUserId    String?             @map("actor_user_id") @db.Uuid
+  reason         String?             @db.VarChar(800)
+  occurredAt     DateTime            @default(now()) @map("occurred_at") @db.Timestamptz(6)
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  business     Business     @relation(fields: [businessId], references: [id], onDelete: Restrict)
+
+  @@index([subscriptionId, occurredAt])
+  @@index([businessId, occurredAt])
+  @@map("subscription_status_history")
+}
+
+// ---------------------------------------------------------------------------
+// Files (registration only; storage engine deferred), audit/security
+// ---------------------------------------------------------------------------
+
+model FileObject {
+  id             String       @id @default(uuid()) @db.Uuid
+  businessId     String?      @map("business_id") @db.Uuid
+  category       FileCategory
+  storageKey     String       @unique @map("storage_key") @db.VarChar(400)
+  mimeType       String       @map("mime_type") @db.VarChar(128)
+  sizeBytes      BigInt       @map("size_bytes") @db.BigInt
+  checksumSha256 String       @map("checksum_sha256") @db.VarChar(64)
+  uploadedBy     String?      @map("uploaded_by") @db.Uuid
+  expiresAt      DateTime?    @map("expires_at") @db.Timestamptz(6)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  business Business? @relation(fields: [businessId], references: [id], onDelete: Restrict)
+
+  @@index([businessId, category])
+  @@map("file_object")
+}
+
+model SecurityEvent {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String?  @map("user_id") @db.Uuid
+  businessId String?  @map("business_id") @db.Uuid
+  type       String   @db.VarChar(64)
+  ip         String?  @db.VarChar(64)
+  device     String?  @db.VarChar(200)
+  browser    String?  @db.VarChar(200)
+  result     String   @db.VarChar(32)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  business Business? @relation(fields: [businessId], references: [id], onDelete: Restrict)
+
+  @@index([userId, createdAt])
+  @@index([businessId, createdAt])
+  @@index([type, createdAt])
+  @@map("security_event")
+}
+
+model AuditEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  actorUserId String?  @map("actor_user_id") @db.Uuid
+  actorRole   String?  @map("actor_role") @db.VarChar(32)
+  action      String   @db.VarChar(64)
+  businessId  String?  @map("business_id") @db.Uuid
+  detail      String?  @db.VarChar(4000)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user     User?     @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+  business Business? @relation(fields: [businessId], references: [id], onDelete: Restrict)
+
+  @@index([businessId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@index([action, createdAt])
+  @@map("audit_event")
+}
+
+model ReportJob {
+  id              String    @id @default(uuid()) @db.Uuid
+  businessId      String?   @map("business_id") @db.Uuid
+  requesterUserId String?   @map("requester_user_id") @db.Uuid
+  scopeRef        String?   @map("scope_ref") @db.VarChar(400)
+  state           String    @db.VarChar(32)
+  fileObjectId    String?   @map("file_object_id") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  finishedAt      DateTime? @map("finished_at") @db.Timestamptz(6)
+
+  business Business? @relation(fields: [businessId], references: [id], onDelete: Restrict)
+
+  @@index([businessId, createdAt])
+  @@index([state, createdAt])
+  @@map("report_job")
+}

@@ -1,0 +1,35 @@
+# Werefa backend — local development database (PostgreSQL 16)
+#
+# Matches the approved backend database (architecture doc 07, ADR-002).
+# Host port 5433 is used to avoid clashing with any local PostgreSQL.
+#
+#   npm run db:up          start + wait for healthy
+#   npm run db:provision   create roles app/migrator + werefa_dev/werefa_test
+#   npm run prisma:dev     first migration (uses MIGRATOR_DATABASE_URL)
+#   npm run db:down        stop the container (data persists in the volume)
+#
+# Real credentials must come from backend/.env (see .env.example). Nothing in
+# this file is a production secret.
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: werefa-db-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-werefa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-werefa_dev_password}
+      POSTGRES_DB: werefa_dev
+    ports:
+      - '5433:5432'
+    volumes:
+      - werefa_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-werefa} -d werefa_dev']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  werefa_pgdata:
+    name: werefa_pgdata
