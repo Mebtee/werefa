@@ -2,13 +2,18 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import {
   acceptBooking,
   cancelBooking,
+  cancelPaymentPendingBooking,
   completeDueBookings,
   createBookingEntry,
+  getOccupiedBlocks,
   getServices,
   listBookings,
   markNoShowBooking,
-  resetStore,
+  rejectBooking,
+  releaseRejectedBooking,
   rescheduleBooking,
+  resetStore,
+  resubmitRejectedProof,
   setCustomerTelegramConnected,
 } from '@/mock/store'
 import { PRIMARY_BUSINESS_SLUG } from '@/mock/data'
@@ -28,6 +33,7 @@ const DATE = '2030-04-04'
 const TAKEN = '09:00' // occupied by seedConfirmed; fakeBooking's default slot (die VM never reads it otherwise)
 const FREE = '11:00'
 const SVC_ID = 'haircut-styling'
+const SECONDARY_SLUG = 'marathon-auto-care'
 
 function fakeBooking(overrides?: { date?: string; time?: string }) {
   const services = getServices(PRIMARY_BUSINESS_SLUG)
@@ -128,5 +134,201 @@ describe('owner booking lifecycle: No Show / Cancel / Reschedule / Auto-complete
     }
     const dueAfter = listBookings(PRIMARY_BUSINESS_SLUG).length
     expect(dueAfter).toBe(t0)
+  })
+})
+
+describe('terminal-state guards and idempotency (REQ-102/103/104/123, T9/T10)', () => {
+  it('refuses every lifecycle action on a No Show booking', () => {
+    const booking = seedConfirmed()
+    markNoShowBooking(PRIMARY_BUSINESS_SLUG, booking.id)
+
+    expect(cancelBooking(PRIMARY_BUSINESS_SLUG, booking.id).ok).toBe(false)
+    expect(markNoShowBooking(PRIMARY_BUSINESS_SLUG, booking.id).ok).toBe(false)
+    expect(rescheduleBooking(PRIMARY_BUSINESS_SLUG, booking.id, DATE, '14:00').ok).toBe(false)
+    expect(releaseRejectedBooking(PRIMARY_BUSINESS_SLUG, booking.id).ok).toBe(false)
+    expect(
+      resubmitRejectedProof(PRIMARY_BUSINESS_SLUG, booking.id, {
+        fileName: 'n.png',
+        sizeBytes: 1,
+        mimeType: 'image/png',
+      }).ok,
+    ).toBe(false)
+  })
+
+  it('refuses to cancel or release an already-completed booking', () => {
+    const booking = seedConfirmed()
+    completeDueBookings(PRIMARY_BUSINESS_SLUG, '2030-04-04T10:00:00Z')
+    expect(cancelBooking(PRIMARY_BUSINESS_SLUG, booking.id).ok).toBe(false)
+    expect(releaseRejectedBooking(PRIMARY_BUSINESS_SLUG, booking.id).ok).toBe(false)
+  })
+
+  it('cancelPaymentPendingBooking keeps the slot blocked and issues no notice (SM-08)', () => {
+    const created = createBookingEntry(fakeBooking())
+    expect(created.ok).toBe(true)
+    if (!created.ok) throw new Error('create failed')
+    const result = cancelPaymentPendingBooking(PRIMARY_BUSINESS_SLUG, created.booking.id)
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.state).toBe('cancelled')
+      expect(result.value.slotReleased).toBe(false)
+      expect(result.value.telegramNotices).toHaveLength(0)
+    }
+    expect(
+      getOccupiedBlocks(PRIMARY_BUSINESS_SLUG, DATE).some((b) => b.start === TAKEN),
+    ).toBe(true)
+  })
+
+  it('releaseRejectedBooking: Rejected → Cancelled, payment stays Rejected, slot released (T9)', () => {
+    const created = createBookingEntry(fakeBooking())
+    expect(created.ok).toBe(true)
+    if (!created.ok) throw new Error('create failed')
+    const booking = created.booking
+    const rejected = rejectBooking(PRIMARY_BUSINESS_SLUG, booking.id, 'Not clear enough')
+    expect(rejected.ok).toBe(true)
+
+    const result = releaseRejectedBooking(PRIMARY_BUSINESS_SLUG, booking.id)
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.state).toBe('cancelled')
+      expect(result.value.paymentState).toBe('rejected')
+      expect(result.value.slotReleased).toBe(true)
+      expect(result.value.telegramNotices).toHaveLength(0)
+    }
+    expect(
+      getOccupiedBlocks(PRIMARY_BUSINESS_SLUG, DATE).some((b) => b.start === TAKEN),
+    ).toBe(false)
+  })
+
+  it('resubmitRejectedProof: Rejected → Payment Pending with the slot still blocked (T10, REQ-230)', () => {
+    const created = createBookingEntry(fakeBooking())
+    expect(created.ok).toBe(true)
+    if (!created.ok) throw new Error('create failed')
+    const booking = created.booking
+    const rejected = rejectBooking(PRIMARY_BUSINESS_SLUG, booking.id, 'Wrong amount')
+    expect(rejected.ok).toBe(true)
+
+    const result = resubmitRejectedProof(PRIMARY_BUSINESS_SLUG, booking.id, {
+      fileName: 'fresh.png',
+      sizeBytes: 2048,
+      mimeType: 'image/png',
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.state).toBe('payment-pending')
+      expect(result.value.paymentState).toBe('pending')
+      expect(result.value.rejectionReason).toBeNull()
+      expect(result.value.proof.fileName).toBe('fresh.png')
+      expect(result.value.history.at(-1)).toMatchObject({
+        previous: 'rejected',
+        state: 'payment-pending',
+      })
+    }
+    // The rejected slot stays blocked for the resubmitted booking (REQ-123).
+    expect(
+      getOccupiedBlocks(PRIMARY_BUSINESS_SLUG, DATE).some((b) => b.start === TAKEN),
+    ).toBe(true)
+    // The fresh proof is accepted back to review as a normal pending booking.
+    const accepted = acceptBooking(PRIMARY_BUSINESS_SLUG, booking.id)
+    expect(accepted.ok).toBe(true)
+  })
+})
+
+describe('idempotent double actions and tenant mutation guard rails (Prompt 38)', () => {
+  it('accepting twice records exactly one confirmation transition and one Telegram notice', () => {
+    setCustomerTelegramConnected(PRIMARY_BUSINESS_SLUG, '+251911111111', true)
+    const booking = seedConfirmed()
+    const historyAfter = booking.history.length
+    const noticesAfter = booking.telegramNotices.length
+    const second = acceptBooking(PRIMARY_BUSINESS_SLUG, booking.id)
+    expect(second.ok).toBe(false)
+    expect(booking.state).toBe('confirmed')
+    expect(booking.history).toHaveLength(historyAfter)
+    expect(booking.telegramNotices).toHaveLength(noticesAfter)
+    expect(
+      booking.telegramNotices.filter((n) => n.type === 'booking-confirmed'),
+    ).toHaveLength(1)
+  })
+
+  it('cancelling twice records only one cancellation transition and notice', () => {
+    setCustomerTelegramConnected(PRIMARY_BUSINESS_SLUG, '+251911111111', true)
+    const booking = seedConfirmed()
+    const first = cancelBooking(PRIMARY_BUSINESS_SLUG, booking.id)
+    expect(first.ok).toBe(true)
+    const len = booking.history.length
+    const notices = booking.telegramNotices.length
+    const second = cancelBooking(PRIMARY_BUSINESS_SLUG, booking.id)
+    expect(second.ok).toBe(false)
+    expect(booking.history).toHaveLength(len)
+    expect(booking.telegramNotices).toHaveLength(notices)
+    expect(
+      booking.telegramNotices.filter((n) => n.type === 'cancelled'),
+    ).toHaveLength(1)
+  })
+
+  it('marking No Show twice records only one transition and notice', () => {
+    setCustomerTelegramConnected(PRIMARY_BUSINESS_SLUG, '+251911111111', true)
+    const booking = seedConfirmed()
+    const first = markNoShowBooking(PRIMARY_BUSINESS_SLUG, booking.id)
+    expect(first.ok).toBe(true)
+    const len = booking.history.length
+    const notices = booking.telegramNotices.length
+    const second = markNoShowBooking(PRIMARY_BUSINESS_SLUG, booking.id)
+    expect(second.ok).toBe(false)
+    expect(booking.history).toHaveLength(len)
+    expect(booking.telegramNotices).toHaveLength(notices)
+    expect(
+      booking.telegramNotices.filter((n) => n.type === 'no-show'),
+    ).toHaveLength(1)
+  })
+
+  it('double-rescheduling to the same target slot is rejected; no duplicate notice', () => {
+    setCustomerTelegramConnected(PRIMARY_BUSINESS_SLUG, '+251911111111', true)
+    const booking = seedConfirmed() // at TAKEN
+    const moved = rescheduleBooking(PRIMARY_BUSINESS_SLUG, booking.id, DATE, '14:00')
+    expect(moved.ok).toBe(true)
+    const historyLen = booking.history.length
+    const noticesLen = booking.telegramNotices.length
+    const again = rescheduleBooking(PRIMARY_BUSINESS_SLUG, booking.id, DATE, '14:00')
+    expect(again.ok).toBe(false)
+    expect(booking.history).toHaveLength(historyLen)
+    expect(booking.telegramNotices).toHaveLength(noticesLen)
+    expect(
+      booking.telegramNotices.filter((n) => n.type === 'reschedule'),
+    ).toHaveLength(1)
+  })
+
+  it('another businesss booking cannot be mutated by this owner session', () => {
+    const services = getServices(SECONDARY_SLUG)
+    const service = services[0]
+    const created = createBookingEntry({
+      businessSlug: SECONDARY_SLUG,
+      lineItems: [
+        { name: service.name, unitPrice: service.basePrice, durationMinutes: service.baseDurationMinutes },
+      ],
+      total: service.basePrice,
+      totalDurationMinutes: service.baseDurationMinutes,
+      deposit: 0,
+      customer: { name: 'Other Biz Customer', phone: '+251988776655', note: '' },
+      date: DATE,
+      time: TAKEN,
+      paymentMethod: 'bank-transfer' as const,
+      proof: { fileName: 'receipt.png', sizeBytes: 100, mimeType: 'image/png' },
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    const id = created.booking.id
+    const acceptResult = acceptBooking(PRIMARY_BUSINESS_SLUG, id)
+    expect(acceptResult.ok).toBe(false)
+    if (!acceptResult.ok) expect(acceptResult.error).toBe('Booking not found.')
+    const rejectResult = rejectBooking(PRIMARY_BUSINESS_SLUG, id, 'nope')
+    expect(rejectResult.ok).toBe(false)
+    if (!rejectResult.ok) expect(rejectResult.error).toBe('Booking not found.')
+    const cancelResult = cancelBooking(PRIMARY_BUSINESS_SLUG, id)
+    expect(cancelResult.ok).toBe(false)
+    const noShowResult = markNoShowBooking(PRIMARY_BUSINESS_SLUG, id)
+    expect(noShowResult.ok).toBe(false)
+    expect(created.booking.state).toBe('payment-pending')
+    expect(created.booking.paymentState).toBe('pending')
+    expect(listBookings(SECONDARY_SLUG).find((b) => b.id === id)!.state).toBe('payment-pending')
   })
 })
