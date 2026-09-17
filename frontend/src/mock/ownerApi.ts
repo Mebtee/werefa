@@ -32,7 +32,10 @@ import {
   type StoreResult,
 } from '@/mock/store'
 import { computeAvailableTimes } from '@/mock/availability'
-import { ownerSession } from '@/mock/ownerSession'
+import {
+  getMockOwnedBusinessSlug,
+  setMockOwnedBusinessSlug,
+} from '@/mock/ownedBusinessFixture'
 import { toDateString } from '@/lib/time'
 import type {
   Booking,
@@ -187,7 +190,7 @@ function latency(): number {
 }
 
 function ownedSlug(): string {
-  return ownerSession.businessSlug
+  return getMockOwnedBusinessSlug()
 }
 
 export const mockOwnerApi: OwnerApi = {
@@ -222,7 +225,7 @@ export const mockOwnerApi: OwnerApi = {
   async changePublicSlug(next) {
     await delay(latency())
     const result = changeBusinessSlug(ownedSlug(), next)
-    if (result.ok) ownerSession.businessSlug = result.value
+    if (result.ok) setMockOwnedBusinessSlug(result.value)
     return result.ok
       ? { ok: true, slug: result.value }
       : { ok: false, error: result.error }
@@ -353,5 +356,3 @@ export const mockOwnerApi: OwnerApi = {
     return resubmitRejectedProof(ownedSlug(), id, proof)
   },
 }
-
-export { ownerSession }

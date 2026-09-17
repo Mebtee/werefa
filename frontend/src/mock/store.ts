@@ -26,12 +26,15 @@ import type {
   Timestamp,
   WeeklyWorkingHours,
 } from '@/types/models'
-import { buildPages, PRIMARY_BUSINESS_SLUG } from '@/mock/data'
+import { buildPages } from '@/mock/data'
 import { buildDemoBookings } from '@/mock/seedBookings'
 import { computeAvailableTimes, periodsForSchedule } from '@/mock/availability'
 import { minutesOf, nowTimestamp } from '@/lib/time'
 import { normalizePhoneForMatch } from '@/lib/validation'
-import { ownerSession } from '@/mock/ownerSession'
+import {
+  MOCK_OWNER_ACTOR_NAME,
+  resetMockOwnedBusinessSlug,
+} from '@/mock/ownedBusinessFixture'
 
 /**
  * In-memory mock store — the single source of truth for business data in this
@@ -110,11 +113,11 @@ function seed(): void {
   scheduleConflicts = []
   customerTelegramConnections.clear()
   telegramNoticeSeq = 0
-  // The mock owner session always represents the primary business. Rebuilding
-  // the store must realign the session with it, or a changed public link from
-  // an earlier test/state would leave the portal pointing at a business that
-  // no longer exists under the old slug.
-  ownerSession.businessSlug = PRIMARY_BUSINESS_SLUG
+  // The mock domain data always represents the primary business. Rebuilding the
+  // store must realign it, or a changed public link from an earlier
+  // test/state would leave the portal pointing at a business that no longer
+  // exists under the old slug.
+  resetMockOwnedBusinessSlug()
 }
 
 seed()
@@ -322,7 +325,7 @@ export function saveSchedule(
   const paused = business.pause !== null
   applySnapshot(slug, snapshot)
   const version = recordScheduleVersion(slug, snapshot, {
-    actor: ownerSession.owner.name,
+    actor: MOCK_OWNER_ACTOR_NAME,
     reason: opts.reason?.trim() || null,
     automatic: false,
     status: paused ? 'pending' : 'active',
@@ -749,7 +752,7 @@ function recordTransition(
     {
       state: next,
       previous,
-      actor: opts.actor ?? ownerSession.owner.name,
+      actor: opts.actor ?? MOCK_OWNER_ACTOR_NAME,
       at: opts.at ?? nowTimestamp(),
     },
   ]
