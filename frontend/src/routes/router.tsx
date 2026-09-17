@@ -4,6 +4,8 @@ import { PRIMARY_BUSINESS_SLUG } from '@/mock/data'
 import { PublicBookingPage } from '@/pages/PublicBookingPage'
 import { BookingStatusPage } from '@/pages/BookingStatusPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
+import { LoginPage } from '@/features/auth/LoginPage'
+import { RequireOwner } from '@/features/auth/RequireOwner'
 import { OwnerLayoutApp } from '@/features/owner-portal/components/OwnerLayout'
 import { DashboardPage } from '@/features/owner-portal/pages/DashboardPage'
 import { BusinessProfilePage } from '@/features/owner-portal/pages/BusinessProfilePage'
@@ -16,10 +18,12 @@ import { BookingDetailPage } from '@/features/owner-portal/pages/BookingDetailPa
 /**
  * Route tree.
  *
- * Public surface (this phase): the business page lives at /p/:slug.
- * The owner surface (/owner/*) is driven by the isolated mock owner session;
- * auth is out of scope for this phase. Admin (/admin/*) and super-admin
- * (/super-admin/*) surfaces remain reserved for later phases.
+ * Public surface (this phase): the business page lives at /p/:slug. Customers
+ * remain unauthenticated (REQ-040).
+ * The owner surface (/owner/*) requires a real backend Owner session (Prompt
+ * 44): unauthenticated visitors are redirected to /owner/login. Admin
+ * (/admin/*) and super-admin (/super-admin/*) surfaces remain reserved for
+ * later phases.
  */
 export const appRoutes: RouteObject[] = [
   {
@@ -35,8 +39,16 @@ export const appRoutes: RouteObject[] = [
     element: <BookingStatusPage />,
   },
   {
+    path: '/owner/login',
+    element: <LoginPage />,
+  },
+  {
     path: '/owner',
-    element: <OwnerLayoutApp />,
+    element: (
+      <RequireOwner>
+        <OwnerLayoutApp />
+      </RequireOwner>
+    ),
     children: [
       { index: true, element: <DashboardPage /> },
       { path: 'business', element: <BusinessProfilePage /> },

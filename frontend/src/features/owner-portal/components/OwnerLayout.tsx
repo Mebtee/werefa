@@ -1,6 +1,8 @@
-import type { ReactNode } from 'react'
-import { Link, NavLink, Outlet } from 'react-router-dom'
-import { ownerSession } from '@/mock/ownerSession'
+import { useState, type ReactNode } from 'react'
+import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { Button } from '@/components/ui/Button'
+import { useAuth } from '@/features/auth/useAuth'
+import { getMockOwnedBusinessSlug } from '@/mock/ownedBusinessFixture'
 
 const NAV_ITEMS = [
   { to: '/owner', label: 'Dashboard', end: true },
@@ -11,6 +13,17 @@ const NAV_ITEMS = [
 ]
 
 export function OwnerLayoutApp({ children }: { children?: ReactNode }) {
+  const { principal, logout } = useAuth()
+  const navigate = useNavigate()
+  const [signingOut, setSigningOut] = useState(false)
+  const businessSlug = getMockOwnedBusinessSlug()
+
+  async function handleSignOut() {
+    setSigningOut(true)
+    await logout()
+    navigate('/owner/login', { replace: true })
+  }
+
   return (
     <div className="owner-shell page-root">
       <a className="skip-link" href="#owner-main">
@@ -45,17 +58,27 @@ export function OwnerLayoutApp({ children }: { children?: ReactNode }) {
             </ul>
           </nav>
 
-          <div className="owner-session" title="Auth is not implemented in this phase">
+          <div className="owner-session">
             <span className="badge" aria-hidden="true">
-              Demo session
+              Owner
             </span>
-            <span className="owner-session__owner">{ownerSession.owner.name}</span>
+            <span className="owner-session__owner">
+              {principal?.email ?? principal?.id ?? ''}
+            </span>
             <Link
               className="owner-session__public"
-              to={`/p/${ownerSession.businessSlug}`}
+              to={`/p/${businessSlug}`}
             >
               View public page
             </Link>
+            <Button
+              variant="outline"
+              className="owner-session__signout"
+              loading={signingOut}
+              onClick={() => void handleSignOut()}
+            >
+              Sign out
+            </Button>
           </div>
         </div>
       </header>
@@ -66,8 +89,9 @@ export function OwnerLayoutApp({ children }: { children?: ReactNode }) {
 
       <footer className="owner-footer">
         <div className="container">
-          Werefa owner portal — preview build. Mock session, no bookings are
-          stored and changes affect the public page immediately.
+          Werefa owner portal — preview build. Your sign-in is real, but business
+          data is still sample data: changes affect the public page immediately
+          and are not stored permanently.
         </div>
       </footer>
     </div>
