@@ -101,6 +101,11 @@ export const appConfigSchema = z.object({
   migratorDatabaseUrl: z.string().optional(),
   testDatabaseUrl: z.string().optional(),
   runDbTests: boolish(false),
+  authSessionTtlHours: z.coerce.number().int().min(1).max(720).default(12),
+  authRecoveryTtlMinutes: z.coerce.number().int().min(5).max(60).default(15),
+  authRecoveryMaxAttempts: z.coerce.number().int().min(1).max(10).default(5),
+  authRecoveryCodeLength: z.coerce.number().int().min(6).max(8).default(6),
+  authCookieName: z.string().min(1).max(64).default('werefa_session'),
   productParameters: z.object({
     subscriptionMonthlyPriceMinor: z.number().int().positive().nullable().default(null),
     appTimezone: z.string().min(1).default(APP_TIMEZONE_DESIGN_DEFAULT),
@@ -176,6 +181,11 @@ function rawToParsed(env: Record<string, string | undefined>): z.infer<typeof ap
     migratorDatabaseUrl: env.MIGRATOR_DATABASE_URL || undefined,
     testDatabaseUrl: env.TEST_DATABASE_URL || undefined,
     runDbTests: env.RUN_DB_TESTS || undefined,
+    authSessionTtlHours: env.AUTH_SESSION_TTL_HOURS || undefined,
+    authRecoveryTtlMinutes: env.AUTH_RECOVERY_TTL_MINUTES || undefined,
+    authRecoveryMaxAttempts: env.AUTH_RECOVERY_MAX_ATTEMPTS || undefined,
+    authRecoveryCodeLength: env.AUTH_RECOVERY_CODE_LENGTH || undefined,
+    authCookieName: env.AUTH_COOKIE_NAME || undefined,
     productParameters: {
       subscriptionMonthlyPriceMinor: productRaw.PRODUCT_SUBSCRIPTION_MONTHLY_PRICE_MINOR as number | null,
       appTimezone: productRaw.PRODUCT_APP_TIMEZONE as string,

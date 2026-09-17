@@ -27,8 +27,11 @@ if (!migratorUrl) {
 
 process.env.DATABASE_URL = migratorUrl;
 
+// On Windows `npx` is a `npx.cmd` shim, so it must be spawned through a shell;
+// `shell: true` also guards the column of the process exit status.
 const result = spawnSync('npx', ['prisma', 'migrate', verb], {
   stdio: 'inherit',
   cwd: process.cwd(),
+  shell: true,
 });
 process.exitCode = result.status ?? 1;
