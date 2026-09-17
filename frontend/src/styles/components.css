@@ -2616,3 +2616,100 @@ fieldset.option-group legend {
     flex-direction: column;
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * Authentication surfaces (PROMPT 44) — owner sign-in + session states
+ * ------------------------------------------------------------------------- */
+
+.auth-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5) var(--space-4);
+}
+
+.auth-screen__inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: 420px;
+  text-align: center;
+}
+
+.auth-screen__card {
+  width: 100%;
+  max-width: 420px;
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.auth-screen__text {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.auth-screen__actions {
+  margin-top: var(--space-4);
+}
+
+.auth-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.auth-brand__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: #ffffff;
+  font-weight: 700;
+  font-size: var(--text-lg);
+}
+
+.auth-brand__name {
+  font-weight: 700;
+  font-size: var(--text-lg);
+}
+
+.auth-brand__sub {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-weight: 400;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.auth-form__note {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.owner-session__signout {
+  margin-left: var(--space-1);
+}
+
+@media (max-width: 480px) {
+  .auth-screen {
+    padding: var(--space-4) var(--space-3);
+    align-items: flex-start;
+  }
+
+  .auth-screen__card {
+    padding: var(--space-5);
+  }
+}
