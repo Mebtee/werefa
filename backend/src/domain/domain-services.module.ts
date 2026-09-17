@@ -15,6 +15,9 @@ import { BookingService } from './services/booking.service';
 import { ResubmissionService } from './services/resubmission.service';
 import { SubscriptionService } from './services/subscription.service';
 import { CustomerStatusService } from './services/customer-status.service';
+import { AuthService } from './services/auth.service';
+import { RecoveryService } from './services/recovery.service';
+import { AdminManagementService } from './services/admin-management.service';
 
 /**
  * Domain/application services module (Prompt 41). Services implement the
@@ -42,6 +45,9 @@ import { CustomerStatusService } from './services/customer-status.service';
     ResubmissionService,
     SubscriptionService,
     CustomerStatusService,
+    AuthService,
+    RecoveryService,
+    AdminManagementService,
   ],
   exports: [
     GLOBAL_CLOCK,
@@ -55,6 +61,9 @@ import { CustomerStatusService } from './services/customer-status.service';
     ResubmissionService,
     SubscriptionService,
     CustomerStatusService,
+    AuthService,
+    RecoveryService,
+    AdminManagementService,
   ],
 })
 export class DomainServicesModule {}
