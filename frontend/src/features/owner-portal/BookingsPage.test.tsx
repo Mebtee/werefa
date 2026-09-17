@@ -1,13 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   fireEvent,
-  render,
   screen,
-  type RenderResult,
 } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { createMemoryRouter, RouterProvider } from 'react-router-dom'
-import { appRoutes } from '@/routes'
+import { renderAppAt } from '@/test/auth'
 import {
   resetStore,
   listBookings,
@@ -32,10 +29,8 @@ import type { BookingState, WeeklyWorkingHours } from '@/types/models'
 const user = userEvent.setup()
 const SECONDARY_SLUG = 'marathon-auto-care'
 
-function renderAt(path: string): RenderResult & { router: ReturnType<typeof createMemoryRouter> } {
-  const router = createMemoryRouter(appRoutes, { initialEntries: [path] })
-  const result = render(<RouterProvider router={router} />)
-  return { router, ...result }
+function renderAt(path: string) {
+  return renderAppAt(path)
 }
 
 beforeEach(() => {

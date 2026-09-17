@@ -1,15 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   fireEvent,
-  render,
   screen,
   waitFor,
   within,
-  type RenderResult,
 } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { createMemoryRouter, RouterProvider } from 'react-router-dom'
-import { appRoutes } from '@/routes'
+import { OWNER_PRINCIPAL, renderAppAt } from '@/test/auth'
 import { resetStore, getBusiness, setPause, listScheduleHistory, getOpenConflicts, createBookingEntry, acceptBooking, getBooking } from '@/mock/store'
 import { computeAvailableTimes } from '@/mock/availability'
 import { PRIMARY_BUSINESS_SLUG } from '@/mock/data'
@@ -43,10 +40,8 @@ function seedConfirmedBooking(
   return { id: accepted.value.id }
 }
 
-function renderAt(path: string): RenderResult & { router: ReturnType<typeof createMemoryRouter> } {
-  const router = createMemoryRouter(appRoutes, { initialEntries: [path] })
-  const result = render(<RouterProvider router={router} />)
-  return { router, ...result }
+function renderAt(path: string) {
+  return renderAppAt(path)
 }
 
 beforeEach(() => {
@@ -59,7 +54,7 @@ describe('owner dashboard', () => {
 
     await screen.findByRole('heading', { name: 'Dashboard' })
     expect(screen.getAllByText('Addis Beauty Lounge').length).toBeGreaterThan(0)
-    expect(screen.getByText('Demo session')).toBeInTheDocument()
+    expect(screen.getByText(OWNER_PRINCIPAL.email)).toBeInTheDocument()
     expect(screen.getByText('werefa.app/p/addis-beauty-lounge')).toBeInTheDocument()
     expect(screen.getByText(/active of 4 total/)).toBeInTheDocument()
     expect(screen.getByText(/bookings? today/)).toBeInTheDocument()
