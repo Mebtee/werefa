@@ -8,9 +8,10 @@
 // the runtime 'app' role operates under RLS (doc 07 §1/§4) with
 // SELECT/INSERT/UPDATE/DELETE grants applied by the migration.
 //
-// Deliberate deferrals (auth phase): User stores identity foundation only;
-// EmailVerification, OneTimeToken, Session, PasswordReset, EmergencyRecovery,
-// recovery tokens, and all auth flows are NOT yet modeled.
+// Auth phase (Prompt 43): sessions (server-side, revocable), Super Admin
+// emergency recovery and account lockout counters are modeled below. Email
+// verification/OneTimeToken/PasswordReset remain deliberately NOT modeled:
+// real email delivery and customer-facing self-service auth are out of scope.
 // Unresolved product decisions (spec §46) are intentionally NOT resolved;
 // the schema only anticipates them (e.g., prepayment_mode is selectable,
 // subscription prices are nullable/absent, single global timezone with no
@@ -151,23 +152,63 @@ enum FileCategory {
 }
 
 // ---------------------------------------------------------------------------
-// Identity foundation (auth phase will add sessions/tokens/recovery)
+// Identity + authentication (Prompt 43): sessions, lockout, Super Admin recovery
 // ---------------------------------------------------------------------------
 
 model User {
-  id              String    @id @default(uuid()) @db.Uuid
-  email           String    @unique @db.VarChar(320)
-  passwordHash    String    @map("password_hash") @db.VarChar(255)
-  role            UserRole  @default(OWNER)
-  isEmailVerified Boolean   @default(false) @map("is_email_verified")
-  isLockedUntil   DateTime? @map("is_locked_until") @db.Timestamptz(6)
-  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                  String    @id @default(uuid()) @db.Uuid
+  email               String    @unique @db.VarChar(320)
+  passwordHash        String    @map("password_hash") @db.VarChar(255)
+  role                UserRole  @default(OWNER)
+  isEmailVerified     Boolean   @default(false) @map("is_email_verified")
+  isLockedUntil       DateTime? @map("is_locked_until") @db.Timestamptz(6)
+  failedLoginAttempts Int       @default(0) @map("failed_login_attempts")
+  recoveryEmail       String?   @map("recovery_email") @db.VarChar(320)
+  passwordChangedAt   DateTime? @map("password_changed_at") @db.Timestamptz(6)
+  isDeactivated       Boolean   @default(false) @map("is_deactivated")
+  lastLoginAt         DateTime? @map("last_login_at") @db.Timestamptz(6)
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  businesses BusinessOwner[]
-  auditLogs  AuditEvent[]
+  businesses          BusinessOwner[]
+  auditLogs           AuditEvent[]
+  sessions            Session[]
+  emergencyRecoveries EmergencyRecovery[]
 
   @@map("user")
+}
+
+model Session {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash") @db.VarChar(64)
+  ip        String?   @db.VarChar(64)
+  device    String?   @db.VarChar(200)
+  browser   String?   @db.VarChar(200)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([userId, revokedAt])
+  @@map("session")
+}
+
+model EmergencyRecovery {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  codeHash  String    @map("code_hash") @db.VarChar(64)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
+  attempts  Int       @default(0)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, usedAt])
+  @@map("emergency_recovery")
 }
 
 // ---------------------------------------------------------------------------
