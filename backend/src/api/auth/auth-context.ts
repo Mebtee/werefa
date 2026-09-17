@@ -1,19 +1,24 @@
 import type { Request } from 'express';
 import { AppError } from '../../common/errors/app-error';
 import { AppConfig } from '../../config/app-config';
+import { CONFIG } from '../../config/config.constants';
 import { ActorContext, ownerActor } from '../../domain/authorization/actor-context';
+import { AuthService } from '../../domain/services/auth.service';
+import { parseCookieHeader } from '../../auth/cookie-utils';
 
 /**
- * HTTP authentication boundary (Prompt 42 §20).
+ * HTTP authentication boundary (Prompt 43 §20).
  *
- * Authentication is DEFERRED; there is no real session/token system yet. The
- * controllers never trust client headers directly. They depend on an
+ * Controllers never trust client headers directly. They depend on an
  * `AuthContextResolver` that produces an explicit `ActorContext`. Two
  * implementations exist:
  *
- *  - `DeniedAuthContextResolver` (production default): every owner-scoped route
- *    fails with UNAUTHENTICATED until a real auth provider lands. No header,
- *    no cookie, no request field can ever grant access.
+ *  - `SessionAuthContextResolver` (default): resolves the actor from the
+ *    httpOnly session cookie — the opaque token is sha-256 hashed and looked up
+ *    against a valid (non-revoked, non-expired) session row; the owning user
+ *    must still exist and not be deactivated. Invalid inputs all collapse to a
+ *    single UNAUTHENTICATED error, so the resolver reveals nothing about
+ *    whether a token, session or user exists.
  *  - `TestAuthContextResolver` (development/tests only): resolves an actor from
  *    `X-Actor-Role` + `X-Actor-Id`. It is constructed ONLY when
  *    `AUTH_TEST_ENABLED` is truthy AND the environment is not production, and it
@@ -23,12 +28,20 @@ import { ActorContext, ownerActor } from '../../domain/authorization/actor-conte
 export const AUTH_CONTEXT_RESOLVER = Symbol('AUTH_CONTEXT_RESOLVER');
 
 export interface AuthContextResolver {
-  resolve(req: Request): ActorContext;
+  resolve(req: Request): Promise<ActorContext>;
 }
 
-export class DeniedAuthContextResolver implements AuthContextResolver {
-  resolve(_req: Request): ActorContext {
-    throw AppError.unauthenticated('Authentication is not implemented yet.');
+/** Production default: real server-side session → actor resolution. */
+export class SessionAuthContextResolver implements AuthContextResolver {
+  constructor(
+    private readonly config: AppConfig,
+    private readonly authService: AuthService,
+  ) {}
+
+  async resolve(req: Request): Promise<ActorContext> {
+    const cookies = parseCookieHeader(req.headers.cookie);
+    const token = cookies[this.config.authCookieName];
+    return this.authService.resolveActorFromToken(token);
   }
 }
 
@@ -47,7 +60,7 @@ export class TestAuthContextResolver implements AuthContextResolver {
     }
   }
 
-  resolve(req: Request): ActorContext {
+  async resolve(req: Request): Promise<ActorContext> {
     const role = String(req.headers[TEST_HEADERS.role] ?? '');
     const id = String(req.headers[TEST_HEADERS.id] ?? '');
     switch (role.toUpperCase()) {
@@ -70,3 +83,24 @@ export class TestAuthContextResolver implements AuthContextResolver {
     throw AppError.unauthenticated('A valid test actor context must be provided.');
   }
 }
+
+/** Selects the resolver at construction time: test bridge or real sessions. */
+export function authContextResolverFactory(config: AppConfig, authService: AuthService): AuthContextResolver {
+  if (config.authTestEnabled && config.nodeEnv !== 'production') {
+    return new TestAuthContextResolver(config);
+  }
+  return new SessionAuthContextResolver(config, authService);
+}
+
+/**
+ * NestJS provider descriptor for AUTH_CONTEXT_RESOLVER. Registered once per
+ * module scope that consumes guards (AuthModule's own controllers and the
+ * ApiModule owner/admin controllers). Both scopes are stateless resolvers, so
+ * two instances are equivalent.
+ */
+export const AUTH_CONTEXT_RESOLVER_PROVIDER = {
+  provide: AUTH_CONTEXT_RESOLVER,
+  inject: [CONFIG, AuthService],
+  useFactory: (config: AppConfig, authService: AuthService): AuthContextResolver =>
+    authContextResolverFactory(config, authService),
+};

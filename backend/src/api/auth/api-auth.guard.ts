@@ -20,9 +20,9 @@ export interface AuthenticatedRequest extends Request {
 export class ApiAuthGuard implements CanActivate {
   constructor(@Inject(AUTH_CONTEXT_RESOLVER) private readonly resolver: AuthContextResolver) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<AuthenticatedRequest>();
-    req[ACTOR_CONTEXT_PROPERTY] = this.resolver.resolve(req);
+    req[ACTOR_CONTEXT_PROPERTY] = await this.resolver.resolve(req);
     return true;
   }
 }
