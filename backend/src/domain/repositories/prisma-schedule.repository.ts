@@ -138,7 +138,7 @@ export class PrismaScheduleRepository implements ScheduleRepository {
 
   async createException(
     tx: Prisma.TransactionClient,
-    args: { businessId: string; versionId: string; bookingId: number; createdBy?: string | null },
+    args: { businessId: string; versionId: string; bookingId: number; createdBy?: string | null; reason?: string | null },
   ): Promise<import('@prisma/client').ScheduleException> {
     return tx.scheduleException.create({
       data: {
@@ -146,6 +146,7 @@ export class PrismaScheduleRepository implements ScheduleRepository {
         scheduleVersionId: args.versionId,
         bookingId: args.bookingId,
         createdBy: args.createdBy ?? null,
+        reason: args.reason ?? null,
       },
     });
   }

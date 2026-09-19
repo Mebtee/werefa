@@ -3,11 +3,14 @@ import { ApiOperation, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { BusinessService } from '../../domain/services/business.service';
 import { CatalogService } from '../../domain/services/catalog.service';
 import { AvailabilityService } from '../../domain/services/availability.service';
+import { ScheduleService } from '../../domain/services/schedule.service';
 import {
   PublicAvailabilityView,
   PublicBusinessView,
+  PublicScheduleView,
   PublicServiceView,
   publicBusinessProjection,
+  publicScheduleProjection,
   publicServicesProjection,
 } from '../dto/projections';
 import { AvailabilityQuery, SlugParamsDto } from '../dto/payloads';
@@ -24,6 +27,7 @@ export class PublicController {
     @Inject(BusinessService) private readonly businessService: BusinessService,
     @Inject(CatalogService) private readonly catalogService: CatalogService,
     @Inject(AvailabilityService) private readonly availabilityService: AvailabilityService,
+    @Inject(ScheduleService) private readonly scheduleService: ScheduleService,
   ) {}
 
   private async requireBusiness(slug: string) {
@@ -47,6 +51,16 @@ export class PublicController {
   async services(@Param() params: SlugParamsDto): Promise<PublicServiceView[]> {
     const profile = await this.requireBusiness(params.slug);
     return publicServicesProjection(await this.catalogService.listActiveServices(profile.business.id));
+  }
+
+  @Get(':slug/schedule')
+  @ApiOperation({ summary: 'Publish-safe weekly schedule (working periods, blocks, special dates).' })
+  @ApiOkResponse({ type: PublicScheduleView })
+  async schedule(@Param() params: SlugParamsDto): Promise<PublicScheduleView> {
+    const profile = await this.requireBusiness(params.slug);
+    const version = await this.scheduleService.getActiveVersion(profile.business.id);
+    if (!version) throw new NotFoundException('No active schedule version.');
+    return publicScheduleProjection(version);
   }
 
   @Get(':slug/availability')

@@ -6,6 +6,7 @@ import {
   IsIn,
   IsInt,
   IsISO8601,
+  IsNumber,
   IsOptional,
   IsPhoneNumber,
   IsString,
@@ -205,6 +206,20 @@ export class UpdateBusinessProfilePayload {
   @IsOptional()
   @IsIn(BUSINESS_CATEGORIES)
   categoryCode?: string;
+
+  @ApiPropertyOptional({ example: 9.0108, description: 'REQ-211 AC1: the location may be saved with all three attributes.' })
+  @IsOptional()
+  @IsNumber({ allowNaN: false, allowInfinity: false })
+  @Min(-90)
+  @Max(90)
+  latitude?: number;
+
+  @ApiPropertyOptional({ example: 38.7612 })
+  @IsOptional()
+  @IsNumber({ allowNaN: false, allowInfinity: false })
+  @Min(-180)
+  @Max(180)
+  longitude?: number;
 }
 
 export class ChangeSlugPayload {
@@ -423,6 +438,12 @@ export class RecordExceptionPayload {
   @ApiProperty({ example: 'uuid' })
   @IsUUID('4')
   versionId: string;
+
+  @ApiPropertyOptional({ example: 'Owner keeps the booking', description: 'Why the owner keeps the booking despite the conflict (REQ-160/161).' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
 }
 
 // ---------------------------------------------------------------------------

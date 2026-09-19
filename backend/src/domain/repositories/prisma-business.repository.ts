@@ -74,6 +74,8 @@ export class PrismaBusinessRepository implements BusinessRepository {
       address?: string;
       phonePublic?: string;
       categoryCode?: string;
+      latitude?: number;
+      longitude?: number;
     },
   ): Promise<Business> {
     return tx.business.update({
@@ -84,6 +86,8 @@ export class PrismaBusinessRepository implements BusinessRepository {
         address: args.address,
         phonePublic: args.phonePublic,
         categoryCode: args.categoryCode,
+        latitude: args.latitude,
+        longitude: args.longitude,
       },
     });
   }

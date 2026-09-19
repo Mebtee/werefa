@@ -135,6 +135,43 @@ describe.skipIf(!RUN)('HTTP API end-to-end (real DB)', () => {
     expect(res.body.isPaused).toBe(false);
   });
 
+  it('owner saves the location as part of the profile and both owner and public projections expose it (REQ-211 AC1)', async () => {
+    const patched = await http()
+      .patch(`/api/v1/owner/businesses/${businessId}`)
+      .set(owner(OWNER_A))
+      .send({ name: 'Happy Salons Test', address: 'Bole Road, Addis Ababa', latitude: 9.0108, longitude: 38.7612, phonePublic: '+251911000001' })
+      .expect(200);
+    expect(patched.body.coordinates).toEqual({ latitude: 9.0108, longitude: 38.7612 });
+    expect(patched.body.address).toBe('Bole Road, Addis Ababa');
+    expect(patched.body.phonePublic).toBe('+251911000001');
+
+    const ownerView = await http().get(`/api/v1/owner/businesses/${businessId}`).set(owner(OWNER_A)).expect(200);
+    expect(ownerView.body.coordinates).toEqual({ latitude: 9.0108, longitude: 38.7612 });
+
+    const publicView = await http().get('/api/v1/public/businesses/happy-salons-test-1').expect(200);
+    expect(publicView.body.coordinates).toEqual({ latitude: 9.0108, longitude: 38.7612 });
+    expect(publicView.body.address).toBe('Bole Road, Addis Ababa');
+    expect(publicView.body.phonePublic).toBe('+251911000001');
+  });
+
+  it('rejects out-of-range coordinates with a validation envelope', async () => {
+    const res = await http()
+      .patch(`/api/v1/owner/businesses/${businessId}`)
+      .set(owner(OWNER_A))
+      .send({ latitude: 91, longitude: 38.7612 })
+      .expect(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    expect(res.body.error.fields.latitude).toBeTruthy();
+
+    const res2 = await http()
+      .patch(`/api/v1/owner/businesses/${businessId}`)
+      .set(owner(OWNER_A))
+      .send({ latitude: 9.0108, longitude: -181 })
+      .expect(400);
+    expect(res2.body.error.code).toBe('VALIDATION_ERROR');
+    expect(res2.body.error.fields.longitude).toBeTruthy();
+  });
+
   it('owner creates services, variations and add-ons', async () => {
     await createCatalog();
     const res = await http().get(`/api/v1/owner/businesses/${businessId}/services`).set(owner(OWNER_A)).expect(200);
@@ -219,6 +256,14 @@ describe.skipIf(!RUN)('HTTP API end-to-end (real DB)', () => {
     await http().get(`/api/v1/owner/businesses/${businessId}/bookings`).set(owner(OWNER_B)).expect(404);
     await http().post(`/api/v1/owner/businesses/${businessId}/bookings/${booking1Id}/accept`).set(owner(OWNER_B)).expect(404);
     await http().get(`/api/v1/owner/businesses/${businessId}/schedule/current`).set(owner(OWNER_B)).expect(404);
+    await http().get(`/api/v1/owner/businesses/${businessId}/services`).set(owner(OWNER_B)).expect(404);
+    await http()
+      .patch(`/api/v1/owner/businesses/${businessId}/services/${serviceId}`)
+      .set(owner(OWNER_B))
+      .send({ name: 'Stolen' })
+      .expect(404);
+    await http().post(`/api/v1/owner/businesses/${businessId}/services/${serviceId}/deactivate`).set(owner(OWNER_B)).expect(404);
+    await http().post(`/api/v1/owner/businesses/${businessId}/services/${serviceId}/reactivate`).set(owner(OWNER_B)).expect(404);
   });
 
   it('owner accepts proof → confirmed, then reschedules and cancels with full history', async () => {
@@ -296,6 +341,195 @@ describe.skipIf(!RUN)('HTTP API end-to-end (real DB)', () => {
       .expect(400);
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
     expect(typeof res.body.error.fields).toBe('object');
+  });
+
+  it('rejects invalid service create/update input with a validation envelope', async () => {
+    const res = await http()
+      .post(`/api/v1/owner/businesses/${businessId}/services`)
+      .set(owner(OWNER_A))
+      .send({ name: '', basePriceMinor: -5, baseDurationMinutes: 0 })
+      .expect(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    expect(res.body.error.fields.name).toBeTruthy();
+    expect(res.body.error.fields.basePriceMinor).toBeTruthy();
+    expect(res.body.error.fields.baseDurationMinutes).toBeTruthy();
+
+    await http()
+      .patch(`/api/v1/owner/businesses/${businessId}/services/${serviceId}`)
+      .set(owner(OWNER_A))
+      .send({ basePriceMinor: -1 })
+      .expect(400);
+    await http()
+      .patch(`/api/v1/owner/businesses/${businessId}/services/${serviceId}`)
+      .set(owner(OWNER_A))
+      .send({ baseDurationMinutes: 0 })
+      .expect(400);
+  });
+
+  it('rejects malformed service identifiers and bad variation payloads with a validation envelope', async () => {
+    const res1 = await http()
+      .patch(`/api/v1/owner/businesses/${businessId}/services/not-a-uuid`)
+      .set(owner(OWNER_A))
+      .send({ name: 'Rename' })
+      .expect(400);
+    expect(res1.body.error.code).toBe('VALIDATION_ERROR');
+    await http().post(`/api/v1/owner/businesses/${businessId}/services/not-a-uuid/deactivate`).set(owner(OWNER_A)).expect(400);
+    await http().post(`/api/v1/owner/businesses/not-a-uuid/services`).set(owner(OWNER_A)).send({ name: 'X', basePriceMinor: 0, baseDurationMinutes: 1 }).expect(400);
+
+    const res2 = await http()
+      .post(`/api/v1/owner/businesses/${businessId}/services/${serviceId}/variations`)
+      .set(owner(OWNER_A))
+      .send({ name: '', priceDeltaMinor: -1, durationDeltaMinutes: -5 })
+      .expect(400);
+    expect(res2.body.error.code).toBe('VALIDATION_ERROR');
+    expect(res2.body.error.fields.name).toBeTruthy();
+    expect(res2.body.error.fields.priceDeltaMinor).toBeTruthy();
+
+    const res3 = await http()
+      .post(`/api/v1/owner/businesses/${businessId}/services/${serviceId}/addons`)
+      .set(owner(OWNER_A))
+      .send({ name: '', priceDeltaMinor: -1, durationDeltaMinutes: -5 })
+      .expect(400);
+    expect(res3.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('deactivates a service that already has an open booking, and hides/reactivates it on the public page (REQ-077/078/079/081)', async () => {
+    // booking2 is PAYMENT_PENDING against the Haircut service.
+    const deactivated = await http()
+      .post(`/api/v1/owner/businesses/${businessId}/services/${serviceId}/deactivate`)
+      .set(owner(OWNER_A))
+      .expect(200);
+    expect(deactivated.body.isActive).toBe(false);
+
+    const publicServices = await http().get('/api/v1/public/businesses/happy-salons-test-1/services').expect(200);
+    expect(publicServices.body.find((s: { id: string }) => s.id === serviceId)).toBeUndefined();
+
+    const ownerList = await http().get(`/api/v1/owner/businesses/${businessId}/services`).set(owner(OWNER_A)).expect(200);
+    const ownerService = ownerList.body.find((s: { id: string }) => s.id === serviceId);
+    expect(ownerService.isActive).toBe(false);
+
+    const reactivated = await http()
+      .post(`/api/v1/owner/businesses/${businessId}/services/${serviceId}/reactivate`)
+      .set(owner(OWNER_A))
+      .expect(200);
+    expect(reactivated.body.isActive).toBe(true);
+
+    const publicAgain = await http().get('/api/v1/public/businesses/happy-salons-test-1/services').expect(200);
+    expect(publicAgain.body.find((s: { id: string }) => s.id === serviceId)).toBeTruthy();
+  });
+
+  it('service price/duration edits never mutate booking component snapshots (REQ-076)', async () => {
+    const before = await http().get(`/api/v1/owner/businesses/${businessId}/bookings/${booking2Id}`).set(owner(OWNER_A)).expect(200);
+    expect(before.body.components).toContainEqual({ componentType: 'SERVICE', name: 'Haircut', unitPriceMinor: 10000, durationMinutes: 60 });
+    expect(before.body.components).toContainEqual({ componentType: 'VARIATION', name: 'Styling', unitPriceMinor: 2000, durationMinutes: 10 });
+
+    const updated = await http()
+      .patch(`/api/v1/owner/businesses/${businessId}/services/${serviceId}`)
+      .set(owner(OWNER_A))
+      .send({ basePriceMinor: 22000, baseDurationMinutes: 75 })
+      .expect(200);
+    expect(updated.body.basePriceMinor).toBe(22000);
+    expect(updated.body.baseDurationMinutes).toBe(75);
+
+    const after = await http().get(`/api/v1/owner/businesses/${businessId}/bookings/${booking2Id}`).set(owner(OWNER_A)).expect(200);
+    expect(after.body.components).toContainEqual({ componentType: 'SERVICE', name: 'Haircut', unitPriceMinor: 10000, durationMinutes: 60 });
+    expect(after.body.components).toContainEqual({ componentType: 'VARIATION', name: 'Styling', unitPriceMinor: 2000, durationMinutes: 10 });
+  });
+
+  it('open conflicts: owner keeps a conflicting booking with reason; non-conflict is rejected (REQ-092/093/160/161)', async () => {
+    await setupWorld();
+    const body = { ...CREATE_BODY, serviceId, variationIds: [variationId], addOnIds: [addOnId] };
+    await http()
+      .post('/api/v1/customer/bookings')
+      .send({ ...body, startAt: '2026-11-24T10:00:00.000Z', submissionKey: 'invoice-20261124-0009' })
+      .expect(201);
+
+    const list = await http().get(`/api/v1/owner/businesses/${businessId}/bookings`).set(owner(OWNER_A)).expect(200);
+    const kept = list.body.find((b: { startAt: string }) => b.startAt === '2026-11-24T10:00:00.000Z');
+    expect(kept).toBeTruthy();
+    const keptId = kept.bookingId as number;
+
+    // New ACTIVE version that drops Tuesday (2026-11-24): the booking becomes impossible (REQ-090 keeps the booking untouched).
+    const saved = await http()
+      .put(`/api/v1/owner/businesses/${businessId}/schedule`)
+      .set(owner(OWNER_A))
+      .send({
+        name: 'No Tuesday',
+        workingPeriods: [1, 3, 4, 5, 6, 7].map((weekday) => ({ weekday, startMinutes: 540, endMinutes: 1020 })),
+        blockedPeriods: [],
+        specialDates: [],
+      })
+      .expect(200);
+    const newVersionId = saved.body.versionId as string;
+
+    const conflicts = await http().get(`/api/v1/owner/businesses/${businessId}/schedule/conflicts`).set(owner(OWNER_A)).expect(200);
+    expect(conflicts.body).toHaveLength(1);
+    expect(conflicts.body[0].bookingId).toBe(keptId);
+    expect(conflicts.body[0].status).toBe('PAYMENT_PENDING');
+    expect(conflicts.body[0].customerName).toBe('Awit Haile');
+    expect(conflicts.body[0].reason).toBe('OUTSIDE_HOURS');
+    expect(conflicts.body[0].reasonDetail).toContain('Outside working hours');
+    expect(conflicts.body[0].services.some((s: { name: string }) => s.name === 'Haircut')).toBe(true);
+
+    const keptDetail = await http().get(`/api/v1/owner/businesses/${businessId}/bookings/${keptId}`).set(owner(OWNER_A)).expect(200);
+    expect(keptDetail.body.status).toBe('PAYMENT_PENDING');
+    expect(keptDetail.body.startAt).toBe('2026-11-24T10:00:00.000Z');
+
+    const exc = await http()
+      .post(`/api/v1/owner/businesses/${businessId}/schedule/exceptions`)
+      .set(owner(OWNER_A))
+      .send({ bookingId: keptId, versionId: newVersionId, reason: 'Owner keeps the slot' })
+      .expect(201);
+    expect(exc.body.reason).toBe('Owner keeps the slot');
+
+    const cleared = await http().get(`/api/v1/owner/businesses/${businessId}/schedule/conflicts`).set(owner(OWNER_A)).expect(200);
+    expect(cleared.body).toHaveLength(0);
+
+    const detail = await http().get(`/api/v1/owner/businesses/${businessId}/bookings/${keptId}`).set(owner(OWNER_A)).expect(200);
+    const history = detail.body.history as { toStatus: string; reason: string | null }[];
+    expect(history[history.length - 1].toStatus).toBe('PAYMENT_PENDING');
+    expect(history[history.length - 1].reason).toBe('Schedule exception: Owner keeps the slot');
+
+    // A feasible booking (booking2, Sunday) cannot be kept as an exception.
+    const tooGood = await http()
+      .post(`/api/v1/owner/businesses/${businessId}/schedule/exceptions`)
+      .set(owner(OWNER_A))
+      .send({ bookingId: booking2Id, versionId: newVersionId, reason: 'no conflict here' })
+      .expect(400);
+    expect(tooGood.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('public schedule projection and Super Admin-only history access (REQ-167/168)', async () => {
+    const pub = await http().get('/api/v1/public/businesses/happy-salons-test-1/schedule').expect(200);
+    expect(pub.body.workingPeriods).toHaveLength(6);
+    expect(pub.body.workingPeriods.some((w: { weekday: number }) => w.weekday === 2)).toBe(false);
+    expect(pub.body.versionId).toBeUndefined();
+
+    const saId = '20000000-0000-4000-8000-0000000000sa';
+    const adminVersions = await http()
+      .get(`/api/v1/admin/businesses/${businessId}/schedule/versions`)
+      .set('x-actor-role', 'SUPER_ADMIN')
+      .set('x-actor-id', saId)
+      .expect(200);
+    expect(adminVersions.body).toHaveLength(2);
+    expect(adminVersions.body[0].workingPeriods).toHaveLength(7);
+    expect(adminVersions.body[1].workingPeriods).toHaveLength(6);
+    expect(adminVersions.body[1].snapshots).toBeUndefined();
+
+    const adminId = '30000000-0000-4000-8000-0000000000ad';
+    await http()
+      .get(`/api/v1/admin/businesses/${businessId}/schedule/versions`)
+      .set('x-actor-role', 'ADMIN')
+      .set('x-actor-id', adminId)
+      .expect(403);
+    await http()
+      .get(`/api/v1/admin/businesses/${businessId}/schedule/versions`)
+      .set(owner(OWNER_B))
+      .expect(403);
+    await http()
+      .get(`/api/v1/owner/businesses/${businessId}/schedule/versions`)
+      .set(owner(OWNER_A))
+      .expect(200);
   });
 });
 

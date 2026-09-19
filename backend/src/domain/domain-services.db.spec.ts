@@ -269,6 +269,116 @@ describe.skipIf(!RUN)('domain application services (live PostgreSQL 16)', () => 
     expect(pendingCount).toBe(1); // v1 demoted; v2 promoted. Exactly one ACTIVE remains.
   }, 20000);
 
+  it('duplicate special dates are rejected as VALIDATION_ERROR (no P2002 leak)', async () => {
+    const w = await readyBusiness(33);
+    await expectCode(
+      scheduleService.saveTemplate(ownerActor(w.ownerId), w.businessId, {
+        template: {
+          workingPeriods: [{ weekday: 1, startMinutes: 540, endMinutes: 1020 }],
+          blockedPeriods: [],
+          specialDates: [
+            { date: new Date('2026-09-14T00:00:00Z'), kind: 'CLOSED' },
+            { date: new Date('2026-09-14T00:00:00Z'), kind: 'CUSTOM', startMinutes: 600, endMinutes: 780 },
+          ],
+        },
+      }),
+      ErrorCode.VALIDATION_ERROR,
+    );
+    const versions = await prisma.scheduleVersion.count({ where: { businessId: w.businessId } });
+    expect(versions).toBe(1); // no version was persisted
+  });
+
+  it('open conflicts: outside-hours booking listed with booking detail and reason, keep clears it (REQ-092/093/160/161/090)', async () => {
+    const w = await readyBusiness(34);
+    const booking = (await makeBooking(w, new Date('2026-09-14T10:00:00Z'), 'key-conf-16a')).booking;
+
+    const saved = await scheduleService.saveTemplate(ownerActor(w.ownerId), w.businessId, {
+      template: {
+        // Monday (weekday 1) is removed; the 2026-09-14 booking now has no window.
+        workingPeriods: Array.from({ length: 6 }, (_, i) => ({ weekday: i + 2, startMinutes: 540, endMinutes: 1020 })),
+        blockedPeriods: [],
+        specialDates: [],
+      },
+    });
+
+    const conflicts = await scheduleService.listOpenConflicts(w.businessId);
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0].bookingId).toBe(booking.id);
+    expect(conflicts[0].status).toBe('PAYMENT_PENDING');
+    expect(conflicts[0].customerName).toBe('Liya Tesfaye');
+    expect(conflicts[0].services.map((s) => s.name)).toEqual(['Haircut', 'Styling', 'Wash']);
+    expect(conflicts[0].reason).toBe('OUTSIDE_HOURS');
+    expect(conflicts[0].reasonDetail).toContain('Outside working hours');
+
+    // REQ-090: the schedule change never mutates the booking itself.
+    const unchanged = await prisma.booking.findUnique({ where: { id: booking.id } });
+    expect(unchanged!.status).toBe('PAYMENT_PENDING');
+    expect(unchanged!.startAt.toISOString()).toBe('2026-09-14T10:00:00.000Z');
+
+    // Keep the booking with a reason → exception + audit history row (from NULL).
+    const exc = await scheduleService.recordScheduleException(ownerActor(w.ownerId), w.businessId, booking.id, saved.versionId, 'Family visit');
+    expect(exc.reason).toBe('Family visit');
+    const row = await prisma.scheduleException.findUnique({ where: { id: exc.id } });
+    expect(row!.reason).toBe('Family visit');
+    expect(row!.createdBy).toBe(w.ownerId);
+
+    const history = await prisma.bookingStatusHistory.findMany({ where: { bookingId: booking.id }, orderBy: { id: 'asc' } });
+    expect(history).toHaveLength(2); // creation + keep
+    expect(history[1].fromStatus).toBeNull();
+    expect(history[1].toStatus).toBe('PAYMENT_PENDING');
+    expect(history[1].reason).toBe('Schedule exception: Family visit');
+
+    expect(await scheduleService.listOpenConflicts(w.businessId)).toHaveLength(0);
+
+    // Idempotent keep → same row, no second history entry.
+    const again = await scheduleService.recordScheduleException(ownerActor(w.ownerId), w.businessId, booking.id, saved.versionId, 'Family visit');
+    expect(again.id).toBe(exc.id);
+    expect(await prisma.bookingStatusHistory.count({ where: { bookingId: booking.id } })).toBe(2);
+
+    // A non-conflicting booking cannot be kept as an exception.
+    const ok = (await makeBooking(w, new Date('2026-09-19T10:00:00Z'), 'key-conf-16b')).booking; // Saturday is still open
+    await expectCode(
+      scheduleService.recordScheduleException(ownerActor(w.ownerId), w.businessId, ok.id, saved.versionId),
+      ErrorCode.VALIDATION_ERROR,
+    );
+
+    // Oversized reason is rejected.
+    await expectCode(
+      scheduleService.recordScheduleException(ownerActor(w.ownerId), w.businessId, booking.id, saved.versionId, 'x'.repeat(501)),
+      ErrorCode.VALIDATION_ERROR,
+    );
+  });
+
+  it('closed special date and blocked period yield distinct conflict reasons', async () => {
+    const w = await readyBusiness(35);
+    await makeBooking(w, new Date('2026-09-14T10:00:00Z'), 'key-closed-35');
+    await scheduleService.saveTemplate(ownerActor(w.ownerId), w.businessId, {
+      template: {
+        workingPeriods: [],
+        blockedPeriods: [],
+        specialDates: [{ date: new Date('2026-09-14T00:00:00Z'), kind: 'CLOSED' }],
+      },
+    });
+    const closed = await scheduleService.listOpenConflicts(w.businessId);
+    expect(closed).toHaveLength(1);
+    expect(closed[0].reason).toBe('CLOSED');
+    expect(closed[0].reasonDetail).toContain('Closed on 2026-09-14');
+
+    const w2 = await readyBusiness(36);
+    await makeBooking(w2, new Date('2026-09-14T10:00:00Z'), 'key-block-36');
+    await scheduleService.saveTemplate(ownerActor(w2.ownerId), w2.businessId, {
+      template: {
+        workingPeriods: [{ weekday: 1, startMinutes: 540, endMinutes: 1020 }],
+        blockedPeriods: [{ dayOfWeek: 1, startMinutes: 600, endMinutes: 660 }],
+        specialDates: [],
+      },
+    });
+    const blocked = await scheduleService.listOpenConflicts(w2.businessId);
+    expect(blocked).toHaveLength(1);
+    expect(blocked[0].reason).toBe('BLOCKED');
+    expect(blocked[0].reasonDetail).toContain('Blocked period');
+  });
+
   it('booking creation persists the full aggregate: booking, payment, proof, lock, components, history', async () => {
     const w = await readyBusiness(6);
     const result = await makeBooking(w, new Date('2026-09-14T10:00:00Z'), 'key-happy-1');
@@ -537,5 +647,48 @@ describe.skipIf(!RUN)('domain application services (live PostgreSQL 16)', () => 
     await businessService.pause(ownerActor(w.ownerId), w.businessId, {});
     await prisma.subscription.update({ where: { businessId: w.businessId }, data: { status: 'EXPIRED' } });
     await expectCode(businessService.resumeManual(ownerActor(w.ownerId), w.businessId), ErrorCode.SUBSCRIPTION_EXPIRED);
+  });
+
+  it('REQ-077: hard deletion of a service is refused while it still has future bookings', async () => {
+    const w = await readyBusiness(30);
+    await makeBooking(w, new Date('2026-09-20T10:00:00Z'), 'key-del-30');
+    await expectCode(
+      catalogService.deleteService(ownerActor(w.ownerId), w.businessId, w.serviceId),
+      ErrorCode.VALIDATION_ERROR,
+    );
+    const remaining = await catalogService.listServicesForOwner(ownerActor(w.ownerId), w.businessId);
+    expect(remaining).toHaveLength(1);
+  });
+
+  it('REQ-077/078/081: a service with an open booking is deactivated (never deleted), hidden publicly, then reactivated', async () => {
+    const w = await readyBusiness(31);
+    await makeBooking(w, new Date('2026-09-20T11:00:00Z'), 'key-del-31');
+
+    await catalogService.deactivateService(ownerActor(w.ownerId), w.businessId, w.serviceId);
+    const ownerList = await catalogService.listServicesForOwner(ownerActor(w.ownerId), w.businessId);
+    expect(ownerList[0].isActive).toBe(false);
+    expect(await catalogService.listActiveServices(w.businessId)).toHaveLength(0);
+
+    await catalogService.reactivateService(ownerActor(w.ownerId), w.businessId, w.serviceId);
+    expect(await catalogService.listActiveServices(w.businessId)).toHaveLength(1);
+
+    // The open booking still references the service, so deletion stays refused.
+    await expectCode(
+      catalogService.deleteService(ownerActor(w.ownerId), w.businessId, w.serviceId),
+      ErrorCode.VALIDATION_ERROR,
+    );
+  });
+
+  it('REQ-077: deletion succeeds once no active booking references the service (snapshots preserved)', async () => {
+    const w = await readyBusiness(32);
+    const created = await makeBooking(w, new Date('2026-09-20T12:00:00Z'), 'key-del-32');
+    await bookingService.acceptProof(ownerActor(w.ownerId), w.businessId, created.booking.id);
+    await bookingService.cancelBooking(ownerActor(w.ownerId), w.businessId, created.booking.id);
+
+    await catalogService.deleteService(ownerActor(w.ownerId), w.businessId, w.serviceId);
+    expect(await prisma.service.findMany({ where: { id: w.serviceId } })).toHaveLength(0);
+    const components = await prisma.bookingComponent.findMany({ where: { businessId: w.businessId } });
+    expect(components).toHaveLength(3);
+    expect(components.map((c) => c.nameSnapshot)).toContain('Haircut');
   });
 });

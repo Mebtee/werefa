@@ -34,4 +34,6 @@ export const isOwner = (ctx: ActorContext): boolean => ctx.actorType === 'OWNER'
 export const isAdminOrSuperAdmin = (ctx: ActorContext): boolean =>
   ctx.actorType === 'ADMIN' || ctx.actorType === 'SUPER_ADMIN';
 
+export const isSuperAdmin = (ctx: ActorContext): boolean => ctx.actorType === 'SUPER_ADMIN';
+
 export const isSystem = (ctx: ActorContext): boolean => ctx.actorType === 'SYSTEM';

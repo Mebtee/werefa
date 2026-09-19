@@ -3,7 +3,7 @@ import { BusinessWithOwner } from '../repositories/business.repository.port';
 import { BUSINESS_REPOSITORY } from '../repositories/tokens';
 import { BusinessRepository } from '../repositories/business.repository.port';
 import { domainErrors } from '../errors/domain-errors';
-import { ActorContext, isAdminOrSuperAdmin, isOwner, isSystem } from './actor-context';
+import { ActorContext, isAdminOrSuperAdmin, isOwner, isSuperAdmin, isSystem } from './actor-context';
 
 /**
  * Explicit tenant authorization boundary (Prompt 41 §25, doc 04).
@@ -32,6 +32,12 @@ export class TenantGuard {
   requireAdminOrSuperAdmin(ctx: ActorContext): void {
     if (!isAdminOrSuperAdmin(ctx)) {
       throw domainErrors.unauthorizedTenantAccess('This operation requires an admin or super admin context.');
+    }
+  }
+
+  requireSuperAdmin(ctx: ActorContext): void {
+    if (!isSuperAdmin(ctx)) {
+      throw domainErrors.unauthorizedTenantAccess('This operation requires a super admin context.');
     }
   }
 

@@ -7,6 +7,7 @@ import { OwnerBusinessController } from './owner/business.controller';
 import { OwnerCatalogController } from './owner/catalog.controller';
 import { OwnerScheduleController } from './owner/schedule.controller';
 import { OwnerBookingController } from './owner/booking.controller';
+import { AdminScheduleController } from './admin/schedule.controller';
 
 /**
  * HTTP API & contract layer (Prompt 42/43).
@@ -29,6 +30,7 @@ import { OwnerBookingController } from './owner/booking.controller';
     OwnerCatalogController,
     OwnerScheduleController,
     OwnerBookingController,
+    AdminScheduleController,
   ],
   providers: [AUTH_CONTEXT_RESOLVER_PROVIDER],
 })

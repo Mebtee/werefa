@@ -11,9 +11,10 @@ import { withBusinessAdvisoryLock } from '../transactions/business-advisory-lock
 
 /**
  * Service catalog lifecycle (REQ-069 … REQ-081; Prompt 41 §6). Owner-scoped, no
- * hard deletes — deactivation only; a service with future bookings cannot be
- * deactivated (REQ-077). `validateCombination` builds immutable component
- * snapshots for booking creation (REQ-074/076) and refuses inactive services.
+ * hard deletes — services with future bookings refuse deletion (REQ-077) and
+ * are deactivated instead (REQ-078). `validateCombination` builds immutable
+ * component snapshots for booking creation (REQ-074/076) and refuses inactive
+ * services.
  */
 @Injectable()
 export class CatalogService {
@@ -112,13 +113,33 @@ export class CatalogService {
 
   async deactivateService(ctx: ActorContext, businessId: string, serviceId: string): Promise<void> {
     await this.tenantGuard.requireOwnedBusiness(ctx, businessId);
-    const hasFuture = await this.bookingRepo.hasServiceFutureBookings(businessId, serviceId);
-    if (hasFuture) {
-      throw domainErrors.invalidSchedule({ serviceId: 'Service cannot be deactivated because it has future bookings (REQ-077).' });
-    }
+    // REQ-078: a service with future bookings is deactivated instead of deleted.
     await withBusinessAdvisoryLock(this.prisma, businessId, async (tx) => {
       const updated = await tx.service.updateMany({ where: { id: serviceId, businessId, isActive: true }, data: { isActive: false } });
       if (updated.count !== 1) throw domainErrors.businessNotFound('Service not found.');
+    });
+  }
+
+  /**
+   * REQ-077: hard deletion is refused while the service still has future
+   * bookings — deactivate instead. Not exposed over HTTP; owners only see the
+   * activate/deactivate path in the UI.
+   */
+  async deleteService(ctx: ActorContext, businessId: string, serviceId: string): Promise<void> {
+    await this.tenantGuard.requireOwnedBusiness(ctx, businessId);
+    const hasFutureBookings = await this.bookingRepo.hasServiceFutureBookings(businessId, serviceId);
+    if (hasFutureBookings) {
+      throw domainErrors.invalidSchedule({
+        serviceId: 'Service has future bookings and cannot be deleted (REQ-077). Deactivate it instead.',
+      });
+    }
+    await withBusinessAdvisoryLock(this.prisma, businessId, async (tx) => {
+      // Variations/add-ons only exist while the service exists; booking history
+      // references are kept via component snapshots (serviceId SetNull).
+      await tx.addOn.deleteMany({ where: { businessId, serviceId } });
+      await tx.serviceVariation.deleteMany({ where: { businessId, serviceId } });
+      const deleted = await tx.service.deleteMany({ where: { id: serviceId, businessId } });
+      if (deleted.count !== 1) throw domainErrors.businessNotFound('Service not found.');
     });
   }
 

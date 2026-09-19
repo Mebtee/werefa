@@ -41,6 +41,8 @@ export interface BusinessRepository {
       address?: string;
       phonePublic?: string;
       categoryCode?: string;
+      latitude?: number;
+      longitude?: number;
     },
   ): Promise<Business>;
   changeSlug(tx: Prisma.TransactionClient, args: { businessId: string; publicSlug: string }): Promise<Business>;

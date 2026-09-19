@@ -74,6 +74,8 @@ export class OwnerBusinessController {
       address: payload.address,
       phonePublic: payload.phonePublic,
       categoryCode: payload.categoryCode,
+      latitude: payload.latitude,
+      longitude: payload.longitude,
     });
     return ownerBusinessProjection(await this.businessService.getOwnedProfile(actor, params.businessId));
   }

@@ -48,6 +48,6 @@ export interface ScheduleRepository {
   listPendingVersions(businessId: string): Promise<ScheduleVersion[]>;
   createException(
     tx: Prisma.TransactionClient,
-    args: { businessId: string; versionId: string; bookingId: number; createdBy?: string | null },
+    args: { businessId: string; versionId: string; bookingId: number; createdBy?: string | null; reason?: string | null },
   ): Promise<ScheduleException>;
 }

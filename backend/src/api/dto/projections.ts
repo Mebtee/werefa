@@ -221,6 +221,7 @@ export class OwnerBusinessView {
   @ApiPropertyOptional() description: string | null;
   @ApiPropertyOptional() address: string | null;
   @ApiPropertyOptional() phonePublic: string | null;
+  @ApiPropertyOptional() coordinates: { latitude: number | null; longitude: number | null };
   @ApiProperty({ example: false }) isDeactivated: boolean;
   @ApiProperty({ example: false }) isPaused: boolean;
   @ApiPropertyOptional() pauseMessage: string | null;
@@ -242,6 +243,10 @@ export function ownerBusinessProjection(source: { business: BusinessWithOwner; s
     description: business.description,
     address: business.address,
     phonePublic: business.phonePublic,
+    coordinates: {
+      latitude: business.latitude == null ? null : Number(business.latitude),
+      longitude: business.longitude == null ? null : Number(business.longitude),
+    },
     isDeactivated: business.deactivatedAt != null,
     isPaused: settings?.isPaused ?? false,
     pauseMessage: settings?.pauseMessage ?? null,
@@ -475,9 +480,87 @@ export class OwnerScheduleSaveResultView {
   @ApiProperty({ type: OwnerScheduleView }) version: OwnerScheduleView;
 }
 
+export class PublicScheduleView {
+  @ApiProperty({ type: [WorkingPeriodView] }) workingPeriods: WorkingPeriodView[];
+  @ApiProperty({ type: [BlockedPeriodView] }) blockedPeriods: BlockedPeriodView[];
+  @ApiProperty({ type: [SpecialDateView] }) specialDates: SpecialDateView[];
+}
+
+export function publicScheduleProjection(version: ScheduleWithDetails): PublicScheduleView {
+  return {
+    workingPeriods: version.workingPeriods.map((w) => ({
+      weekday: w.weekday,
+      startMinutes: w.startMinutes,
+      endMinutes: w.endMinutes,
+    })),
+    blockedPeriods: version.blockedPeriods.map((b) => ({
+      dayOfWeek: b.dayOfWeek,
+      startMinutes: b.startMinutes,
+      endMinutes: b.endMinutes,
+    })),
+    specialDates: version.specialDates.map((s) => ({
+      date: s.date.toISOString().slice(0, 10),
+      kind: s.kind,
+      startMinutes: s.startMinutes,
+      endMinutes: s.endMinutes,
+    })),
+  };
+}
+
 export class ScheduleExceptionView {
   @ApiProperty({ example: 'uuid' }) id: string;
   @ApiProperty({ example: 'uuid' }) scheduleVersionId: string;
   @ApiProperty({ example: 1 }) bookingId: number;
+  @ApiPropertyOptional({ example: 'Owner keeps the booking' }) reason: string | null;
   @ApiProperty() createdAt: string;
+}
+
+export class ScheduleConflictBookingComponentView {
+  @ApiProperty({ example: 'Haircut' }) name: string;
+  @ApiProperty({ example: 60 }) durationMinutes: number;
+  @ApiProperty({ example: '2500' }) unitPriceMinor: string;
+}
+
+export class OwnerScheduleConflictView {
+  @ApiProperty({ example: 1 }) bookingId: number;
+  @ApiProperty({ enum: ['PAYMENT_PENDING', 'CONFIRMED'] }) status: string;
+  @ApiProperty() startAt: string;
+  @ApiProperty() endAt: string;
+  @ApiProperty() createdAt: string;
+  @ApiProperty({ example: 'Awit' }) customerName: string;
+  @ApiProperty({ example: '+2519…' }) customerPhone: string;
+  @ApiPropertyOptional() note: string | null;
+  @ApiProperty({ example: 'OUTSIDE_HOURS', enum: ['CLOSED', 'OUTSIDE_HOURS', 'BLOCKED'] }) reason: string;
+  @ApiProperty({ example: 'Outside working hours on 2026-09-20.' }) reasonDetail: string;
+  @ApiProperty({ type: [ScheduleConflictBookingComponentView] }) services: ScheduleConflictBookingComponentView[];
+}
+
+export function ownerScheduleConflictProjection(
+  conflict: {
+    bookingId: number;
+    status: string;
+    startAt: Date;
+    endAt: Date;
+    createdAt: Date;
+    customerName: string;
+    customerPhone: string;
+    note: string | null;
+    reason: string;
+    reasonDetail: string;
+    services: { name: string; durationMinutes: number; unitPriceMinor: string }[];
+  },
+): OwnerScheduleConflictView {
+  return {
+    bookingId: conflict.bookingId,
+    status: conflict.status,
+    startAt: conflict.startAt.toISOString(),
+    endAt: conflict.endAt.toISOString(),
+    createdAt: conflict.createdAt.toISOString(),
+    customerName: conflict.customerName,
+    customerPhone: conflict.customerPhone,
+    note: conflict.note,
+    reason: conflict.reason,
+    reasonDetail: conflict.reasonDetail,
+    services: conflict.services,
+  };
 }

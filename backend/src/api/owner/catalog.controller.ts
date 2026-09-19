@@ -8,8 +8,7 @@ import { BusinessIdParamDto, CreateServicePayload, CreateVariantPayload, Service
 
 /**
  * Owner service-catalog management (Prompt 42 §7; REQ-069 … REQ-081).
- * No hard deletes — deactivate only; a service with future bookings cannot be
- * deactivated (REQ-077).
+ * No hard deletes — deactivation only (REQ-077/078).
  */
 @ApiTags('owner · catalog')
 @Controller('owner/businesses')

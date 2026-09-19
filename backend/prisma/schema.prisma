@@ -457,6 +457,7 @@ model ScheduleException {
   scheduleVersionId String   @map("schedule_version_id") @db.Uuid
   bookingId         Int      @map("booking_id")
   createdBy         String?  @map("created_by") @db.Uuid
+  reason            String?  @db.VarChar(2000)
   createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   business        Business        @relation(fields: [businessId], references: [id], onDelete: Restrict)

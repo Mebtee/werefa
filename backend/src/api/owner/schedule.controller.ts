@@ -5,12 +5,12 @@ import { TenantGuard } from '../../domain/authorization/tenant-guard';
 import { ActorContext } from '../../domain/authorization/actor-context';
 import { Actor, ApiAuthGuard } from '../auth/api-auth.guard';
 import {
+  OwnerScheduleConflictView,
   OwnerScheduleSaveResultView,
-  OwnerScheduleVersionView,
   OwnerScheduleView,
   ScheduleExceptionView,
+  ownerScheduleConflictProjection,
   ownerScheduleProjection,
-  ownerScheduleVersionProjection,
 } from '../dto/projections';
 import { BusinessIdParamDto, RecordExceptionPayload, SaveSchedulePayload } from '../dto/payloads';
 
@@ -39,12 +39,21 @@ export class OwnerScheduleController {
   }
 
   @Get(':businessId/schedule/versions')
-  @ApiOperation({ summary: 'Schedule version history (read-only).' })
-  @ApiOkResponse({ type: OwnerScheduleVersionView, isArray: true })
-  async versions(@Actor() actor: ActorContext, @Param() params: BusinessIdParamDto): Promise<OwnerScheduleVersionView[]> {
+  @ApiOperation({ summary: 'Schedule version history with full snapshots (read-only).' })
+  @ApiOkResponse({ type: OwnerScheduleView, isArray: true })
+  async versions(@Actor() actor: ActorContext, @Param() params: BusinessIdParamDto): Promise<OwnerScheduleView[]> {
     await this.tenantGuard.requireOwnedBusiness(actor, params.businessId);
-    const versions = await this.scheduleService.listVersions(params.businessId);
-    return versions.map(ownerScheduleVersionProjection);
+    const versions = await this.scheduleService.listVersionsWithDetails(params.businessId);
+    return versions.map(ownerScheduleProjection);
+  }
+
+  @Get(':businessId/schedule/conflicts')
+  @ApiOperation({ summary: 'Live bookings made impossible by the current ACTIVE schedule (REQ-092/093).' })
+  @ApiOkResponse({ type: OwnerScheduleConflictView, isArray: true })
+  async conflicts(@Actor() actor: ActorContext, @Param() params: BusinessIdParamDto): Promise<OwnerScheduleConflictView[]> {
+    await this.tenantGuard.requireOwnedBusiness(actor, params.businessId);
+    const conflicts = await this.scheduleService.listOpenConflicts(params.businessId);
+    return conflicts.map(ownerScheduleConflictProjection);
   }
 
   @Put(':businessId/schedule')
@@ -86,7 +95,13 @@ export class OwnerScheduleController {
     @Param() params: BusinessIdParamDto,
     @Body() payload: RecordExceptionPayload,
   ): Promise<ScheduleExceptionView> {
-    const created = await this.scheduleService.recordScheduleException(actor, params.businessId, payload.bookingId, payload.versionId);
-    return { id: created.id, scheduleVersionId: created.scheduleVersionId, bookingId: created.bookingId, createdAt: created.createdAt.toISOString() };
+    const created = await this.scheduleService.recordScheduleException(actor, params.businessId, payload.bookingId, payload.versionId, payload.reason);
+    return {
+      id: created.id,
+      scheduleVersionId: created.scheduleVersionId,
+      bookingId: created.bookingId,
+      reason: created.reason,
+      createdAt: created.createdAt.toISOString(),
+    };
   }
 }
