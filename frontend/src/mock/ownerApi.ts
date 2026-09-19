@@ -90,8 +90,7 @@ export interface BrandingPatch {
 export interface ServiceDraft {
   id?: string
   name: string
-  description?: string
-  basePrice: number
+  basePriceMinor: number
   baseDurationMinutes: number
   variations?: readonly ServiceVariation[]
   addOns?: readonly ServiceAddOn[]

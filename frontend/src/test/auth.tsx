@@ -1,9 +1,11 @@
 import { render, type RenderResult } from '@testing-library/react'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
+import { afterEach } from 'vitest'
 import type { AuthPrincipal } from '@/api/types'
 import { AuthProvider } from '@/features/auth/AuthProvider'
 import type { AuthState } from '@/features/auth/auth-context'
 import { appRoutes } from '@/routes'
+import { installBusinessApiStub } from './businessApi'
 
 /** Shared principals for tests. Values are obvious fixtures, never real accounts. */
 export const OWNER_PRINCIPAL: AuthPrincipal = {
@@ -41,18 +43,27 @@ export interface RenderAppOptions {
   auth?: AuthState
 }
 
+const cleanupStubs: Array<() => void> = []
+afterEach(() => {
+  while (cleanupStubs.length > 0) {
+    const restore = cleanupStubs.shift()
+    if (restore) restore()
+  }
+})
+
 /**
- * Renders the real app routes inside an `AuthProvider`.
+ * Renders the full retail routes inside an `AuthProvider`.
  *
- * By supplying `initialState` the provider skips its bootstrap fetch, so tests
- * that only care about the owner surface need no network stub. Auth-specific
- * tests should instead render `<AuthProvider>` without `initialState` and stub
- * `GET /auth/session` (see `installFetchStub`).
+ * The real business API client is served by a dedicated stateful test double so
+ * the owner profile and public pages exercise the true wire contract; all other
+ * URLs fall through to the stub `fetch` previously installed by the test.
  */
 export function renderAppAt(
   path: string,
   options: RenderAppOptions = {},
 ): RenderResult & { router: ReturnType<typeof createMemoryRouter> } {
+  const stub = installBusinessApiStub()
+  cleanupStubs.push(stub.restore)
   const router = createMemoryRouter(appRoutes, { initialEntries: [path] })
   const result = render(
     <AuthProvider initialState={options.auth ?? AUTHENTICATED_OWNER}>

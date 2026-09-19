@@ -61,8 +61,7 @@ const dryCleaningHours = weekdays(
 function service(input: {
   id: string
   name: string
-  description?: string
-  basePrice: Money
+  basePriceMinor: Money
   baseDurationMinutes: number
 }): Service {
   return { ...input, variations: [], addOns: [], isActive: true }
@@ -72,63 +71,60 @@ const salonServices: Service[] = [
   {
     id: 'haircut-styling',
     name: 'Women’s Haircut & Styling',
-    description: 'Cut, wash and hairstyle tailored to your hair type.',
-    basePrice: 90000,
+    basePriceMinor: 90000,
     baseDurationMinutes: 60,
     variations: [
-      { id: 'basic', name: 'Basic cut', priceDelta: 0, durationDeltaMinutes: 0 },
+      { id: 'basic', name: 'Basic cut', priceDeltaMinor: 0, durationDeltaMinutes: 0 },
       {
         id: 'premium',
         name: 'Premium styling',
-        priceDelta: 30000,
+        priceDeltaMinor: 30000,
         durationDeltaMinutes: 15,
       },
     ],
     addOns: [
-      { id: 'hair-wash', name: 'Deep-conditioning wash', price: 15000, durationMinutes: 15 },
-      { id: 'blowdry', name: 'Blow-dry finish', price: 10000, durationMinutes: 10 },
+      { id: 'hair-wash', name: 'Deep-conditioning wash', priceDeltaMinor: 15000, durationDeltaMinutes: 15 },
+      { id: 'blowdry', name: 'Blow-dry finish', priceDeltaMinor: 10000, durationDeltaMinutes: 10 },
     ],
     isActive: true,
   },
   {
     id: 'mens-haircut',
     name: 'Men’s Cut',
-    basePrice: 40000,
+    basePriceMinor: 40000,
     baseDurationMinutes: 30,
     variations: [
-      { id: 'basic', name: 'Classic', priceDelta: 0, durationDeltaMinutes: 0 },
-      { id: 'fade', name: 'Skin fade', priceDelta: 10000, durationDeltaMinutes: 10 },
+      { id: 'basic', name: 'Classic', priceDeltaMinor: 0, durationDeltaMinutes: 0 },
+      { id: 'fade', name: 'Skin fade', priceDeltaMinor: 10000, durationDeltaMinutes: 10 },
     ],
-    addOns: [{ id: 'beard-trim', name: 'Beard trim', price: 15000, durationMinutes: 15 }],
+    addOns: [{ id: 'beard-trim', name: 'Beard trim', priceDeltaMinor: 15000, durationDeltaMinutes: 15 }],
     isActive: true,
   },
   {
     id: 'mani-pedi',
     name: 'Manicure & Pedicure',
-    description: 'Full care for hands and feet.',
-    basePrice: 75000,
+    basePriceMinor: 75000,
     baseDurationMinutes: 75,
     variations: [
-      { id: 'std', name: 'Standard', priceDelta: 0, durationDeltaMinutes: 0 },
-      { id: 'gel', name: 'Gel polish', priceDelta: 40000, durationDeltaMinutes: 20 },
+      { id: 'std', name: 'Standard', priceDeltaMinor: 0, durationDeltaMinutes: 0 },
+      { id: 'gel', name: 'Gel polish', priceDeltaMinor: 40000, durationDeltaMinutes: 20 },
     ],
     addOns: [
-      { id: 'paraffin', name: 'Paraffin treatment', price: 20000, durationMinutes: 10 },
+      { id: 'paraffin', name: 'Paraffin treatment', priceDeltaMinor: 20000, durationDeltaMinutes: 10 },
     ],
     isActive: true,
   },
   {
     id: 'facial',
     name: 'Deep-Cleansing Facial',
-    description: 'Gentle, thorough cleanse with steam and mask.',
-    basePrice: 85000,
+    basePriceMinor: 85000,
     baseDurationMinutes: 60,
     variations: [
-      { id: 'std', name: 'Standard', priceDelta: 0, durationDeltaMinutes: 0 },
-      { id: 'gold', name: 'Gold infusion', priceDelta: 50000, durationDeltaMinutes: 20 },
+      { id: 'std', name: 'Standard', priceDeltaMinor: 0, durationDeltaMinutes: 0 },
+      { id: 'gold', name: 'Gold infusion', priceDeltaMinor: 50000, durationDeltaMinutes: 20 },
     ],
     addOns: [
-      { id: 'dermaplane', name: 'Express dermaplaning', price: 25000, durationMinutes: 15 },
+      { id: 'dermaplane', name: 'Express dermaplaning', priceDeltaMinor: 25000, durationDeltaMinutes: 15 },
     ],
     isActive: true,
   },
@@ -138,31 +134,29 @@ const autoCareServices: Service[] = [
   {
     id: 'oil-change',
     name: 'Oil Change & Filter Swap',
-    description: 'Engine oil and oil filter replacement.',
-    basePrice: 120000,
+    basePriceMinor: 120000,
     baseDurationMinutes: 45,
     variations: [
-      { id: 'std', name: 'Standard oil', priceDelta: 0, durationDeltaMinutes: 0 },
-      { id: 'synthetic', name: 'Synthetic oil', priceDelta: 60000, durationDeltaMinutes: 0 },
+      { id: 'std', name: 'Standard oil', priceDeltaMinor: 0, durationDeltaMinutes: 0 },
+      { id: 'synthetic', name: 'Synthetic oil', priceDeltaMinor: 60000, durationDeltaMinutes: 0 },
     ],
     addOns: [
-      { id: 'tyre-pressure', name: 'Tyre pressure check (all 4)', price: 20000, durationMinutes: 20 },
+      { id: 'tyre-pressure', name: 'Tyre pressure check (all 4)', priceDeltaMinor: 20000, durationDeltaMinutes: 20 },
     ],
     isActive: true,
   },
-  service({ id: 'hand-wash', name: 'Exterior Hand Wash', basePrice: 50000, baseDurationMinutes: 30 }),
+  service({ id: 'hand-wash', name: 'Exterior Hand Wash', basePriceMinor: 50000, baseDurationMinutes: 30 }),
   service({
     id: 'wheel-align',
     name: 'Wheel Alignment',
-    description: 'Front + rear alignment setup.',
-    basePrice: 180000,
+    basePriceMinor: 180000,
     baseDurationMinutes: 60,
   }),
 ]
 
 const dryCleaningServices: Service[] = [
-  service({ id: 'laundry-kg', name: 'Standard Laundry (per kg)', basePrice: 25000, baseDurationMinutes: 120 }),
-  service({ id: 'dry-clean-item', name: 'Dry Cleaning (per item)', basePrice: 60000, baseDurationMinutes: 90 }),
+  service({ id: 'laundry-kg', name: 'Standard Laundry (per kg)', basePriceMinor: 25000, baseDurationMinutes: 120 }),
+  service({ id: 'dry-clean-item', name: 'Dry Cleaning (per item)', basePriceMinor: 60000, baseDurationMinutes: 90 }),
 ]
 
 function seedBookings(slug: string, date: DateString): readonly BlockedPeriod[] {

@@ -26,7 +26,7 @@ interface BookingWizardProps {
 }
 
 export function BookingWizard({ business, services }: BookingWizardProps) {
-  const flow = useBookingFlow(business)
+  const flow = useBookingFlow(business, services)
   const lineItems = buildLineItems(services, flow.selections)
   const total = totalPrice(lineItems)
   const duration = totalDurationMinutes(lineItems)

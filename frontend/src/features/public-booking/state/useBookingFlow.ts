@@ -5,6 +5,7 @@ import type {
   CustomerDetails,
   PaymentMethodId,
   ProofFile,
+  Service,
   ServiceSelection,
   SubmitResult,
 } from '@/types/models'
@@ -21,7 +22,7 @@ export const BOOKING_STEP_LABELS = ['Services', 'Date & time', 'Your details', '
 
 const EMPTY_CUSTOMER: CustomerDetails = { name: '', phone: '', note: '' }
 
-export function useBookingFlow(business: BusinessDetails) {
+export function useBookingFlow(business: BusinessDetails, services: readonly Service[]) {
   const [step, setStep] = useState(STEP_SERVICES)
   const [selections, setSelections] = useState<ServiceSelection[]>([])
   const [date, setDateState] = useState<string | null>(null)
@@ -137,7 +138,7 @@ export function useBookingFlow(business: BusinessDetails) {
       setSubmitting(true)
       setResult(null)
       try {
-        const outcome = await mockApi.createBooking(draft, business, durationMinutes)
+        const outcome = await mockApi.createBooking(draft, business, services, durationMinutes)
         setResult(outcome)
         setStep(STEP_DONE)
       } catch {
@@ -147,7 +148,7 @@ export function useBookingFlow(business: BusinessDetails) {
         setSubmitting(false)
       }
     },
-    [selections, date, time, customer, paymentMethod, proof, business],
+    [selections, date, time, customer, paymentMethod, proof, business, services],
   )
 
   return {

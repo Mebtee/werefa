@@ -6,6 +6,7 @@ import { AuthProvider } from '@/features/auth/AuthProvider'
 import { appRoutes } from '@/routes'
 import { resetStore } from '@/mock/store'
 import { installFetchStub, type FetchStub } from '@/test/fetch'
+import { installBusinessApiStub } from '@/test/businessApi'
 import {
   AUTHENTICATED_ADMIN,
   AUTHENTICATED_OWNER,
@@ -31,6 +32,7 @@ describe('owner route protection', () => {
     stub = installFetchStub([
       { method: 'GET', path: '/auth/session', status: 200, body: { user: OWNER_PRINCIPAL } },
     ])
+    installBusinessApiStub()
     const router = createMemoryRouter(appRoutes, { initialEntries: ['/owner'] })
     render(
       <AuthProvider>

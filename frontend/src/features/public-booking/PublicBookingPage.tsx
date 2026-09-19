@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import type { BusinessPage } from '@/types/models'
+import { getPublicBusiness, isNotFoundError } from '@/api/business'
+import { getPublicServices } from '@/api/catalog'
+import { hybridizePublicBusiness } from '@/api/business.mapper'
 import { mockApi } from '@/mock/api'
 import { PRIMARY_BUSINESS_SLUG } from '@/mock/data'
 import { Alert } from '@/components/ui/Alert'
@@ -14,6 +17,7 @@ type LoadState =
   | { status: 'loading' }
   | { status: 'ready'; page: BusinessPage }
   | { status: 'notfound' }
+  | { status: 'error' }
 
 export function PublicBookingPage() {
   const { slug } = useParams<{ slug: string }>()
@@ -22,10 +26,30 @@ export function PublicBookingPage() {
   useEffect(() => {
     let cancelled = false
     setLoad({ status: 'loading' })
-    mockApi.getBusinessPage(slug ?? '').then((page) => {
-      if (cancelled) return
-      setLoad(page ? { status: 'ready', page } : { status: 'notfound' })
-    })
+    void (async () => {
+      // The backend is authoritative for existence, profile, pause state and
+      // the active service catalog (REQ-079 hides deactivated services); the
+      // mock seam still supplies the cosmetic profile fields that the evolved
+      // backend does not persist yet.
+      try {
+        const [view, servicesView, mockPage] = await Promise.all([
+          getPublicBusiness(slug ?? ''),
+          getPublicServices(slug ?? ''),
+          mockApi.getBusinessPage(slug ?? ''),
+        ])
+        if (cancelled) return
+        setLoad({
+          status: 'ready',
+          page: {
+            business: hybridizePublicBusiness(view, mockPage?.business),
+            services: servicesView,
+          },
+        })
+      } catch (error) {
+        if (cancelled) return
+        setLoad(isNotFoundError(error) ? { status: 'notfound' } : { status: 'error' })
+      }
+    })()
     return () => {
       cancelled = true
     }
@@ -76,6 +100,14 @@ export function PublicBookingPage() {
           </div>
         )}
 
+        {load.status === 'error' && (
+          <div className="container" style={{ paddingBlock: 'var(--space-8)' }}>
+            <Alert tone="danger" title="Could not load this page">
+              We could not load this business page right now. Please try again.
+            </Alert>
+          </div>
+        )}
+
         {load.status === 'ready' && (
           <>
             <BusinessHero business={load.page.business} />
@@ -98,8 +130,8 @@ export function PublicBookingPage() {
 
       <footer className="page-footer">
         <div className="container">
-          Werefa — public preview build. Everything you see uses in-memory mock
-          data; no bookings are stored.
+          Werefa — preview build. This business&apos;s profile, pause state and
+          service catalog are real; schedule and bookings are still sample data.
         </div>
       </footer>
     </div>

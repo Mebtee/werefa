@@ -5,7 +5,7 @@ import { PauseCard } from '@/features/owner-portal/components/PauseCard'
 import { CATEGORY_LABEL } from '@/features/owner-portal/lib/labels'
 
 export function DashboardPage() {
-  const { business, services, bookingsToday, loading, error, reload } =
+  const { business, businessId, services, bookingsToday, loading, error, reload } =
     useOwnedBusiness()
 
   return (
@@ -14,7 +14,7 @@ export function DashboardPage() {
       error={error && business === null}
       onRetry={reload}
     >
-      {business && (
+      {business && businessId && (
         <>
           <h1 className="page-title">Dashboard</h1>
 
@@ -117,7 +117,7 @@ export function DashboardPage() {
             </Link>
           </nav>
 
-          <PauseCard business={business} onChanged={reload} />
+          <PauseCard businessId={businessId} business={business} onChanged={reload} />
         </>
       )}
     </LoadState>

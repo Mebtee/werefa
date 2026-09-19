@@ -61,11 +61,11 @@ function seedBooking(overrides?: {
     lineItems: [
       {
         name: service.name,
-        unitPrice: service.basePrice,
+        unitPrice: service.basePriceMinor,
         durationMinutes: service.baseDurationMinutes,
       },
     ],
-    total: service.basePrice,
+    total: service.basePriceMinor,
     totalDurationMinutes: service.baseDurationMinutes,
     deposit: 18000,
     customer: {
@@ -471,11 +471,11 @@ describe('tenant isolation on the detail page', () => {
       lineItems: [
         {
           name: services[0].name,
-          unitPrice: services[0].basePrice,
+          unitPrice: services[0].basePriceMinor,
           durationMinutes: services[0].baseDurationMinutes,
         },
       ],
-      total: services[0].basePrice,
+      total: services[0].basePriceMinor,
       totalDurationMinutes: services[0].baseDurationMinutes,
       deposit: 0,
       customer: { name: 'Intruder', phone: '+251922112233', note: '' },

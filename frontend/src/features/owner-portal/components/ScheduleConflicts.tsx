@@ -1,48 +1,40 @@
-import { useEffect, useRef, useState } from 'react'
-import type {
-  Booking,
-  ScheduleConflict,
-} from '@/types/models'
+import { useState } from 'react'
+import type { ScheduleConflictItem } from '@/api/schedule.mapper'
+import { recordScheduleException } from '@/api/schedule'
+import { toUserMessage } from '@/api/errors'
 import { mockOwnerApi } from '@/mock/ownerApi'
 import { Button } from '@/components/ui/Button'
 import { Field } from '@/components/ui/Field'
-import { formatDateLong } from '@/lib/time'
+import { formatDateTime } from '@/lib/time'
 import { RescheduleForm } from '@/features/owner-portal/components/RescheduleForm'
 
 interface ScheduleConflictsProps {
-  conflicts: readonly ScheduleConflict[]
+  conflicts: readonly ScheduleConflictItem[]
+  businessId: string
+  /** The currently-active schedule version — target for Keep Booking exceptions (REQ-160). */
+  versionId: string | null
   /** Reload business + conflicts after a quick action succeeds. */
   onChanged: () => Promise<void>
 }
 
+function totalDuration(conflict: ScheduleConflictItem): number {
+  return conflict.services.reduce((sum, service) => sum + service.durationMinutes, 0)
+}
+
 /**
- * Affected-booking warning panel (REQ-092/093/099): each booking made
- * impossible by the current schedule is listed with its date/time and the
- * reason, and offers the quick actions Reschedule / Cancel / Keep Booking.
+ * Affected-booking warning panel (REQ-092/093/099). The conflict list comes
+ * straight from the real schedule API with the booking details embedded
+ * (Prompt 47), so no booking lookup is needed to render a row. Keep Booking is
+ * recorded as a real schedule exception; Cancel stays on the mock booking seam
+ * with Reschedule (the bookings vertical is not part of this slice).
  */
-export function ScheduleConflicts({ conflicts, onChanged }: ScheduleConflictsProps) {
-  const [bookings, setBookings] = useState<Record<string, Booking>>({})
-
-  useEffect(() => {
-    let cancelled = false
-    void Promise.all(
-      conflicts.map((conflict) => mockOwnerApi.getBooking(conflict.bookingId)),
-    )
-      .then((list) => {
-        if (cancelled) return
-        setBookings(Object.fromEntries(list.map((booking) => [booking.id, booking])))
-      })
-      .catch(() => {
-        // A booking that disappeared between save and render is simply skipped.
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [conflicts])
-
-  const open = conflicts.filter((conflict) => conflict.status === 'open')
-
-  if (open.length === 0) return null
+export function ScheduleConflicts({
+  conflicts,
+  businessId,
+  versionId,
+  onChanged,
+}: ScheduleConflictsProps) {
+  if (conflicts.length === 0) return null
 
   return (
     <section
@@ -53,39 +45,42 @@ export function ScheduleConflicts({ conflicts, onChanged }: ScheduleConflictsPro
         Affected bookings
       </h2>
       <p className="card__subtitle">
-        This schedule change conflicts with {open.length}{' '}
-        {open.length === 1 ? 'existing booking' : 'existing bookings'}. They were
-        not changed — decide how to handle each one.
+        This schedule change conflicts with {conflicts.length}{' '}
+        {conflicts.length === 1 ? 'existing booking' : 'existing bookings'}. They
+        were not changed — decide how to handle each one.
       </p>
 
       <ul className="conflict-list">
-        {open.map((conflict) => {
-          const booking = bookings[conflict.bookingId]
-          if (!booking) return null
-          return (
-            <li key={conflict.id} className="conflict-row">
-              <ConflictRow booking={booking} conflict={conflict} onChanged={onChanged} />
-            </li>
-          )
-        })}
+        {conflicts.map((conflict) => (
+          <li key={conflict.bookingId} className="conflict-row">
+            <ConflictRow
+              conflict={conflict}
+              businessId={businessId}
+              versionId={versionId}
+              onChanged={onChanged}
+            />
+          </li>
+        ))}
       </ul>
     </section>
   )
 }
 
 function ConflictRow({
-  booking,
   conflict,
+  businessId,
+  versionId,
   onChanged,
 }: {
-  booking: Booking
-  conflict: ScheduleConflict
+  conflict: ScheduleConflictItem
+  businessId: string
+  versionId: string | null
   onChanged: () => Promise<void>
 }) {
   const [mode, setMode] = useState<'view' | 'reschedule' | 'cancel' | 'keep'>('view')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const keepRef = useRef<HTMLTextAreaElement>(null)
+  const [keepReason, setKeepReason] = useState('')
 
   const reset = (next: typeof mode) => {
     setError(null)
@@ -101,10 +96,11 @@ function ConflictRow({
         setError(result.error ?? 'That could not be completed. Please try again.')
         return
       }
+      setKeepReason('')
       reset('view')
       await onChanged()
-    } catch {
-      setError('That could not be completed. Please try again.')
+    } catch (err) {
+      setError(toUserMessage(err))
     } finally {
       setBusy(false)
     }
@@ -112,32 +108,36 @@ function ConflictRow({
 
   const applyKeep = () =>
     void run(async () => {
-      const reason = keepRef.current?.value ?? ''
-      const result = await mockOwnerApi.keepBooking(booking.id, reason)
-      return result.ok ? { ok: true } : { ok: false, error: result.error }
+      if (!versionId) {
+        return { ok: false, error: 'No active schedule version to keep against.' }
+      }
+      await recordScheduleException(businessId, {
+        bookingId: conflict.bookingId,
+        versionId,
+        ...(keepReason.trim() ? { reason: keepReason.trim() } : {}),
+      })
+      return { ok: true }
     })
 
   const applyCancel = () =>
     void run(async () => {
-      const result = await mockOwnerApi.cancelBooking(booking.id)
+      const result = await mockOwnerApi.cancelBooking(conflict.bookingId)
       return result.ok ? { ok: true } : { ok: false, error: result.error }
     })
+
+  const serviceCount = conflict.services.length
 
   return (
     <>
       <div className="conflict-row__head">
-        <strong>{booking.customer.name}</strong>
-        <span className="booking-card__meta">{booking.customer.phone}</span>
-        {booking.scheduleException && (
-          <span className="badge conflict-row__exception">Schedule Exception</span>
-        )}
+        <strong>{conflict.customerName}</strong>
+        <span className="booking-card__meta">{conflict.customerPhone}</span>
       </div>
       <p className="conflict-row__when">
-        {formatDateLong(booking.date)} at {booking.time} ·{' '}
-        {booking.totalDurationMinutes} minutes · {booking.lineItems.length}{' '}
-        {booking.lineItems.length === 1 ? 'service' : 'services'}
+        {formatDateTime(conflict.startAt)} · {totalDuration(conflict)} minutes ·{' '}
+        {serviceCount} {serviceCount === 1 ? 'service' : 'services'}
       </p>
-      <p className="conflict-row__reason">{conflict.reason}</p>
+      <p className="conflict-row__reason">{conflict.reasonDetail}</p>
 
       {mode === 'view' && (
         <div className="conflict-actions">
@@ -163,8 +163,12 @@ function ConflictRow({
 
       {mode === 'reschedule' && (
         <RescheduleForm
-          booking={booking}
+          booking={{
+            id: conflict.bookingId,
+            totalDurationMinutes: totalDuration(conflict),
+          }}
           onDone={() => {
+            setKeepReason('')
             reset('view')
             return onChanged()
           }}
@@ -203,11 +207,12 @@ function ConflictRow({
             {({ id, ariaDescribedBy }) => (
               <textarea
                 id={id}
-                ref={keepRef}
                 className="textarea conflict-keep-reason"
                 rows={2}
                 aria-describedby={ariaDescribedBy}
                 placeholder="e.g. Customer confirmed over the phone to keep the original time."
+                value={keepReason}
+                onChange={(event) => setKeepReason(event.target.value)}
               />
             )}
           </Field>

@@ -1,8 +1,12 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/Button'
 import { useAuth } from '@/features/auth/useAuth'
-import { getMockOwnedBusinessSlug } from '@/mock/ownedBusinessFixture'
+import {
+  getPrimaryOwnedBusiness,
+  loadPrimaryOwnedBusiness,
+  subscribePrimaryOwnedBusiness,
+} from '@/api/business'
 
 const NAV_ITEMS = [
   { to: '/owner', label: 'Dashboard', end: true },
@@ -16,13 +20,24 @@ export function OwnerLayoutApp({ children }: { children?: ReactNode }) {
   const { principal, logout } = useAuth()
   const navigate = useNavigate()
   const [signingOut, setSigningOut] = useState(false)
-  const businessSlug = getMockOwnedBusinessSlug()
+  const primary = useSyncExternalStore(
+    subscribePrimaryOwnedBusiness,
+    getPrimaryOwnedBusiness,
+  )
+
+  // The real primary business (first owned business on the tenant) is resolved
+  // once so the public-page link reflects slug changes without a navigation.
+  useEffect(() => {
+    void loadPrimaryOwnedBusiness().catch(() => undefined)
+  }, [])
 
   async function handleSignOut() {
     setSigningOut(true)
     await logout()
     navigate('/owner/login', { replace: true })
   }
+
+  const businessSlug = primary?.slug ?? ''
 
   return (
     <div className="owner-shell page-root">
@@ -67,7 +82,8 @@ export function OwnerLayoutApp({ children }: { children?: ReactNode }) {
             </span>
             <Link
               className="owner-session__public"
-              to={`/p/${businessSlug}`}
+              to={businessSlug ? `/p/${businessSlug}` : '/owner'}
+              aria-disabled={!businessSlug}
             >
               View public page
             </Link>
@@ -89,9 +105,9 @@ export function OwnerLayoutApp({ children }: { children?: ReactNode }) {
 
       <footer className="owner-footer">
         <div className="container">
-          Werefa owner portal — preview build. Your sign-in is real, but business
-          data is still sample data: changes affect the public page immediately
-          and are not stored permanently.
+          Werefa owner portal — preview build. Your sign-in, business profile,
+          public link and pause state are real and stored. Services, schedule
+          and bookings are still sample data.
         </div>
       </footer>
     </div>

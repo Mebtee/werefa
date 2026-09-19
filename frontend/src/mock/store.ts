@@ -192,8 +192,7 @@ export function changeBusinessSlug(
 export interface NewServiceInput {
   id?: string
   name: string
-  description?: string
-  basePrice: number
+  basePriceMinor: number
   baseDurationMinutes: number
   variations?: readonly ServiceVariation[]
   addOns?: readonly ServiceAddOn[]
@@ -208,8 +207,7 @@ export function createService(
   const service: Service = {
     id: input.id ?? makeId('svc'),
     name: input.name,
-    description: input.description,
-    basePrice: input.basePrice,
+    basePriceMinor: input.basePriceMinor,
     baseDurationMinutes: input.baseDurationMinutes,
     variations: input.variations ? input.variations.map((v) => ({ ...v })) : [],
     addOns: input.addOns ? input.addOns.map((a) => ({ ...a })) : [],
@@ -547,6 +545,32 @@ export function keepBooking(
     at: nowTimestamp(),
     reason: (reason ?? '').trim() || 'Kept as a schedule exception.',
     scheduleVersionId: open.versionId,
+  }
+  booking.updatedAt = nowTimestamp()
+  recordTransition(booking, booking.state, booking.state)
+  resolveConflictsForBooking(slug, id, 'keep')
+  return { ok: true, value: booking }
+}
+
+/**
+ * Prompt 47 seam: records a booking-specific schedule exception that was
+ * created through the REAL schedule API (`POST …/schedule/exceptions`) onto
+ * the still-mock booking record, so the mock bookings vertical keeps showing
+ * the Schedule Exception badge, its details and the causing version link. This
+ * is the mirror counterpart of `keepBooking` for the migrated Keep-Booking
+ * flow; it deliberately does not require a mock-store open conflict.
+ */
+export function applyScheduleException(
+  slug: string,
+  id: string,
+  params: { reason: string | null; scheduleVersionId: string },
+): StoreResult<Booking> {
+  const booking = getBooking(slug, id)
+  if (!booking) return { ok: false, error: 'Booking not found.' }
+  booking.scheduleException = {
+    at: nowTimestamp(),
+    reason: (params.reason ?? '').trim() || 'Kept as a schedule exception.',
+    scheduleVersionId: params.scheduleVersionId,
   }
   booking.updatedAt = nowTimestamp()
   recordTransition(booking, booking.state, booking.state)

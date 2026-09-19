@@ -1,9 +1,17 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { BusinessDetails, Service } from '@/types/models'
+import {
+  listOwnedBusinesses,
+  setPrimaryOwnedBusiness,
+} from '@/api/business'
+import { listOwnerServices } from '@/api/catalog'
+import { hybridizeOwnedBusiness } from '@/api/business.mapper'
 import { mockOwnerApi } from '@/mock/ownerApi'
 
 export interface OwnedBusinessState {
   business: BusinessDetails | null
+  /** The real backend id of the primary owned business (tenant-scoped). */
+  businessId: string | null
   services: readonly Service[]
   bookingsToday: number
   loading: boolean
@@ -11,9 +19,14 @@ export interface OwnedBusinessState {
   reload: () => Promise<void>
 }
 
-/** Loads the business owned by the mock session plus its services. */
+/**
+ * Loads the real backend business profile (Prompt 45) and the real service
+ * catalog (Prompt 46) of the primary owned business, plus the mock store's
+ * today preview — booking management stays on the in-memory seam.
+ */
 export function useOwnedBusiness(): OwnedBusinessState {
   const [business, setBusiness] = useState<BusinessDetails | null>(null)
+  const [businessId, setBusinessId] = useState<string | null>(null)
   const [services, setServices] = useState<readonly Service[]>([])
   const [bookingsToday, setBookingsToday] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -23,13 +36,23 @@ export function useOwnedBusiness(): OwnedBusinessState {
     setLoading(true)
     setError(false)
     try {
-      const [biz, svcs, today] = await Promise.all([
+      // The list endpoint already returns the full owner projection for every
+      // owned business, so one request is enough for the primary profile. The
+      // service catalog is fetched separately since it needs the real tenant
+      // id (never trusted from the client).
+      const [owned, mockBiz, today] = await Promise.all([
+        listOwnedBusinesses(),
         mockOwnerApi.getOwnedBusiness(),
-        mockOwnerApi.getServices(),
         mockOwnerApi.getTodayPreview(),
       ])
-      setBusiness(biz)
-      setServices(svcs)
+      const primary = owned[0]
+      if (!primary) throw new Error('No owned business')
+      const view = primary
+      setBusinessId(view.id)
+      setPrimaryOwnedBusiness({ id: view.id, slug: view.slug })
+      const servicesForBusiness = await listOwnerServices(view.id)
+      setBusiness(hybridizeOwnedBusiness(view, mockBiz))
+      setServices(servicesForBusiness)
       setBookingsToday(today.bookingsToday)
     } catch {
       setError(true)
@@ -42,5 +65,5 @@ export function useOwnedBusiness(): OwnedBusinessState {
     void reload()
   }, [reload])
 
-  return { business, services, bookingsToday, loading, error, reload }
+  return { business, businessId, services, bookingsToday, loading, error, reload }
 }

@@ -51,11 +51,11 @@ export function buildDemoBookings(): readonly Booking[] {
   const lineItems = [
     {
       name: service.name,
-      unitPrice: service.basePrice,
+      unitPrice: service.basePriceMinor,
       durationMinutes,
     },
   ]
-  const total = service.basePrice
+  const total = service.basePriceMinor
   const deposit =
     business.prepayment.mode === 'percentage'
       ? Math.ceil((total * (business.prepayment.value ?? 0)) / 100)

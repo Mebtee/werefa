@@ -26,8 +26,8 @@ function fakeBooking(overrides?: {
   const service = services.find((s) => s.id === 'haircut-styling') ?? services[0]
   return {
     businessSlug,
-    lineItems: [{ name: service.name, unitPrice: service.basePrice, durationMinutes: service.baseDurationMinutes }],
-    total: service.basePrice,
+    lineItems: [{ name: service.name, unitPrice: service.basePriceMinor, durationMinutes: service.baseDurationMinutes }],
+    total: service.basePriceMinor,
     totalDurationMinutes: service.baseDurationMinutes,
     deposit: 18000,
     customer: { name: overrides?.name ?? 'Abebe', phone: overrides?.phone ?? '+251911111111', note: '' },

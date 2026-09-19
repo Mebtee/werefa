@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useOwnedBusiness } from '@/features/owner-portal/state/useOwnedBusiness'
 import { LoadState } from '@/features/owner-portal/components/LoadState'
-import { mockOwnerApi } from '@/mock/ownerApi'
+import { deactivateOwnerService, reactivateOwnerService } from '@/api/catalog'
 import { formatMoney } from '@/lib/format'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
@@ -13,7 +13,7 @@ interface ServicesLocationState {
 }
 
 export function ServicesPage() {
-  const { business, services, loading, error, reload } = useOwnedBusiness()
+  const { business, businessId, services, loading, error, reload } = useOwnedBusiness()
   const location = useLocation()
   const locationState = (location.state ?? {}) as ServicesLocationState
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
@@ -21,13 +21,14 @@ export function ServicesPage() {
   const [actionError, setActionError] = useState<string | null>(null)
 
   const toggleActive = async (serviceId: string, active: boolean) => {
+    if (!businessId) return
     setActing(true)
     setActionError(null)
     try {
-      const result = await mockOwnerApi.setServiceActive(serviceId, active)
-      if (!result.ok) {
-        setActionError(result.error)
-        return
+      if (active) {
+        await reactivateOwnerService(businessId, serviceId)
+      } else {
+        await deactivateOwnerService(businessId, serviceId)
       }
       setConfirmingId(null)
       await reload()
@@ -75,11 +76,8 @@ export function ServicesPage() {
                 <li key={service.id} className="card card--padded service-row">
                   <div className="service-row__main">
                     <h2 className="service-row__name">{service.name}</h2>
-                    {service.description && (
-                      <p className="service-row__desc">{service.description}</p>
-                    )}
                     <ul className="service-row__facts">
-                      <li>{formatMoney(service.basePrice, business.currency)}</li>
+                      <li>{formatMoney(service.basePriceMinor, business.currency)}</li>
                       <li>{service.baseDurationMinutes} min</li>
                       <li>
                         {service.variations.length} variation

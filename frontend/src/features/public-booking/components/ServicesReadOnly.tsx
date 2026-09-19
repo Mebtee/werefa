@@ -21,16 +21,13 @@ export function ServicesReadOnly({
                 <h3 className="service-card__name">{service.name}</h3>
                 <span className="service-card__priceblock">
                   <span className="service-card__price">
-                    {formatMoney(service.basePrice, business.currency)}
+                    {formatMoney(service.basePriceMinor, business.currency)}
                   </span>
                   <span className="service-card__meta">
                     {service.baseDurationMinutes} min
                   </span>
                 </span>
               </div>
-              {service.description && (
-                <p className="service-card__desc">{service.description}</p>
-              )}
               {(service.variations.length > 0 || service.addOns.length > 0) && (
                 <div className="service-card__options">
                   {service.variations.length > 0 && (
@@ -45,7 +42,10 @@ export function ServicesReadOnly({
                     <p className="option-group__title">
                       Add-ons:{' '}
                       {service.addOns
-                        .map((a) => `${a.name} (${formatMoney(a.price, business.currency)})`)
+                        .map(
+                          (a) =>
+                            `${a.name} (+${formatMoney(a.priceDeltaMinor, business.currency)})`,
+                        )
                         .join(', ')}
                     </p>
                   )}

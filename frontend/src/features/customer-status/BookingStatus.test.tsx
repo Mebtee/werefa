@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   render,
   screen,
@@ -24,6 +24,7 @@ import {
   rescheduleBooking,
 } from '@/mock/store'
 import { PRIMARY_BUSINESS_SLUG, MOCK_BUSINESS_PAGES } from '@/mock/data'
+import { installBusinessApiStub } from '@/test/businessApi'
 import {
   BOOKING_STATE_LABEL,
   PAYMENT_STATE_LABEL,
@@ -33,8 +34,17 @@ const user = userEvent.setup()
 const STATUS_URL = `/p/${PRIMARY_BUSINESS_SLUG}/status`
 const SERVICE_NAME = 'Women’s Haircut & Styling'
 
+let restoreFetch: (() => void) | undefined
+
 beforeEach(() => {
   resetStore()
+  const stub = installBusinessApiStub()
+  restoreFetch = stub.restore
+})
+
+afterEach(() => {
+  restoreFetch?.()
+  restoreFetch = undefined
 })
 
 function renderAt(path: string): RenderResult {
@@ -69,11 +79,11 @@ function createBookingFor(
     lineItems: [
       {
         name: service.name,
-        unitPrice: service.basePrice,
+        unitPrice: service.basePriceMinor,
         durationMinutes: service.baseDurationMinutes,
       },
     ],
-    total: service.basePrice,
+    total: service.basePriceMinor,
     totalDurationMinutes: service.baseDurationMinutes,
     deposit: 18000,
     customer: { name, phone, note: '' },

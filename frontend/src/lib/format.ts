@@ -43,14 +43,14 @@ export function buildLineItems(
     const addOns = service.addOns.filter((a) => addOnIds.has(a.id))
 
     const unitPrice =
-      service.basePrice +
-      (variation?.priceDelta ?? 0) +
-      addOns.reduce((sum, a) => sum + a.price, 0)
+      service.basePriceMinor +
+      (variation?.priceDeltaMinor ?? 0) +
+      addOns.reduce((sum, a) => sum + a.priceDeltaMinor, 0)
 
     const durationMinutes =
       service.baseDurationMinutes +
       (variation?.durationDeltaMinutes ?? 0) +
-      addOns.reduce((sum, a) => sum + a.durationMinutes, 0)
+      addOns.reduce((sum, a) => sum + a.durationDeltaMinutes, 0)
 
     const name = variation
       ? `${service.name} (${variation.name})`
@@ -93,7 +93,10 @@ export function prepaymentAmount(config: {
 }
 
 /** Deterministic map link built from coordinates and provider (REQ-212). */
-export function mapUrl(lat: number, lng: number, provider: MapProvider): string {
+export function mapUrl(lat: number | null, lng: number | null, provider: MapProvider): string {
+  if (lat === null || lng === null) {
+    return provider === 'google' ? `https://www.google.com/maps` : `https://www.openstreetmap.org`
+  }
   const coords = `${lat},${lng}`
   return provider === 'google'
     ? `https://www.google.com/maps/search/?api=1&query=${coords}`

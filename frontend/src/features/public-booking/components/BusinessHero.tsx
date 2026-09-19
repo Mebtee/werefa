@@ -46,37 +46,47 @@ export function BusinessHero({ business }: { business: BusinessDetails }) {
           <div>
             <span className="badge">{CATEGORY_LABEL[business.category]}</span>
             <h1 className="hero__name">{business.name}</h1>
-            <p className="hero__tagline">{business.tagline}</p>
+            {business.tagline.trim() ? (
+              <p className="hero__tagline">{business.tagline}</p>
+            ) : null}
           </div>
         </div>
 
         <div className="hero__body">
-          <p className="hero__desc">{business.description}</p>
+          {business.description.trim() ? (
+            <p className="hero__desc">{business.description}</p>
+          ) : null}
 
-          <dl className="hero__facts">
-            <div className="hero__fact">
-              <dt>Address</dt>
-              <dd>
-                {business.address}
-                {' · '}
-                <a
-                  href={mapUrl(business.lat, business.lng, business.mapProvider)}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Open in map
-                </a>
-              </dd>
-            </div>
-            <div className="hero__fact">
-              <dt>Phone</dt>
-              <dd>
-                <a href={`tel:${business.phone.replace(/\s/g, '')}`}>
-                  {business.phone}
-                </a>
-              </dd>
-            </div>
-          </dl>
+          {business.address.trim() || business.phone.trim() ? (
+            <dl className="hero__facts">
+              {business.address.trim() && (
+                <div className="hero__fact">
+                  <dt>Address</dt>
+                  <dd>
+                    {business.address}
+                    {' · '}
+                    <a
+                      href={mapUrl(business.lat, business.lng, business.mapProvider)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open in map
+                    </a>
+                  </dd>
+                </div>
+              )}
+              {business.phone.trim() && (
+                <div className="hero__fact">
+                  <dt>Phone</dt>
+                  <dd>
+                    <a href={`tel:${business.phone.replace(/\s/g, '')}`}>
+                      {business.phone}
+                    </a>
+                  </dd>
+                </div>
+              )}
+            </dl>
+          ) : null}
         </div>
 
         {business.pause && (

@@ -49,16 +49,13 @@ export function ServicesStep({
                   <h3 className="service-card__name">{service.name}</h3>
                   <span className="service-card__priceblock">
                     <span className="service-card__price">
-                      {formatMoney(service.basePrice, business.currency)}
+                      {formatMoney(service.basePriceMinor, business.currency)}
                     </span>
                     <span className="service-card__meta">
                       {service.baseDurationMinutes} min
                     </span>
                   </span>
                 </div>
-                {service.description && (
-                  <p className="service-card__desc">{service.description}</p>
-                )}
 
                 {(service.variations.length > 0 || service.addOns.length > 0) && (
                   <div className="service-card__options">
@@ -74,8 +71,8 @@ export function ServicesStep({
                               isSelected &&
                               selection?.variationId === variation.id
                             const delta =
-                              variation.priceDelta > 0
-                                ? ` +${formatMoney(variation.priceDelta, business.currency)}`
+                              variation.priceDeltaMinor > 0
+                                ? ` +${formatMoney(variation.priceDeltaMinor, business.currency)}`
                                 : ''
                             return (
                               <li key={variation.id}>
@@ -119,9 +116,9 @@ export function ServicesStep({
                                 >
                                   {addOn.name}
                                   {' · '}
-                                  {formatMoney(addOn.price, business.currency)}
+                                  +{formatMoney(addOn.priceDeltaMinor, business.currency)}
                                   {' · '}
-                                  {addOn.durationMinutes} min
+                                  +{addOn.durationDeltaMinutes} min
                                 </button>
                               </li>
                             )

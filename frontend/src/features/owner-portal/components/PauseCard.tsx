@@ -1,11 +1,14 @@
 import { useState } from 'react'
 import type { BusinessDetails, DateString, PauseState } from '@/types/models'
-import { mockOwnerApi } from '@/mock/ownerApi'
+import { pauseOwnedBusiness, resumeOwnedBusiness } from '@/api/business'
+import { toUserMessage } from '@/api/errors'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { Field } from '@/components/ui/Field'
 
 interface PauseCardProps {
+  /** The real backend id of the owned business (tenant-scoped). */
+  businessId: string
   business: BusinessDetails
   onChanged: () => Promise<void>
 }
@@ -24,7 +27,7 @@ function todayString(): DateString {
  * visible and carries the optional pause message). Pausing can be indefinite
  * or scheduled to automatically reopen on a chosen date.
  */
-export function PauseCard({ business, onChanged }: PauseCardProps) {
+export function PauseCard({ businessId, business, onChanged }: PauseCardProps) {
   const [mode, setMode] = useState<'view' | 'edit' | 'confirm'>('view')
   const [kind, setKind] = useState<'indefinite' | 'until'>('indefinite')
   const [reopenDate, setReopenDate] = useState<string>('')
@@ -50,11 +53,14 @@ export function PauseCard({ business, onChanged }: PauseCardProps) {
     setSaving(true)
     setFlashError(null)
     try {
-      const result = await mockOwnerApi.setPause(pause)
-      if (!result.ok) {
-        setFlashError(result.error)
-        setMode(paused ? 'view' : 'edit')
-        return
+      if (pause === null) {
+        await resumeOwnedBusiness(businessId)
+      } else {
+        await pauseOwnedBusiness(businessId, {
+          pauseMessage: pause.message,
+          reopenAt:
+            pause.kind === 'until' ? `${pause.reopenDate}T00:00:00.000Z` : undefined,
+        })
       }
       setFlashSuccess(
         pause === null
@@ -63,8 +69,12 @@ export function PauseCard({ business, onChanged }: PauseCardProps) {
       )
       setMode('view')
       await onChanged()
-    } catch {
-      setFlashError('Could not update the pause state. Please try again.')
+    } catch (error) {
+      setFlashError(
+        toUserMessage(error) === 'Something went wrong. Please try again.'
+          ? 'Could not update the pause state. Please try again.'
+          : toUserMessage(error),
+      )
     } finally {
       setSaving(false)
     }

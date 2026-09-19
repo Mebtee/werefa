@@ -41,11 +41,11 @@ function fakeBooking(overrides?: {
     lineItems: [
       {
         name: service.name,
-        unitPrice: service.basePrice,
+        unitPrice: service.basePriceMinor,
         durationMinutes: service.baseDurationMinutes,
       },
     ],
-    total: service.basePrice,
+    total: service.basePriceMinor,
     totalDurationMinutes: service.baseDurationMinutes,
     deposit: 18000,
     customer: { name: 'Abebe', phone: overrides?.phone ?? PHONE, note: '' },

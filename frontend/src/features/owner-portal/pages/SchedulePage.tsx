@@ -1,48 +1,38 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type {
-  ScheduleConflict,
-  ScheduleSnapshot,
-  ScheduleVersion,
-  SpecialDay,
-  TimeOfDay,
-} from '@/types/models'
+import type { TimeOfDay } from '@/types/models'
 import { useOwnedBusiness } from '@/features/owner-portal/state/useOwnedBusiness'
 import { LoadState } from '@/features/owner-portal/components/LoadState'
 import { ScheduleConflicts } from '@/features/owner-portal/components/ScheduleConflicts'
 import { ScheduleHistory } from '@/features/owner-portal/components/ScheduleHistory'
-import { mockOwnerApi } from '@/mock/ownerApi'
+import { toUserMessage } from '@/api/errors'
+import {
+  getOwnerSchedule,
+  listOwnerScheduleConflicts,
+  listOwnerScheduleVersions,
+  saveOwnerSchedule,
+  updateOwnerScheduleInterval,
+} from '@/api/schedule'
+import type {
+  BlockedPeriodRow,
+  PeriodRow,
+  ScheduleConflictItem,
+  ScheduleForm,
+  SpecialDayEntry,
+} from '@/api/schedule.mapper'
+import {
+  conflictsFromApi,
+  scheduleFormFromApi,
+  toSchedulePayload,
+  versionHistoryEntry,
+} from '@/api/schedule.mapper'
+import { mirrorScheduleIntoBusiness } from '@/mock/scheduleMirror'
+import type { OwnerScheduleView } from '@/api/types'
+import type { ScheduleVersionHistoryEntry } from '@/types/models'
 import { WEEKDAY_NAMES } from '@/features/owner-portal/lib/labels'
 import { firstOverlap } from '@/lib/periods'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { Field } from '@/components/ui/Field'
-
-interface PeriodRow {
-  start: TimeOfDay
-  end: TimeOfDay
-}
-
-interface SpecialDayEntry {
-  date: string
-  kind: 'closed' | 'hours'
-  periods: PeriodRow[]
-}
-
-interface BlockedPeriodRow {
-  key: string
-  date: string
-  start: TimeOfDay
-  end: TimeOfDay
-}
-
-interface ScheduleForm {
-  hours: PeriodRow[][]
-  interval: string
-  specialDays: SpecialDayEntry[]
-  blockedDays: string[]
-  blockedPeriods: BlockedPeriodRow[]
-  reason: string
-}
 
 interface HourErrors {
   periods: (string | null)[]
@@ -53,43 +43,16 @@ interface HourErrors {
 
 const INTERVAL_OPTIONS = [15, 20, 30, 45, 60]
 
-function fromBusiness(business: {
-  workingHours: readonly (readonly { start: TimeOfDay; end: TimeOfDay }[])[]
-  bookingIntervalMinutes: number
-  specialDays: Readonly<Record<string, SpecialDay>>
-  blockedDays: readonly string[]
-  blockedPeriods: readonly { date: string; start: TimeOfDay; end: TimeOfDay }[]
-}): ScheduleForm {
-  return {
-    hours: business.workingHours.map((day) =>
-      day.map((period) => ({ start: period.start, end: period.end })),
-    ),
-    interval: String(business.bookingIntervalMinutes),
-    specialDays: Object.entries(business.specialDays).map(([date, special]) =>
-      special.kind === 'closed'
-        ? { date, kind: 'closed', periods: [] }
-        : {
-            date,
-            kind: 'hours',
-            periods: special.periods.map((period) => ({
-              start: period.start,
-              end: period.end,
-            })),
-          },
-    ),
-    blockedDays: [...business.blockedDays],
-    blockedPeriods: business.blockedPeriods.map((period) => ({
-      key: `${period.date}-${period.start}-${period.end}`,
-      date: period.date,
-      start: period.start,
-      end: period.end,
-    })),
-    reason: '',
-  }
+const ALL_DAY_LABEL = 'Every day'
+
+function dayLabel(day: number | null): string {
+  return day == null ? ALL_DAY_LABEL : WEEKDAY_NAMES[day]
 }
 
+const EMPTY_SPECIAL: SpecialDayEntry = { date: '', kind: 'custom', start: null, end: null }
+
 export function SchedulePage() {
-  const { business, loading, error, reload } = useOwnedBusiness()
+  const { business, businessId, loading, error, reload } = useOwnedBusiness()
   const initialized = useRef(false)
 
   const [form, setForm] = useState<ScheduleForm | null>(null)
@@ -100,49 +63,68 @@ export function SchedulePage() {
   const [saveSuccess, setSaveSuccess] = useState(false)
   const [pausedPending, setPausedPending] = useState(false)
 
-  const [versions, setVersions] = useState<readonly ScheduleVersion[]>([])
-  const [openConflicts, setOpenConflicts] = useState<readonly ScheduleConflict[]>([])
+  const [versions, setVersions] = useState<readonly ScheduleVersionHistoryEntry[]>([])
+  const [openConflicts, setOpenConflicts] = useState<readonly ScheduleConflictItem[]>([])
+  const [currentSchedule, setCurrentSchedule] = useState<OwnerScheduleView | null>(null)
 
-  const [dayDraft, setDayDraft] = useState('')
-  const [blockDraft, setBlockDraft] = useState<{ date: string; start: TimeOfDay; end: TimeOfDay }>({
-    date: '',
-    start: '12:00',
-    end: '14:00',
-  })
+  const [blockDraft, setBlockDraft] = useState<{
+    day: string
+    start: TimeOfDay
+    end: TimeOfDay
+  }>({ day: '', start: '12:00', end: '14:00' })
 
-  const loadHistory = useCallback(async () => {
+  const loadHistory = useCallback(async (businessId: string) => {
     try {
-      setVersions(await mockOwnerApi.listScheduleHistory())
+      const views = await listOwnerScheduleVersions(businessId)
+      setVersions(views.map(versionHistoryEntry))
     } catch {
       // History is a nicety; the page still works without it.
     }
   }, [])
 
-  const loadConflicts = useCallback(async () => {
+  const loadConflicts = useCallback(async (businessId: string) => {
     try {
-      setOpenConflicts(await mockOwnerApi.getOpenConflicts())
+      const views = await listOwnerScheduleConflicts(businessId)
+      setOpenConflicts(conflictsFromApi(views))
     } catch {
       // Conflicts are a nicety; the page still works without them.
     }
   }, [])
 
   useEffect(() => {
-    if (initialized.current || !business) return
+    if (initialized.current || !business || !businessId) return
     initialized.current = true
-    const initial = fromBusiness(business)
-    setForm(initial)
-    setSaved(initial)
-  }, [business])
+    const id = businessId
+    let cancelled = false
+    void (async () => {
+      try {
+        const current = await getOwnerSchedule(id)
+        if (cancelled) return
+        setCurrentSchedule(current)
+        setForm((previous) =>
+          previous === null ? scheduleFormFromApi(current, business.bookingIntervalMinutes) : previous,
+        )
+        setSaved((previous) =>
+          previous === null ? scheduleFormFromApi(current, business.bookingIntervalMinutes) : previous,
+        )
+      } catch (err) {
+        if (!cancelled) setSaveError(toUserMessage(err))
+      }
+      void loadHistory(id)
+      void loadConflicts(id)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [business, businessId, loadHistory, loadConflicts])
 
-  useEffect(() => {
-    if (!business) return
-    void loadHistory()
-    void loadConflicts()
-  }, [loadHistory, loadConflicts, business])
-
-  if (!business || !form || !saved) {
+  if (!business || !businessId || !form || !saved) {
     return (
-      <LoadState loading={loading || form === null} error={error} onRetry={reload}>
+      <LoadState
+        loading={loading || form === null}
+        error={saveError !== null || error}
+        onRetry={reload}
+      >
         {null}
       </LoadState>
     )
@@ -181,7 +163,9 @@ export function SchedulePage() {
     setForm((current) => {
       if (!current) return current
       const hours = current.hours.map((day, di) =>
-        di === dayIndex ? [...day, { start: '09:00', end: '12:00' } as PeriodRow] : day,
+        di === dayIndex
+          ? [...day, { start: '09:00', end: '12:00' } as PeriodRow]
+          : day,
       )
       return { ...current, hours }
     })
@@ -204,7 +188,11 @@ export function SchedulePage() {
       if (!current) return current
       const isOpen = current.hours[dayIndex].length > 0
       const hours = current.hours.map((day, di) =>
-        di === dayIndex ? (isOpen ? [] : [{ start: '09:00', end: '17:00' } as PeriodRow]) : day,
+        di === dayIndex
+          ? isOpen
+            ? []
+            : [{ start: '09:00', end: '17:00' } as PeriodRow]
+          : day,
       )
       return { ...current, hours }
     })
@@ -216,55 +204,6 @@ export function SchedulePage() {
       if (!current) return current
       const specialDays = current.specialDays.map((entry, i) =>
         i === index ? { ...entry, ...patch } : entry,
-      )
-      return { ...current, specialDays }
-    })
-  }
-
-  const setSpecialPeriod = (
-    index: number,
-    periodIndex: number,
-    key: 'start' | 'end',
-    value: TimeOfDay,
-  ) => {
-    setSaveSuccess(false)
-    setForm((current) => {
-      if (!current) return current
-      const specialDays = current.specialDays.map((entry, i) =>
-        i === index
-          ? {
-              ...entry,
-              periods: entry.periods.map((period, pi) =>
-                pi === periodIndex ? { ...period, [key]: value } : period,
-              ),
-            }
-          : entry,
-      )
-      return { ...current, specialDays }
-    })
-  }
-
-  const addSpecialPeriod = (index: number) => {
-    setSaveSuccess(false)
-    setForm((current) => {
-      if (!current) return current
-      const specialDays = current.specialDays.map((entry, i) =>
-        i === index
-          ? { ...entry, periods: [...entry.periods, { start: '13:00', end: '17:00' } as PeriodRow] }
-          : entry,
-      )
-      return { ...current, specialDays }
-    })
-  }
-
-  const removeSpecialPeriod = (index: number, periodIndex: number) => {
-    setSaveSuccess(false)
-    setForm((current) => {
-      if (!current) return current
-      const specialDays = current.specialDays.map((entry, i) =>
-        i === index
-          ? { ...entry, periods: entry.periods.filter((_, pi) => pi !== periodIndex) }
-          : entry,
       )
       return { ...current, specialDays }
     })
@@ -284,34 +223,20 @@ export function SchedulePage() {
   const addSpecial = () => {
     setSaveSuccess(false)
     if (!form.specialDays.some((entry) => entry.date === '')) {
-      update({ specialDays: [...form.specialDays, { date: '', kind: 'hours', periods: [] }] })
+      update({ specialDays: [...form.specialDays, EMPTY_SPECIAL] })
     }
-  }
-
-  const addBlockedDay = () => {
-    setSaveSuccess(false)
-    if (!dayDraft) return
-    if (form.blockedDays.includes(dayDraft)) {
-      setDayDraft('')
-      return
-    }
-    update({ blockedDays: [...form.blockedDays, dayDraft] })
-    setDayDraft('')
-  }
-
-  const removeBlockedDay = (date: string) => {
-    setSaveSuccess(false)
-    update({ blockedDays: form.blockedDays.filter((d) => d !== date) })
   }
 
   const addBlockedPeriod = () => {
     setSaveSuccess(false)
-    const { date, start, end } = blockDraft
-    if (!date || !start || !end || end <= start) return
-    const key = `${date}-${start}-${end}`
+    const { day, start, end } = blockDraft
+    if (!start || !end || end <= start) return
+    const dayValue = day === '' ? null : Number(day)
+    const key = `${dayValue ?? 'all'}-${start}-${end}`
     if (form.blockedPeriods.some((row) => row.key === key)) return
-    update({ blockedPeriods: [...form.blockedPeriods, { key, date, start, end }] })
-    setBlockDraft({ date: '', start: '12:00', end: '14:00' })
+    const row: BlockedPeriodRow = { key, day: dayValue, start, end }
+    update({ blockedPeriods: [...form.blockedPeriods, row] })
+    setBlockDraft({ day: '', start: '12:00', end: '14:00' })
   }
 
   const removeBlockedPeriodRow = (key: string) => {
@@ -339,40 +264,31 @@ export function SchedulePage() {
       next.interval = 'Pick a booking interval from the list.'
     }
 
+    const seenDates = new Set<string>()
     for (const entry of form.specialDays) {
       if (!entry.date) {
-        next.special = 'Every special date needs a date.'
+        if (!next.special) next.special = 'Every special date needs a date.'
         break
       }
-      if (entry.kind === 'hours') {
-        if (entry.periods.length === 0) {
-          next.special = 'Special hours need at least one period with a start and an end time.'
-          break
-        }
-        let invalid = false
-        for (const period of entry.periods) {
-          if (!period.start || !period.end || period.end <= period.start) {
-            next.special = 'Special opening hours need an end time after the start.'
-            invalid = true
-            break
-          }
-        }
-        if (invalid) break
-        if (firstOverlap(entry.periods)) {
-          next.special = 'Special-day periods must not overlap.'
-          break
+      if (seenDates.has(entry.date)) {
+        if (!next.special) next.special = 'Special dates must not repeat.'
+        break
+      }
+      seenDates.add(entry.date)
+      if (entry.kind === 'custom') {
+        if (!entry.start || !entry.end) {
+          if (!next.special) next.special = 'Special hours need a start and an end time.'
+        } else if (entry.end <= entry.start) {
+          if (!next.special) next.special = 'Special hours need an end time after the start.'
         }
       }
     }
 
     for (const row of form.blockedPeriods) {
-      if (!row.date) {
-        next.blocks = 'Every blocked period needs a date.'
-        break
-      }
-      if (!row.start || !row.end || row.end <= row.start) {
-        next.blocks = 'Blocked periods need an end time after the start.'
-        break
+      if (!row.start || !row.end) {
+        if (!next.blocks) next.blocks = 'Blocked periods need a start and an end time.'
+      } else if (row.end <= row.start) {
+        if (!next.blocks) next.blocks = 'Blocked period end time must be after its start.'
       }
     }
     return next
@@ -381,7 +297,12 @@ export function SchedulePage() {
   const save = async () => {
     const nextErrors = validate()
     setErrors(nextErrors)
-    if (nextErrors.periods.some(Boolean) || nextErrors.interval || nextErrors.special || nextErrors.blocks) {
+    if (
+      nextErrors.periods.some(Boolean) ||
+      nextErrors.interval ||
+      nextErrors.special ||
+      nextErrors.blocks
+    ) {
       return
     }
     setSaving(true)
@@ -389,43 +310,42 @@ export function SchedulePage() {
     setSaveSuccess(false)
     setPausedPending(false)
     try {
-      const specialDays: Record<string, SpecialDay> = {}
-      for (const entry of form.specialDays) {
-        specialDays[entry.date] =
-          entry.kind === 'closed'
-            ? { kind: 'closed' }
-            : { kind: 'hours', periods: entry.periods }
+      const payload = toSchedulePayload(form)
+      const interval = Number(form.interval)
+      const result = await saveOwnerSchedule(businessId, payload)
+      if (String(interval) !== saved.interval) {
+        try {
+          await updateOwnerScheduleInterval(businessId, { bookingIntervalMinutes: interval })
+        } catch {
+          // The schedule itself is saved; the interval mismatch surfaces on next load.
+        }
       }
-      const snapshot: ScheduleSnapshot = {
-        workingHours: form.hours,
-        bookingIntervalMinutes: Number(form.interval),
-        blockedDays: form.blockedDays,
-        blockedPeriods: form.blockedPeriods.map(({ date, start, end }) => ({ date, start, end })),
-        specialDays,
-      }
-      const result = await mockOwnerApi.saveSchedule(snapshot, { reason: form.reason })
-      if (!result.ok) {
-        setSaveError(result.error)
-        return
-      }
+      mirrorScheduleIntoBusiness(
+        business.slug,
+        {
+          ...payload,
+          blockedPeriods: payload.blockedPeriods ?? [],
+          specialDates: payload.specialDates ?? [],
+        },
+        { intervalMinutes: interval, bookingWindowDays: business.bookingWindowDays ?? 14 },
+      )
+      setCurrentSchedule(result.version)
       const savedForm = { ...form, reason: '' }
       setSaved(savedForm)
       setForm(savedForm)
       setSaveSuccess(true)
-      setPausedPending(result.value.version.status === 'pending')
-      await reload()
-      await loadConflicts()
-      await loadHistory()
-    } catch {
-      setSaveError('Could not save the schedule. Please try again.')
+      setPausedPending(result.activated === false)
+      await Promise.all([loadConflicts(businessId), loadHistory(businessId)])
+      void reload()
+    } catch (err) {
+      setSaveError(toUserMessage(err))
     } finally {
       setSaving(false)
     }
   }
 
   const handleConflictsChanged = async () => {
-    await loadConflicts()
-    await loadHistory()
+    await Promise.all([loadConflicts(businessId), loadHistory(businessId)])
     await reload()
   }
 
@@ -613,51 +533,33 @@ export function SchedulePage() {
                   <input
                     type="radio"
                     name={`special-kind-${index}`}
-                    value="hours"
-                    checked={entry.kind === 'hours'}
-                    onChange={() => updateSpecial(index, { kind: 'hours' })}
+                    value="custom"
+                    checked={entry.kind === 'custom'}
+                    onChange={() => updateSpecial(index, { kind: 'custom' })}
                   />
-                  Special hours
+                  Custom hours
                 </label>
-                {entry.kind === 'hours' && (
+                {entry.kind === 'custom' && (
                   <div className="special-day__periods">
-                    {entry.periods.map((period, periodIndex) => (
-                      <div key={`${index}-${periodIndex}`} className="hours-period">
-                        <input
-                          className="input hours-period__input"
-                          type="time"
-                          aria-label={`Special date ${index + 1} period ${periodIndex + 1} start`}
-                          value={period.start}
-                          onChange={(event) =>
-                            setSpecialPeriod(index, periodIndex, 'start', event.target.value)
-                          }
-                        />
-                        <span className="hours-period__to" aria-hidden="true">
-                          to
-                        </span>
-                        <input
-                          className="input hours-period__input"
-                          type="time"
-                          aria-label={`Special date ${index + 1} period ${periodIndex + 1} end`}
-                          value={period.end}
-                          onChange={(event) =>
-                            setSpecialPeriod(index, periodIndex, 'end', event.target.value)
-                          }
-                        />
-                        {entry.periods.length > 1 && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() => removeSpecialPeriod(index, periodIndex)}
-                          >
-                            Remove
-                          </Button>
-                        )}
-                      </div>
-                    ))}
-                    <Button type="button" variant="outline" onClick={() => addSpecialPeriod(index)}>
-                      Add period
-                    </Button>
+                    <div className="hours-period">
+                      <input
+                        className="input hours-period__input"
+                        type="time"
+                        aria-label={`Special date ${index + 1} period 1 start`}
+                        value={entry.start ?? ''}
+                        onChange={(event) => updateSpecial(index, { start: event.target.value })}
+                      />
+                      <span className="hours-period__to" aria-hidden="true">
+                        to
+                      </span>
+                      <input
+                        className="input hours-period__input"
+                        type="time"
+                        aria-label={`Special date ${index + 1} period 1 end`}
+                        value={entry.end ?? ''}
+                        onChange={(event) => updateSpecial(index, { end: event.target.value })}
+                      />
+                    </div>
                   </div>
                 )}
                 <Button type="button" variant="outline" onClick={() => removeSpecial(index)}>
@@ -674,102 +576,70 @@ export function SchedulePage() {
 
         <fieldset className="subsection">
           <legend className="subsection__legend">
-            Blocked days & periods{' '}
-            <span className="subsection__hint">temporarily close a day or a window</span>
+            Blocked periods{' '}
+            <span className="subsection__hint">
+              weekly windows that reject bookings, overriding the week
+            </span>
           </legend>
-
-          <div className="block-editor">
-            <div className="block-editor__group">
-              <h3 className="subsection__subtitle">Blocked days</h3>
-              {form.blockedDays.length === 0 && (
-                <p className="subsection__empty">No blocked days.</p>
-              )}
-              {form.blockedDays.map((date) => (
-                <div key={date} className="block-row">
-                  <span className="block-row__label">Closed all day — {date}</span>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => removeBlockedDay(date)}
-                    aria-label={`Remove blocked day ${date}`}
-                  >
-                    Remove
-                  </Button>
-                </div>
-              ))}
-              <div className="block-add">
-                <input
-                  className="input block-add__date"
-                  type="date"
-                  aria-label="Blocked day date"
-                  value={dayDraft}
-                  onChange={(event) => setDayDraft(event.target.value)}
-                />
-                <Button type="button" variant="outline" onClick={addBlockedDay} disabled={!dayDraft}>
-                  Add blocked day
-                </Button>
-              </div>
+          {form.blockedPeriods.length === 0 && (
+            <p className="subsection__empty">No blocked periods.</p>
+          )}
+          {form.blockedPeriods.map((row) => (
+            <div key={row.key} className="block-row">
+              <span className="block-row__label">
+                Blocked {row.start}–{row.end} on {dayLabel(row.day)}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => removeBlockedPeriodRow(row.key)}
+                aria-label={`Remove blocked period on ${dayLabel(row.day)}`}
+              >
+                Remove
+              </Button>
             </div>
-
-            <div className="block-editor__group">
-              <h3 className="subsection__subtitle">Blocked periods</h3>
-              {form.blockedPeriods.length === 0 && (
-                <p className="subsection__empty">No blocked periods.</p>
-              )}
-              {form.blockedPeriods.map((row) => (
-                <div key={row.key} className="block-row">
-                  <span className="block-row__label">
-                    Blocked {row.start}–{row.end} on {row.date}
-                  </span>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => removeBlockedPeriodRow(row.key)}
-                    aria-label={`Remove blocked period on ${row.date}`}
-                  >
-                    Remove
-                  </Button>
-                </div>
-              ))}
-              <div className="block-add block-add--periods">
-                <input
-                  className="input block-add__date"
-                  type="date"
-                  aria-label="Blocked period date"
-                  value={blockDraft.date}
-                  onChange={(event) =>
-                    setBlockDraft({ ...blockDraft, date: event.target.value })
-                  }
-                />
-                <input
-                  className="input"
-                  type="time"
-                  aria-label="Blocked period start"
-                  value={blockDraft.start}
-                  onChange={(event) =>
-                    setBlockDraft({ ...blockDraft, start: event.target.value })
-                  }
-                />
-                <span aria-hidden="true">to</span>
-                <input
-                  className="input"
-                  type="time"
-                  aria-label="Blocked period end"
-                  value={blockDraft.end}
-                  onChange={(event) => setBlockDraft({ ...blockDraft, end: event.target.value })}
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={addBlockedPeriod}
-                  disabled={!blockDraft.date || !blockDraft.start || !blockDraft.end}
-                >
-                  Add blocked period
-                </Button>
-              </div>
-              {errors.blocks && <p className="field__error">{errors.blocks}</p>}
-            </div>
+          ))}
+          <div className="block-add">
+            <label className="block-add__label">
+              <span className="sr-only">Blocked period weekday</span>
+              <select
+                className="select block-add__day"
+                value={blockDraft.day}
+                onChange={(event) => setBlockDraft({ ...blockDraft, day: event.target.value })}
+              >
+                <option value="">Every day</option>
+                {WEEKDAY_NAMES.map((name, index) => (
+                  <option key={name} value={String(index)}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <input
+              className="input"
+              type="time"
+              aria-label="Blocked period start"
+              value={blockDraft.start}
+              onChange={(event) => setBlockDraft({ ...blockDraft, start: event.target.value })}
+            />
+            <span aria-hidden="true">to</span>
+            <input
+              className="input"
+              type="time"
+              aria-label="Blocked period end"
+              value={blockDraft.end}
+              onChange={(event) => setBlockDraft({ ...blockDraft, end: event.target.value })}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={addBlockedPeriod}
+              disabled={!blockDraft.start || !blockDraft.end}
+            >
+              Add blocked period
+            </Button>
           </div>
+          {errors.blocks && <p className="field__error">{errors.blocks}</p>}
         </fieldset>
 
         <div className="subsection">
@@ -807,7 +677,16 @@ export function SchedulePage() {
       </form>
 
       <div style={{ marginTop: 'var(--space-4)' }}>
-        <ScheduleConflicts conflicts={openConflicts} onChanged={handleConflictsChanged} />
+        <ScheduleConflicts
+          conflicts={openConflicts}
+          businessId={businessId}
+          versionId={
+            currentSchedule && currentSchedule.status === 'ACTIVE'
+              ? currentSchedule.versionId
+              : null
+          }
+          onChanged={handleConflictsChanged}
+        />
       </div>
 
       <div style={{ marginTop: 'var(--space-4)' }}>

@@ -43,8 +43,8 @@ function fakeBooking(overrides?: { businessSlug?: string; date?: string; time?: 
   const service = services[0]
   return {
     businessSlug: slug,
-    lineItems: [{ name: service.name, unitPrice: service.basePrice, durationMinutes: service.baseDurationMinutes }],
-    total: service.basePrice,
+    lineItems: [{ name: service.name, unitPrice: service.basePriceMinor, durationMinutes: service.baseDurationMinutes }],
+    total: service.basePriceMinor,
     totalDurationMinutes: service.baseDurationMinutes,
     deposit: 18000,
     customer: {

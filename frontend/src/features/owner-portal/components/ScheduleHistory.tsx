@@ -1,14 +1,14 @@
-import type { ScheduleVersion } from '@/types/models'
-import { describeScheduleChange } from '@/lib/scheduleHistory'
+import type { ScheduleVersionHistoryEntry } from '@/types/models'
+import { describeVersionChange } from '@/lib/scheduleHistory'
 import { formatTimestamp } from '@/lib/time'
 
-const STATUS_LABEL: Record<ScheduleVersion['status'], string> = {
+const STATUS_LABEL: Record<ScheduleVersionHistoryEntry['status'], string> = {
   active: 'Active',
   pending: 'Pending',
   superseded: 'Superseded',
 }
 
-const STATUS_CHIP: Record<ScheduleVersion['status'], string> = {
+const STATUS_CHIP: Record<ScheduleVersionHistoryEntry['status'], string> = {
   active: 'version-chip--active',
   pending: 'version-chip--pending',
   superseded: 'version-chip--superseded',
@@ -17,8 +17,14 @@ const STATUS_CHIP: Record<ScheduleVersion['status'], string> = {
 /**
  * View-only schedule history (REQ-166/169): retained schedule versions with
  * who, when, what changed and the reason. No restore/revert action exists.
+ * Versions come from the real backend (Prompt 47) with their canonical
+ * snapshots; the change summary is produced by the canonical diff.
  */
-export function ScheduleHistory({ versions }: { versions: readonly ScheduleVersion[] }) {
+export function ScheduleHistory({
+  versions,
+}: {
+  versions: readonly ScheduleVersionHistoryEntry[]
+}) {
   return (
     <section
       className="card card--padded"
@@ -45,13 +51,11 @@ export function ScheduleHistory({ versions }: { versions: readonly ScheduleVersi
                   <span className={`version-chip ${STATUS_CHIP[version.status]}`}>
                     {STATUS_LABEL[version.status]}
                   </span>
-                  <strong>
-                    {version.automatic ? 'System (automatic)' : version.actor}
-                  </strong>
+                  <strong>{version.actor}</strong>
                   <span className="booking-card__meta">{formatTimestamp(version.at)}</span>
                 </span>
                 <span className="history-row__change">
-                  {describeScheduleChange(previous, version.snapshot)}
+                  {describeVersionChange(previous, version.snapshot)}
                 </span>
                 {version.reason && (
                   <span className="history-row__reason">

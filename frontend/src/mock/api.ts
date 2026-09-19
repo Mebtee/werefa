@@ -4,6 +4,7 @@ import type {
   BusinessPage,
   CustomerBookingStatus,
   DateString,
+  Service,
   SubmitResult,
   TimeOfDay,
 } from '@/types/models'
@@ -18,7 +19,6 @@ import {
   getBookingsByPhone,
   getBusinessPage as readBusinessPage,
   getOccupiedBlocks,
-  getServices,
   isCustomerTelegramConnected,
   setCustomerTelegramConnected,
 } from '@/mock/store'
@@ -52,6 +52,7 @@ export interface BookingApi {
   createBooking(
     draft: BookingDraft,
     business: BusinessDetails,
+    services: readonly Service[],
     durationMinutes: number,
   ): Promise<SubmitResult>
   /**
@@ -114,7 +115,7 @@ export const mockApi: BookingApi = {
     )
   },
 
-  async createBooking(draft, business, durationMinutes) {
+  async createBooking(draft, business, services, durationMinutes) {
     await delay(latency() + 350)
 
     if (draft.date === null || draft.time === null) {
@@ -152,7 +153,8 @@ export const mockApi: BookingApi = {
       return { status: 'unavailable' }
     }
 
-    const services = getServices(business.slug)
+    // Line items are built from the real catalog services passed in (Prompt
+    // 46) — the mock never resolves services from the store anymore.
     const lineItems = buildLineItems(services, draft.selections)
     const total = totalPrice(lineItems)
     const deposit = prepaymentAmount(business.prepayment, total) ?? 0

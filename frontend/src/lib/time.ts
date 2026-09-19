@@ -72,6 +72,32 @@ export function minutesOf(time: TimeOfDay): number {
   return h * 60 + m
 }
 
+/** "HH:MM" string for a minute-of-day count (0 … 1439). */
+export function minutesToTime(totalMinutes: number): TimeOfDay {
+  const h = Math.floor(totalMinutes / 60)
+  const m = Math.round(totalMinutes % 60)
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+}
+
+/** ISO weekday (Monday = 1 … Sunday = 7) for a date string. */
+export function isoWeekdayOf(date: DateString): number {
+  return ((weekdayOf(date) + 6) % 7) + 1
+}
+
+/** Human label for an ISO datetime, e.g. "Mon, Mar 4 2030 at 10:00 AM". */
+export function formatDateTime(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return iso
+  return new Intl.DateTimeFormat('en-US', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
+}
+
 export function periodLengthInMinutes(period: {
   start: TimeOfDay
   end: TimeOfDay

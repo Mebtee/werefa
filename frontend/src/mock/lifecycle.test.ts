@@ -42,9 +42,9 @@ function fakeBooking(overrides?: { date?: string; time?: string }) {
   return {
     businessSlug: PRIMARY_BUSINESS_SLUG,
     lineItems: [
-      { name: service.name, unitPrice: service.basePrice, durationMinutes: service.baseDurationMinutes },
+      { name: service.name, unitPrice: service.basePriceMinor, durationMinutes: service.baseDurationMinutes },
     ],
-    total: service.basePrice,
+    total: service.basePriceMinor,
     totalDurationMinutes: service.baseDurationMinutes,
     deposit: 18000,
     customer: { name: 'Abebe', phone: '+251911111111', note: '' },
@@ -382,9 +382,9 @@ describe('idempotent double actions and tenant mutation guard rails (Prompt 38)'
     const created = createBookingEntry({
       businessSlug: SECONDARY_SLUG,
       lineItems: [
-        { name: service.name, unitPrice: service.basePrice, durationMinutes: service.baseDurationMinutes },
+        { name: service.name, unitPrice: service.basePriceMinor, durationMinutes: service.baseDurationMinutes },
       ],
-      total: service.basePrice,
+      total: service.basePriceMinor,
       totalDurationMinutes: service.baseDurationMinutes,
       deposit: 0,
       customer: { name: 'Other Biz Customer', phone: '+251988776655', note: '' },
@@ -420,9 +420,9 @@ describe('idempotent double actions and tenant mutation guard rails (Prompt 38)'
     const created = createBookingEntry({
       businessSlug: SECONDARY_SLUG,
       lineItems: [
-        { name: service.name, unitPrice: service.basePrice, durationMinutes: service.baseDurationMinutes },
+        { name: service.name, unitPrice: service.basePriceMinor, durationMinutes: service.baseDurationMinutes },
       ],
-      total: service.basePrice,
+      total: service.basePriceMinor,
       totalDurationMinutes: service.baseDurationMinutes,
       deposit: 0,
       customer: { name: 'Other Biz Customer', phone: '+251988776655', note: '' },

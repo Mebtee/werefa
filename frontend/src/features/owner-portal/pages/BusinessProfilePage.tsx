@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import type { BusinessCategory, MapProvider } from '@/types/models'
+import { isApiError, toUserMessage } from '@/api/errors'
+import type { BusinessCategory } from '@/types/models'
+import {
+  changeOwnedBusinessSlug,
+  updateOwnedBusinessProfile,
+} from '@/api/business'
+import { categoryToCode } from '@/api/business.mapper'
 import { useOwnedBusiness } from '@/features/owner-portal/state/useOwnedBusiness'
 import { LoadState } from '@/features/owner-portal/components/LoadState'
 import { ImagePicker } from '@/features/owner-portal/components/ImagePicker'
@@ -8,7 +14,6 @@ import { MockQrCode } from '@/features/owner-portal/components/MockQrCode'
 import { PauseCard } from '@/features/owner-portal/components/PauseCard'
 import { CATEGORY_LABEL } from '@/features/owner-portal/lib/labels'
 import { mockOwnerApi, type BrandingPatch } from '@/mock/ownerApi'
-import { validatePublicSlug } from '@/mock/store'
 import { mapUrl } from '@/lib/format'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
@@ -17,42 +22,30 @@ import { Field } from '@/components/ui/Field'
 interface BusinessForm {
   name: string
   category: BusinessCategory
-  tagline: string
   description: string
-  accentColor: string
   phone: string
   address: string
   lat: string
   lng: string
-  mapProvider: MapProvider
-  bookingWindowDays: string
 }
 
 function fromBusiness(b: {
   name: string
   category: BusinessCategory
-  tagline: string
   description: string
-  accentColor: string
   phone: string
   address: string
-  lat: number
-  lng: number
-  mapProvider: MapProvider
-  bookingWindowDays: number
+  lat: number | null
+  lng: number | null
 }): BusinessForm {
   return {
     name: b.name,
     category: b.category,
-    tagline: b.tagline,
     description: b.description,
-    accentColor: b.accentColor,
     phone: b.phone,
     address: b.address,
-    lat: String(b.lat),
-    lng: String(b.lng),
-    mapProvider: b.mapProvider,
-    bookingWindowDays: String(b.bookingWindowDays),
+    lat: b.lat === null ? '' : String(b.lat),
+    lng: b.lng === null ? '' : String(b.lng),
   }
 }
 
@@ -60,14 +53,13 @@ interface ParseErrors {
   name?: string
   lat?: string
   lng?: string
-  bookingWindowDays?: string
-  accentColor?: string
 }
 
-const HEX_COLOR = /^#[0-9a-fA-F]{6}$/
+/** Mirrors the backend ChangeSlugPayload rule (lowercase + single hyphens), 2–64 chars. */
+const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
 export function BusinessProfilePage() {
-  const { business, loading, error, reload } = useOwnedBusiness()
+  const { business, businessId, loading, error, reload } = useOwnedBusiness()
   const initialized = useRef(false)
 
   const [form, setForm] = useState<BusinessForm | null>(null)
@@ -83,7 +75,8 @@ export function BusinessProfilePage() {
   const [slugSuccess, setSlugSuccess] = useState(false)
   const [savingSlug, setSavingSlug] = useState(false)
 
-  // Branding (logo / cover photo)
+  // Branding (logo / cover photo) — still demo-only: the real business API has
+  // no file storage yet, so uploads stay in the in-memory mock store.
   const [brandingBusy, setBrandingBusy] = useState(false)
   const [brandingError, setBrandingError] = useState<string | null>(null)
   const [brandingSuccess, setBrandingSuccess] = useState(false)
@@ -122,7 +115,7 @@ export function BusinessProfilePage() {
     if (business) setSlugInput(business.slug)
   }, [business])
 
-  if (!business || !form || !saved) {
+  if (!business || !form || !saved || !businessId) {
     return (
       <LoadState loading={loading || form === null} error={error} onRetry={reload}>
         {null}
@@ -142,14 +135,11 @@ export function BusinessProfilePage() {
     if (!form.name.trim()) next.name = 'Please enter your business name.'
     const lat = Number(form.lat)
     const lng = Number(form.lng)
-    if (Number.isNaN(lat)) next.lat = 'Enter a valid latitude.'
-    if (Number.isNaN(lng)) next.lng = 'Enter a valid longitude.'
-    const days = Number(form.bookingWindowDays)
-    if (!Number.isInteger(days) || days < 1 || days > 365) {
-      next.bookingWindowDays = 'Enter a whole number of days between 1 and 365.'
+    if (Number.isNaN(lat) || lat < -90 || lat > 90) {
+      next.lat = 'Enter a valid latitude between -90 and 90.'
     }
-    if (!HEX_COLOR.test(form.accentColor)) {
-      next.accentColor = 'Enter a colour as a 6-digit hex code, e.g. #b4457f.'
+    if (Number.isNaN(lng) || lng < -180 || lng > 180) {
+      next.lng = 'Enter a valid longitude between -180 and 180.'
     }
     return next
   }
@@ -162,28 +152,24 @@ export function BusinessProfilePage() {
     setSaveError(null)
     setSaveSuccess(false)
     try {
-      const result = await mockOwnerApi.saveProfile({
+      await updateOwnedBusinessProfile(businessId, {
         name: form.name.trim(),
-        category: form.category,
-        tagline: form.tagline.trim(),
+        categoryCode: categoryToCode(form.category),
         description: form.description.trim(),
-        accentColor: form.accentColor,
-        phone: form.phone.trim(),
+        phonePublic: form.phone.trim(),
         address: form.address.trim(),
-        lat: Number(form.lat),
-        lng: Number(form.lng),
-        mapProvider: form.mapProvider,
-        bookingWindowDays: Math.trunc(Number(form.bookingWindowDays)),
+        latitude: form.lat.trim() === '' ? undefined : Number(form.lat),
+        longitude: form.lng.trim() === '' ? undefined : Number(form.lng),
       })
-      if (!result.ok) {
-        setSaveError(result.error)
-        return
-      }
       setSaved({ ...form })
       setSaveSuccess(true)
       await reload()
-    } catch {
-      setSaveError('Could not save your changes. Please try again.')
+    } catch (saveThrown) {
+      setSaveError(
+        isApiError(saveThrown)
+          ? toUserMessage(saveThrown)
+          : 'Could not save your changes. Please try again.',
+      )
     } finally {
       setSaving(false)
     }
@@ -200,9 +186,14 @@ export function BusinessProfilePage() {
 
   const saveSlug = async () => {
     const trimmed = slugInput.trim()
-    const invalid = validatePublicSlug(trimmed)
-    if (invalid) {
-      setSlugError(invalid)
+    if (
+      trimmed.length < 2 ||
+      trimmed.length > 64 ||
+      !SLUG_PATTERN.test(trimmed)
+    ) {
+      setSlugError(
+        'Use 5–64 characters: lowercase letters, numbers and single hyphens, no leading or trailing dash.',
+      )
       return
     }
     if (trimmed === business.slug) {
@@ -214,15 +205,15 @@ export function BusinessProfilePage() {
     setSlugError(null)
     setSlugSuccess(false)
     try {
-      const result = await mockOwnerApi.changePublicSlug(trimmed)
-      if (!result.ok) {
-        setSlugError(result.error)
-        return
-      }
+      await changeOwnedBusinessSlug(businessId, trimmed)
       setSlugSuccess(true)
       await reload()
-    } catch {
-      setSlugError('Could not update the public link. Please try again.')
+    } catch (slugThrown) {
+      setSlugError(
+        isApiError(slugThrown) && slugThrown.kind === 'conflict'
+          ? 'That public link is already taken by another business.'
+          : 'Could not update the public link. Please try again.',
+      )
     } finally {
       setSavingSlug(false)
     }
@@ -291,19 +282,6 @@ export function BusinessProfilePage() {
               ))}
             </fieldset>
 
-            <Field label="Tagline" hint="A short line shown under your name.">
-              {({ id, ariaDescribedBy }) => (
-                <input
-                  id={id}
-                  className="input"
-                  value={form.tagline}
-                  maxLength={90}
-                  aria-describedby={ariaDescribedBy}
-                  onChange={(event) => setField('tagline', event.target.value)}
-                />
-              )}
-            </Field>
-
             <Field
               label="Description"
               hint="A few sentences customers read before booking."
@@ -349,93 +327,41 @@ export function BusinessProfilePage() {
             </Field>
 
             <div className="form-grid__pair">
-              <Field label="Latitude" error={errors.lat}>
+              <Field
+                label="Latitude"
+                hint="Used for the map link on your public page."
+                error={errors.lat}
+              >
                 {({ id, ariaDescribedBy }) => (
                   <input
                     id={id}
                     className="input"
                     type="number"
                     step="any"
+                    min={-90}
+                    max={90}
                     value={form.lat}
                     aria-describedby={ariaDescribedBy}
                     onChange={(event) => setField('lat', event.target.value)}
                   />
                 )}
               </Field>
-              <Field label="Longitude" error={errors.lng}>
+              <Field
+                label="Longitude"
+                hint="Used for the map link on your public page."
+                error={errors.lng}
+              >
                 {({ id, ariaDescribedBy }) => (
                   <input
                     id={id}
                     className="input"
                     type="number"
                     step="any"
+                    min={-180}
+                    max={180}
                     value={form.lng}
                     aria-describedby={ariaDescribedBy}
                     onChange={(event) => setField('lng', event.target.value)}
-                  />
-                )}
-              </Field>
-            </div>
-
-            <Field label="Map provider">
-              {({ id, ariaDescribedBy }) => (
-                <select
-                  id={id}
-                  className="select"
-                  value={form.mapProvider}
-                  aria-describedby={ariaDescribedBy}
-                  onChange={(event) =>
-                    setField('mapProvider', event.target.value as MapProvider)
-                  }
-                >
-                  <option value="osm">OpenStreetMap</option>
-                  <option value="google">Google Maps</option>
-                </select>
-              )}
-            </Field>
-
-            <div className="form-grid__pair">
-              <Field
-                label="Accent colour"
-                hint="Used for buttons on your public page."
-                error={errors.accentColor}
-              >
-                {({ id, ariaDescribedBy }) => (
-                  <>
-                    <input
-                      id={id}
-                      className="input"
-                      value={form.accentColor}
-                      pattern="^#[0-9a-fA-F]{6}$"
-                      aria-describedby={ariaDescribedBy}
-                      onChange={(event) => setField('accentColor', event.target.value)}
-                    />
-                    <input
-                      type="color"
-                      aria-label="Pick accent colour"
-                      value={form.accentColor}
-                      onChange={(event) => setField('accentColor', event.target.value)}
-                    />
-                  </>
-                )}
-              </Field>
-              <Field
-                label="Booking window (days)"
-                hint="How far ahead customers can book."
-                error={errors.bookingWindowDays}
-              >
-                {({ id, ariaDescribedBy }) => (
-                  <input
-                    id={id}
-                    className="input"
-                    type="number"
-                    min={1}
-                    max={365}
-                    value={form.bookingWindowDays}
-                    aria-describedby={ariaDescribedBy}
-                    onChange={(event) =>
-                      setField('bookingWindowDays', event.target.value)
-                    }
                   />
                 )}
               </Field>
@@ -458,10 +384,16 @@ export function BusinessProfilePage() {
           <div>
             <h2 className="card__title">Branding</h2>
             <p className="card__subtitle">
-              Your logo and one cover photo are shown on the public page. Image
-              files are stored as inline previews in this demo.
+              Your logo and one cover photo are shown on the public page.
             </p>
           </div>
+        </div>
+
+        <div style={{ marginBottom: 'var(--space-4)' }}>
+          <Alert tone="info" title="Demo-only previews">
+            Real image hosting is not part of this phase, so uploads stay in the
+            local demo store and are not sent to the backend.
+          </Alert>
         </div>
 
         {brandingError && (
@@ -572,15 +504,15 @@ export function BusinessProfilePage() {
           <div className="public-url-card__qr">
             <MockQrCode slug={business.slug} className="qr-svg" />
             <p className="public-url-card__qr-hint">
-              QR code mock — encodes this link; updates if the link changes.
-              A real QR encoder is added at integration time.
+              QR code mock — encodes this real booking link and updates if the
+              link changes. A real QR encoder is added at integration time.
             </p>
           </div>
         </div>
       </section>
 
       <div style={{ marginTop: 'var(--space-4)' }}>
-        <PauseCard business={business} onChanged={reload} />
+        <PauseCard businessId={businessId} business={business} onChanged={reload} />
       </div>
     </>
   )

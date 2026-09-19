@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   render,
   screen,
@@ -10,8 +10,21 @@ import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { appRoutes } from '@/routes'
 import { toDateString } from '@/lib/time'
+import { installBusinessApiStub } from '@/test/businessApi'
 
 const user = userEvent.setup()
+
+let restoreFetch: (() => void) | undefined
+
+beforeEach(() => {
+  const stub = installBusinessApiStub()
+  restoreFetch = stub.restore
+})
+
+afterEach(() => {
+  restoreFetch?.()
+  restoreFetch = undefined
+})
 
 function renderPage(): RenderResult {
   const router = createMemoryRouter(appRoutes, {

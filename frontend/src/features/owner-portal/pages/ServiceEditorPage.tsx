@@ -2,28 +2,39 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useOwnedBusiness } from '@/features/owner-portal/state/useOwnedBusiness'
 import { LoadState } from '@/features/owner-portal/components/LoadState'
-import { mockOwnerApi } from '@/mock/ownerApi'
+import {
+  createOwnerService,
+  createServiceAddOn,
+  createServiceVariation,
+  updateOwnerService,
+} from '@/api/catalog'
+import { toFieldErrors, toUserMessage } from '@/api/errors'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { Field } from '@/components/ui/Field'
 
-interface VariationRow {
-  id: string
+/**
+ * Create/edit a service against the real catalog API (Prompt 46).
+ *
+ * The backend exposes no update/delete for variations and add-ons, so existing
+ * ones are shown read-only; new rows are created with their own POST after the
+ * service itself is saved. Validation mirrors the backend (name 1-160, price
+ * >= 0 minor, duration >= 1, deltas >= 0) and server VALIDATION_ERROR fields
+ * are mapped back onto the form (REQ-071 AC1).
+ */
+
+interface VariantRow {
+  /** Stable key (variation real id when persisted, local id when new). */
+  key: string
+  /** Real backend id; null while the row still needs to be created. */
+  id: string | null
   name: string
   priceDeltaBirr: string
   durationDeltaMinutes: string
 }
 
-interface AddOnRow {
-  id: string
-  name: string
-  priceBirr: string
-  durationMinutes: string
-}
-
 interface EditorForm {
   name: string
-  description: string
   basePriceBirr: string
   baseDurationMinutes: string
 }
@@ -32,12 +43,10 @@ interface EditorErrors {
   name?: string
   basePrice?: string
   baseDuration?: string
-  variations: (string | null)[]
-  addOns: (string | null)[]
 }
 
 function localId(): string {
-  return Math.random().toString(36).slice(2, 8)
+  return `local-${Math.random().toString(36).slice(2, 8)}`
 }
 
 function parseBirr(text: string): number | null {
@@ -57,27 +66,26 @@ function minorToBirr(minor: number): string {
 function emptyForm(): EditorForm {
   return {
     name: '',
-    description: '',
     basePriceBirr: '',
     baseDurationMinutes: '',
   }
 }
 
 function emptyErrors(): EditorErrors {
-  return { variations: [], addOns: [] }
+  return {}
 }
 
 export function ServiceEditorPage() {
   const { serviceId } = useParams<{ serviceId: string }>()
   const navigate = useNavigate()
-  const { business, services, loading, error, reload } = useOwnedBusiness()
+  const { business, businessId, services, loading, error, reload } = useOwnedBusiness()
 
   const isNew = serviceId === undefined || serviceId === 'new'
   const existing = services.find((s) => s.id === serviceId) ?? null
 
   const [form, setForm] = useState<EditorForm>(emptyForm)
-  const [variations, setVariations] = useState<VariationRow[]>([])
-  const [addOns, setAddOns] = useState<AddOnRow[]>([])
+  const [variations, setVariations] = useState<VariantRow[]>([])
+  const [addOns, setAddOns] = useState<VariantRow[]>([])
   const [initializedFor, setInitializedFor] = useState<string | null>(null)
   const [errors, setErrors] = useState<EditorErrors>(emptyErrors)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -95,24 +103,25 @@ export function ServiceEditorPage() {
     if (existing) {
       setForm({
         name: existing.name,
-        description: existing.description ?? '',
-        basePriceBirr: minorToBirr(existing.basePrice),
+        basePriceBirr: minorToBirr(existing.basePriceMinor),
         baseDurationMinutes: String(existing.baseDurationMinutes),
       })
       setVariations(
         existing.variations.map((v) => ({
+          key: v.id,
           id: v.id,
           name: v.name,
-          priceDeltaBirr: minorToBirr(v.priceDelta),
+          priceDeltaBirr: minorToBirr(v.priceDeltaMinor),
           durationDeltaMinutes: String(v.durationDeltaMinutes),
         })),
       )
       setAddOns(
         existing.addOns.map((a) => ({
+          key: a.id,
           id: a.id,
           name: a.name,
-          priceBirr: minorToBirr(a.price),
-          durationMinutes: String(a.durationMinutes),
+          priceDeltaBirr: minorToBirr(a.priceDeltaMinor),
+          durationDeltaMinutes: String(a.durationDeltaMinutes),
         })),
       )
       setInitializedFor(existing.id)
@@ -144,16 +153,17 @@ export function ServiceEditorPage() {
     setSaveError(null)
   }
 
-  const updateVariation = (id: string, patch: Partial<VariationRow>) => {
-    setVariations((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)))
-  }
-
-  const updateAddOn = (id: string, patch: Partial<AddOnRow>) => {
-    setAddOns((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)))
+  const updateRow = (
+    rows: VariantRow[],
+    setRows: (next: VariantRow[]) => void,
+    key: string,
+    patch: Partial<VariantRow>,
+  ) => {
+    setRows(rows.map((r) => (r.key === key ? { ...r, ...patch } : r)))
   }
 
   const validate = (): EditorErrors => {
-    const next: EditorErrors = { variations: [], addOns: [] }
+    const next: EditorErrors = {}
     if (!form.name.trim()) next.name = 'Please enter a service name.'
     const price = parseBirr(form.basePriceBirr)
     if (price === null || price < 0) {
@@ -163,68 +173,48 @@ export function ServiceEditorPage() {
     if (!Number.isInteger(duration) || duration < 1) {
       next.baseDuration = 'Enter a whole number of minutes, at least 1.'
     }
-
-    next.variations = variations.map((row) => {
-      if (!row.name.trim()) return 'Enter a variation name.'
-      const delta = parseBirr(row.priceDeltaBirr)
-      if (delta === null || delta < 0) return 'Enter a valid price change.'
-      const dur = Number(row.durationDeltaMinutes)
-      if (!Number.isInteger(dur) || dur < 0) return 'Enter whole minutes (0 or more).'
-      return null
-    })
-
-    next.addOns = addOns.map((row) => {
-      if (!row.name.trim()) return 'Enter an add-on name.'
-      const price2 = parseBirr(row.priceBirr)
-      if (price2 === null || price2 < 0) return 'Enter a valid price.'
-      const dur = Number(row.durationMinutes)
-      if (!Number.isInteger(dur) || dur < 0) return 'Enter whole minutes (0 or more).'
-      return null
-    })
-
     return next
   }
 
   const save = async () => {
+    if (!businessId) return
     const nextErrors = validate()
     setErrors(nextErrors)
-    if (
-      nextErrors.name ||
-      nextErrors.basePrice ||
-      nextErrors.baseDuration ||
-      nextErrors.variations.some(Boolean) ||
-      nextErrors.addOns.some(Boolean)
-    ) {
-      return
-    }
+    if (nextErrors.name || nextErrors.basePrice || nextErrors.baseDuration) return
     setSaving(true)
     setSaveError(null)
     try {
-      const draft = {
+      const baseInput = {
         name: form.name.trim(),
-        description: form.description.trim() || undefined,
-        basePrice: birrToMinor(parseBirr(form.basePriceBirr) as number),
+        basePriceMinor: birrToMinor(parseBirr(form.basePriceBirr) as number),
         baseDurationMinutes: Number(form.baseDurationMinutes),
-        variations: variations.map((row) => ({
-          id: row.id,
+      }
+      let savedId: string
+      if (isNew) {
+        const created = await createOwnerService(businessId, baseInput)
+        savedId = created.id
+      } else {
+        const updated = await updateOwnerService(businessId, existing!.id, baseInput)
+        savedId = updated.id
+      }
+
+      const newVariations = variations.filter((row) => row.id === null)
+      const newAddOns = addOns.filter((row) => row.id === null)
+      for (const row of newVariations) {
+        await createServiceVariation(businessId, savedId, {
           name: row.name.trim(),
-          priceDelta: birrToMinor(parseBirr(row.priceDeltaBirr) as number),
+          priceDeltaMinor: birrToMinor(parseBirr(row.priceDeltaBirr) as number),
           durationDeltaMinutes: Number(row.durationDeltaMinutes),
-        })),
-        addOns: addOns.map((row) => ({
-          id: row.id,
+        })
+      }
+      for (const row of newAddOns) {
+        await createServiceAddOn(businessId, savedId, {
           name: row.name.trim(),
-          price: birrToMinor(parseBirr(row.priceBirr) as number),
-          durationMinutes: Number(row.durationMinutes),
-        })),
+          priceDeltaMinor: birrToMinor(parseBirr(row.priceDeltaBirr) as number),
+          durationDeltaMinutes: Number(row.durationDeltaMinutes),
+        })
       }
-      const result = isNew
-        ? await mockOwnerApi.createService(draft)
-        : await mockOwnerApi.updateService(existing!.id, draft)
-      if (!result.ok) {
-        setSaveError(result.error)
-        return
-      }
+
       navigate('/owner/services', {
         replace: true,
         state: {
@@ -234,8 +224,18 @@ export function ServiceEditorPage() {
             : 'Changes to this service are saved.',
         },
       })
-    } catch {
-      setSaveError('Could not save the service. Please try again.')
+    } catch (err) {
+      const fields = toFieldErrors(err)
+      if (Object.keys(fields).length > 0) {
+        setErrors({
+          name: fields.name,
+          basePrice: fields.basePriceMinor ? fields.basePriceMinor : fields.basePrice,
+          baseDuration: fields.baseDurationMinutes ? fields.baseDurationMinutes : undefined,
+        })
+        setSaveError(fields.serviceId ? toUserMessage(err) : null)
+      } else {
+        setSaveError(toUserMessage(err))
+      }
     } finally {
       setSaving(false)
     }
@@ -317,19 +317,6 @@ export function ServiceEditorPage() {
               )}
             </Field>
           </div>
-
-          <Field label="Description (optional)" hint="Shown on your public page.">
-            {({ id, ariaDescribedBy }) => (
-              <textarea
-                id={id}
-                className="textarea"
-                rows={3}
-                value={form.description}
-                aria-describedby={ariaDescribedBy}
-                onChange={(event) => setFormField('description', event.target.value)}
-              />
-            )}
-          </Field>
         </div>
 
         <fieldset className="subsection">
@@ -340,60 +327,76 @@ export function ServiceEditorPage() {
             <p className="subsection__empty">No variations.</p>
           )}
           <ul className="option-rows">
-            {variations.map((row, index) => (
-              <li key={row.id} className="option-row">
-                <Field label={`Variation ${index + 1}`} error={errors.variations[index] ?? undefined}>
-                  {({ id, ariaDescribedBy }) => (
-                    <input
-                      id={id}
-                      className="input"
-                      value={row.name}
-                      aria-describedby={ariaDescribedBy}
-                      onChange={(event) => updateVariation(row.id, { name: event.target.value })}
-                    />
-                  )}
-                </Field>
-                <Field label={`Change to price (Birr) ${index + 1}`}>
-                  {({ id }) => (
-                    <input
-                      id={id}
-                      className="input"
-                      type="number"
-                      step="0.01"
-                      min={0}
-                      value={row.priceDeltaBirr}
-                      onChange={(event) =>
-                        updateVariation(row.id, { priceDeltaBirr: event.target.value })
+            {variations.map((row, index) => {
+              const disabled = row.id !== null
+              return (
+                <li key={row.key} className="option-row">
+                  <Field
+                    label={`Variation ${index + 1}${disabled ? ' (saved)' : ''}`}
+                    hint={disabled ? 'Already saved — shown on the public page.' : undefined}
+                  >
+                    {({ id }) => (
+                      <input
+                        id={id}
+                        className="input"
+                        value={row.name}
+                        disabled={disabled}
+                        onChange={(event) =>
+                          updateRow(variations, setVariations, row.key, { name: event.target.value })
+                        }
+                      />
+                    )}
+                  </Field>
+                  <Field label={`Variation ${index + 1} — change to price (Birr)`}>
+                    {({ id }) => (
+                      <input
+                        id={id}
+                        className="input"
+                        type="number"
+                        step="0.01"
+                        min={0}
+                        value={row.priceDeltaBirr}
+                        disabled={disabled}
+                        onChange={(event) =>
+                          updateRow(variations, setVariations, row.key, {
+                            priceDeltaBirr: event.target.value,
+                          })
+                        }
+                      />
+                    )}
+                  </Field>
+                  <Field label={`Variation ${index + 1} — extra minutes`}>
+                    {({ id }) => (
+                      <input
+                        id={id}
+                        className="input"
+                        type="number"
+                        step={1}
+                        min={0}
+                        value={row.durationDeltaMinutes}
+                        disabled={disabled}
+                        onChange={(event) =>
+                          updateRow(variations, setVariations, row.key, {
+                            durationDeltaMinutes: event.target.value,
+                          })
+                        }
+                      />
+                    )}
+                  </Field>
+                  {!disabled && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() =>
+                        setVariations((rows) => rows.filter((r) => r.key !== row.key))
                       }
-                    />
+                    >
+                      Remove
+                    </Button>
                   )}
-                </Field>
-                <Field label={`Extra minutes ${index + 1}`}>
-                  {({ id }) => (
-                    <input
-                      id={id}
-                      className="input"
-                      type="number"
-                      step={1}
-                      min={0}
-                      value={row.durationDeltaMinutes}
-                      onChange={(event) =>
-                        updateVariation(row.id, {
-                          durationDeltaMinutes: event.target.value,
-                        })
-                      }
-                    />
-                  )}
-                </Field>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setVariations((rows) => rows.filter((r) => r.id !== row.id))}
-                >
-                  Remove
-                </Button>
-              </li>
-            ))}
+                </li>
+              )
+            })}
           </ul>
           <Button
             type="button"
@@ -401,7 +404,7 @@ export function ServiceEditorPage() {
             onClick={() =>
               setVariations((rows) => [
                 ...rows,
-                { id: localId(), name: '', priceDeltaBirr: '0', durationDeltaMinutes: '0' },
+                { key: localId(), id: null, name: '', priceDeltaBirr: '0', durationDeltaMinutes: '0' },
               ])
             }
           >
@@ -417,56 +420,74 @@ export function ServiceEditorPage() {
             <p className="subsection__empty">No add-ons.</p>
           )}
           <ul className="option-rows">
-            {addOns.map((row, index) => (
-              <li key={row.id} className="option-row">
-                <Field label={`Add-on ${index + 1}`} error={errors.addOns[index] ?? undefined}>
-                  {({ id, ariaDescribedBy }) => (
-                    <input
-                      id={id}
-                      className="input"
-                      value={row.name}
-                      aria-describedby={ariaDescribedBy}
-                      onChange={(event) => updateAddOn(row.id, { name: event.target.value })}
-                    />
+            {addOns.map((row, index) => {
+              const disabled = row.id !== null
+              return (
+                <li key={row.key} className="option-row">
+                  <Field
+                    label={`Add-on ${index + 1}${disabled ? ' (saved)' : ''}`}
+                    hint={disabled ? 'Already saved — shown on the public page.' : undefined}
+                  >
+                    {({ id }) => (
+                      <input
+                        id={id}
+                        className="input"
+                        value={row.name}
+                        disabled={disabled}
+                        onChange={(event) =>
+                          updateRow(addOns, setAddOns, row.key, { name: event.target.value })
+                        }
+                      />
+                    )}
+                  </Field>
+                  <Field label={`Add-on ${index + 1} — change to price (Birr)`}>
+                    {({ id }) => (
+                      <input
+                        id={id}
+                        className="input"
+                        type="number"
+                        step="0.01"
+                        min={0}
+                        value={row.priceDeltaBirr}
+                        disabled={disabled}
+                        onChange={(event) =>
+                          updateRow(addOns, setAddOns, row.key, {
+                            priceDeltaBirr: event.target.value,
+                          })
+                        }
+                      />
+                    )}
+                  </Field>
+                  <Field label={`Add-on ${index + 1} — extra minutes`}>
+                    {({ id }) => (
+                      <input
+                        id={id}
+                        className="input"
+                        type="number"
+                        step={1}
+                        min={0}
+                        value={row.durationDeltaMinutes}
+                        disabled={disabled}
+                        onChange={(event) =>
+                          updateRow(addOns, setAddOns, row.key, {
+                            durationDeltaMinutes: event.target.value,
+                          })
+                        }
+                      />
+                    )}
+                  </Field>
+                  {!disabled && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setAddOns((rows) => rows.filter((r) => r.key !== row.key))}
+                    >
+                      Remove
+                    </Button>
                   )}
-                </Field>
-                <Field label={`Price (Birr) ${index + 1}`}>
-                  {({ id }) => (
-                    <input
-                      id={id}
-                      className="input"
-                      type="number"
-                      step="0.01"
-                      min={0}
-                      value={row.priceBirr}
-                      onChange={(event) => updateAddOn(row.id, { priceBirr: event.target.value })}
-                    />
-                  )}
-                </Field>
-                <Field label={`Minutes ${index + 1}`}>
-                  {({ id }) => (
-                    <input
-                      id={id}
-                      className="input"
-                      type="number"
-                      step={1}
-                      min={0}
-                      value={row.durationMinutes}
-                      onChange={(event) =>
-                        updateAddOn(row.id, { durationMinutes: event.target.value })
-                      }
-                    />
-                  )}
-                </Field>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setAddOns((rows) => rows.filter((r) => r.id !== row.id))}
-                >
-                  Remove
-                </Button>
-              </li>
-            ))}
+                </li>
+              )
+            })}
           </ul>
           <Button
             type="button"
@@ -474,7 +495,7 @@ export function ServiceEditorPage() {
             onClick={() =>
               setAddOns((rows) => [
                 ...rows,
-                { id: localId(), name: '', priceBirr: '0', durationMinutes: '0' },
+                { key: localId(), id: null, name: '', priceDeltaBirr: '0', durationDeltaMinutes: '0' },
               ])
             }
           >
