@@ -87,6 +87,53 @@ export interface ScheduleVersion {
   status: ScheduleVersionStatus
 }
 
+/**
+ * Canonical schedule state as the real backend stores it (Prompt 41 §7 /
+ * Prompt 42 §8). Weekdays are ISO 1 (Monday) … 7 (Sunday). Blocked periods
+ * recur weekly (a null dayOfWeek blocks every day); special dates are unique
+ * per date and are either closed or one custom window.
+ */
+export interface CanonicalWorkingPeriod {
+  weekday: number
+  startMinutes: number
+  endMinutes: number
+}
+
+export interface WeeklyBlockedPeriod {
+  dayOfWeek: number | null
+  startMinutes: number
+  endMinutes: number
+}
+
+export type CanonicalSpecialDate =
+  | { date: DateString; kind: 'CLOSED'; startMinutes: null; endMinutes: null }
+  | { date: DateString; kind: 'CUSTOM'; startMinutes: number; endMinutes: number }
+
+/** Full canonical schedule state (the backend wire shape, mapped). */
+export interface CanonicalScheduleState {
+  workingPeriods: readonly CanonicalWorkingPeriod[]
+  blockedPeriods: readonly WeeklyBlockedPeriod[]
+  specialDates: readonly CanonicalSpecialDate[]
+}
+
+/**
+ * A retained schedule version as shown in the owner's read-only history
+ * (REQ-166/169), mapped from the backend versions endpoint. Live in this
+ * slice (Prompt 47): the schedule is real, the history diff runs on the
+ * canonical wire shape.
+ */
+export interface ScheduleVersionHistoryEntry {
+  id: string
+  versionNo: number
+  status: ScheduleVersionStatus
+  name: string | null
+  actor: string
+  automatic: boolean
+  reason: string | null
+  at: Timestamp
+  snapshot: CanonicalScheduleState
+}
+
 export type ScheduleConflictAction = 'reschedule' | 'cancel' | 'keep'
 
 /**
@@ -160,8 +207,9 @@ export interface BusinessDetails {
   description: string
   accentColor: string
   address: string
-  lat: number
-  lng: number
+  /** Null when the business has no saved location (REQ-211). */
+  lat: number | null
+  lng: number | null
   mapProvider: MapProvider
   phone: string
   workingHours: WeeklyWorkingHours
@@ -197,22 +245,21 @@ export interface BusinessDetails {
 export interface ServiceVariation {
   id: string
   name: string
-  priceDelta: Money
+  priceDeltaMinor: Money
   durationDeltaMinutes: number
 }
 
 export interface ServiceAddOn {
   id: string
   name: string
-  price: Money
-  durationMinutes: number
+  priceDeltaMinor: Money
+  durationDeltaMinutes: number
 }
 
 export interface Service {
   id: string
   name: string
-  description?: string
-  basePrice: Money
+  basePriceMinor: Money
   baseDurationMinutes: number
   variations: readonly ServiceVariation[]
   addOns: readonly ServiceAddOn[]
