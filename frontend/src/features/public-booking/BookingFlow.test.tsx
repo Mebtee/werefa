@@ -10,14 +10,15 @@ import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { appRoutes } from '@/routes'
 import { toDateString } from '@/lib/time'
-import { installBusinessApiStub } from '@/test/businessApi'
+import { installBusinessApiStub, type BusinessApiStub } from '@/test/businessApi'
 
 const user = userEvent.setup()
 
 let restoreFetch: (() => void) | undefined
+let stub: BusinessApiStub | undefined
 
 beforeEach(() => {
-  const stub = installBusinessApiStub()
+  stub = installBusinessApiStub()
   restoreFetch = stub.restore
 })
 
@@ -94,7 +95,13 @@ async function reachDateStep(container: HTMLElement) {
 }
 
 describe('public booking flow', () => {
-  it('lets a customer book a service, pay a deposit and submit proof without any booking reference', async () => {
+  // The end-to-end booking (service → availability window → times → details →
+  // review → payment → proof upload → submit) runs long under full-suite
+  // parallel load, so it gets a dedicated timeout.
+  it(
+    'lets a customer book a service, pay a deposit and submit proof without any booking reference',
+    { timeout: 20_000 },
+    async () => {
     const { container } = renderPage()
 
     await screen.findByRole('heading', { name: 'Addis Beauty Lounge' })
@@ -142,6 +149,24 @@ describe('public booking flow', () => {
       screen.queryByText(/booking (id|code|reference)/i),
     ).not.toBeInTheDocument()
     expect(screen.getByText(/do you use telegram/i)).toBeInTheDocument()
+
+    // Boundary proof (Prompt 49): the submit went out over the REAL booking
+    // client to POST /api/v1/customer/bookings, not the mock seam.
+    const post = stub?.calls.find(
+      (call) => call.method === 'POST' && call.url.includes('/customer/bookings'),
+    )
+    expect(post).toBeTruthy()
+    const posted = post?.body as Record<string, unknown> | undefined
+    expect(posted?.businessSlug).toBe('addis-beauty-lounge')
+    expect(Array.isArray(posted?.selections)).toBe(true)
+    expect((posted?.selections as unknown[])[0]).toMatchObject({
+      serviceId: expect.any(String),
+    })
+    expect(typeof posted?.startAt).toBe('string')
+    expect(typeof posted?.submissionKey).toBe('string')
+    expect(posted?.customerName).toBe('Selam Tesfaye')
+    expect(posted?.customerPhone).toBe('+251911123456')
+    expect(posted?.paymentMethod).toBe('BANK_TRANSFER')
   })
 
   it('keeps the customer on the details step when validation fails', async () => {
