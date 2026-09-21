@@ -13,8 +13,10 @@ export class PrismaPaymentRepository implements PaymentRepository {
 
   async findBySubmissionKey(
     submissionKey: string,
+    tx?: Prisma.TransactionClient,
   ): Promise<{ bookingId: number; businessId: string; bookingStatus: string; paymentId: string } | null> {
-    const proof = await this.prisma.paymentProof.findUnique({
+    const client = tx ?? this.prisma;
+    const proof = await client.paymentProof.findUnique({
       where: { submissionKey },
       select: {
         paymentId: true,
@@ -69,13 +71,14 @@ export class PrismaPaymentRepository implements PaymentRepository {
 
   async addProof(
     tx: Prisma.TransactionClient,
-    args: { paymentId: string; businessId: string; submissionKey: string },
+    args: { paymentId: string; businessId: string; submissionKey: string; fileObjectId?: string | null },
   ): Promise<PaymentProof> {
     return tx.paymentProof.create({
       data: {
         paymentId: args.paymentId,
         businessId: args.businessId,
         submissionKey: args.submissionKey,
+        fileObjectId: args.fileObjectId ?? null,
       },
     });
   }
@@ -88,6 +91,42 @@ export class PrismaPaymentRepository implements PaymentRepository {
       where: { id: args.proofId },
       data: { replacedByProofId: args.replacedByProofId },
     });
+  }
+
+  async findProofForBooking(
+    businessId: string,
+    bookingId: number,
+    proofId: string,
+  ): Promise<{
+    id: string;
+    submittedAt: Date;
+    replacedByProofId: string | null;
+    file: { mimeType: string; sizeBytes: bigint; storageKey: string } | null;
+  } | null> {
+    const proof = await this.prisma.paymentProof.findFirst({
+      where: { id: proofId, businessId, payment: { bookingId } },
+    });
+    if (!proof) return null;
+    let file: { mimeType: string; sizeBytes: bigint; storageKey: string } | null = null;
+    if (proof.fileObjectId) {
+      const fileObject = await this.prisma.fileObject.findUnique({
+        where: { id: proof.fileObjectId },
+        select: { mimeType: true, sizeBytes: true, storageKey: true },
+      });
+      if (fileObject) {
+        file = {
+          mimeType: fileObject.mimeType,
+          sizeBytes: fileObject.sizeBytes,
+          storageKey: fileObject.storageKey,
+        };
+      }
+    }
+    return {
+      id: proof.id,
+      submittedAt: proof.submittedAt,
+      replacedByProofId: proof.replacedByProofId,
+      file,
+    };
   }
 
   async appendStatusHistory(tx: Prisma.TransactionClient, args: PaymentStatusHistoryInput): Promise<void> {
