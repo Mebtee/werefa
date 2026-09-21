@@ -291,6 +291,12 @@ export interface ProofFile {
   fileName: string
   sizeBytes: number
   mimeType: string
+  /**
+   * The raw file, carried so the real multipart upload can send the bytes
+   * (Prompt 50). Absent on proof records reconstructed from storage/API data,
+   * which only ever need the metadata.
+   */
+  file?: File
 }
 
 export interface BookingDraft {
@@ -406,6 +412,17 @@ export interface CustomerTelegramNotificationView {
   time: TimeOfDay | null
   rejectionReason: string | null
   at: Timestamp
+}
+
+/**
+ * One customer booking from the real `GET /customer/status` endpoint (Prompt
+ * 49). It intentionally carries appointment times + status only — the backend
+ * never exposes internal ids, history, line items or owner metadata here.
+ */
+export interface CustomerBookingStatusEntry {
+  startAt: string
+  endAt: string
+  bookingState: BookingState
 }
 
 /**
