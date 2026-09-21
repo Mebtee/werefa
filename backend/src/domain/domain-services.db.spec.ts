@@ -13,6 +13,9 @@ import { PrismaScheduleRepository } from './repositories/prisma-schedule.reposit
 import { PrismaPaymentRepository } from './repositories/prisma-payment.repository';
 import { PrismaSubscriptionRepository } from './repositories/prisma-subscription.repository';
 import { PrismaResubmissionVerificationRepository } from './repositories/prisma-resubmission.repository';
+import { PrismaFileRepository } from './repositories/prisma-file.repository';
+import { PaymentProofStorage, StoredProof, StoredProofContent } from './repositories/proof-storage.port';
+import { PROOF_SAMPLES } from './lib/proof-file';
 import { BusinessService } from './services/business.service';
 import { CatalogService } from './services/catalog.service';
 import { ScheduleService } from './services/schedule.service';
@@ -131,6 +134,31 @@ const scheduleRepo = () => new PrismaScheduleRepository(prisma);
 const paymentRepo = () => new PrismaPaymentRepository(prisma);
 const subscriptionRepo = () => new PrismaSubscriptionRepository(prisma);
 const verificationRepo = () => new PrismaResubmissionVerificationRepository(prisma);
+const fileRepo = () => new PrismaFileRepository(prisma);
+
+/** In-memory proof store so DB tests never touch disk. */
+class InMemoryProofStorage implements PaymentProofStorage {
+  private readonly files = new Map<string, Buffer>();
+  private readonly meta = new Map<string, { mimeType: string }>();
+
+  async store(input: { businessId: string; bytes: Buffer; mimeType: string; extension: string }): Promise<StoredProof> {
+    const key = `${input.businessId}/test-${this.files.size + 1}.${input.extension || 'bin'}`;
+    this.files.set(key, input.bytes);
+    this.meta.set(key, { mimeType: input.mimeType });
+    const hash = createHash('sha256').update(input.bytes).digest('hex');
+    return { storageKey: key, checksumSha256: hash, sizeBytes: input.bytes.length };
+  }
+
+  async read(storageKey: string): Promise<StoredProofContent | null> {
+    const file = this.files.get(storageKey);
+    return file ? { bytes: file } : null;
+  }
+
+  async delete(storageKey: string): Promise<void> {
+    this.files.delete(storageKey);
+    this.meta.delete(storageKey);
+  }
+}
 
 let tenantGuardHolder: TenantGuard;
 let businessService: BusinessService;
@@ -153,14 +181,28 @@ beforeAll(async () => {
     const subRepo = subscriptionRepo();
     const vRepo = verificationRepo();
     const eventBus = new InMemoryEventBus();
+    const proofStorage = new InMemoryProofStorage();
 
     tenantGuardHolder = new TenantGuard(bRepo);
     businessService = new BusinessService(prisma, bRepo, subRepo, sRepo, tenantGuardHolder);
     catalogService = new CatalogService(prisma, kRepo, tenantGuardHolder);
     scheduleService = new ScheduleService(prisma, sRepo, clock, tenantGuardHolder);
     availabilityService = new AvailabilityService(prisma, sRepo, clock);
-    bookingService = new BookingService(prisma, bRepo, kRepo, pRepo, subRepo, clock, eventBus, tenantGuardHolder, catalogService, availabilityService);
-    resubmissionService = new ResubmissionService(prisma, bRepo, kRepo, pRepo, vRepo, clock, eventBus);
+    bookingService = new BookingService(
+      prisma,
+      bRepo,
+      kRepo,
+      pRepo,
+      subRepo,
+      fileRepo(),
+      proofStorage,
+      clock,
+      eventBus,
+      tenantGuardHolder,
+      catalogService,
+      availabilityService,
+    );
+    resubmissionService = new ResubmissionService(prisma, bRepo, kRepo, pRepo, vRepo, fileRepo(), proofStorage, clock, eventBus);
     customerStatusService = new CustomerStatusService(bRepo, kRepo);
   }
 });
@@ -186,9 +228,7 @@ async function expectCode(promise: Promise<unknown>, code: ErrorCode): Promise<v
 async function makeBooking(w: World, startAt: Date, key: string) {
   return bookingService.createBooking({
     businessSlug: w.ownerSlug,
-    serviceId: w.serviceId,
-    variationIds: [w.serviceVariationId],
-    addOnIds: [w.addOnId],
+    selections: [{ serviceId: w.serviceId, variationIds: [w.serviceVariationId], addOnIds: [w.addOnId] }],
     customerName: 'Liya Tesfaye',
     customerPhone: '+251911112233',
     note: 'by the window',
@@ -601,6 +641,7 @@ describe.skipIf(!RUN)('domain application services (live PostgreSQL 16)', () => 
       bookingId: created.booking.id,
       code: '123456',
       submissionKey: 'key-resub-21b',
+      proof: { bytes: Buffer.from(PROOF_SAMPLES['image/png']), mimeType: 'image/png' },
     });
     expect(res.booking.status).toBe('PAYMENT_PENDING');
     expect(res.events.map((e) => e.type)).toEqual(['PAYMENT_PROOF_RECEIVED']);
