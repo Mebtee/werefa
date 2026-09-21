@@ -4,6 +4,8 @@ import { Link, useParams } from 'react-router-dom'
 import type { BusinessPage } from '@/types/models'
 import { getPublicBusiness, isNotFoundError } from '@/api/business'
 import { getPublicServices } from '@/api/catalog'
+import { getPublicSchedule } from '@/api/schedule'
+import { availabilityScheduleFromView } from '@/api/schedule.mapper'
 import { hybridizePublicBusiness } from '@/api/business.mapper'
 import { mockApi } from '@/mock/api'
 import { PRIMARY_BUSINESS_SLUG } from '@/mock/data'
@@ -27,21 +29,34 @@ export function PublicBookingPage() {
     let cancelled = false
     setLoad({ status: 'loading' })
     void (async () => {
-      // The backend is authoritative for existence, profile, pause state and
-      // the active service catalog (REQ-079 hides deactivated services); the
-      // mock seam still supplies the cosmetic profile fields that the evolved
-      // backend does not persist yet.
+      // The backend is authoritative for existence, profile, pause state,
+      // schedule and the active service catalog (REQ-079 hides deactivated
+      // services). The availability fixture still reads the legacy
+      // `BusinessDetails` schedule fields, so the real public schedule is
+      // derived into them; the cosmetic profile fields the evolved backend
+      // does not persist yet stay on the mock seam.
       try {
-        const [view, servicesView, mockPage] = await Promise.all([
+        const [view, servicesView, scheduleView, mockPage] = await Promise.all([
           getPublicBusiness(slug ?? ''),
           getPublicServices(slug ?? ''),
+          getPublicSchedule(slug ?? ''),
           mockApi.getBusinessPage(slug ?? ''),
         ])
         if (cancelled) return
+        const business = hybridizePublicBusiness(view, mockPage?.business)
+        business.bookingIntervalMinutes = view.bookingIntervalMinutes
+        const availability = availabilityScheduleFromView(scheduleView, {
+          intervalMinutes: view.bookingIntervalMinutes,
+          bookingWindowDays: business.bookingWindowDays ?? 14,
+        })
+        business.workingHours = availability.workingHours
+        business.specialDays = availability.specialDays
+        business.blockedDays = [...availability.blockedDays]
+        business.blockedPeriods = [...availability.blockedPeriods]
         setLoad({
           status: 'ready',
           page: {
-            business: hybridizePublicBusiness(view, mockPage?.business),
+            business,
             services: servicesView,
           },
         })
@@ -130,8 +145,9 @@ export function PublicBookingPage() {
 
       <footer className="page-footer">
         <div className="container">
-          Werefa — preview build. This business&apos;s profile, pause state and
-          service catalog are real; schedule and bookings are still sample data.
+          Werefa — preview build. The business profile, schedule and service
+          catalog are real, and booking requests are stored by the real backing
+          service when you submit them.
         </div>
       </footer>
     </div>
