@@ -1,12 +1,46 @@
 import type {
+  BlockedPeriodView,
   OwnerBusinessView,
+  OwnerScheduleConflictView,
+  OwnerScheduleView,
   OwnerServiceView,
   PublicBusinessView,
+  PublicScheduleView,
   PublicServiceView,
+  SaveSchedulePayload,
+  ScheduleExceptionView,
+  SpecialDateView,
+  WorkingPeriodView,
 } from '@/api/types'
-import type { Service } from '@/types/models'
-import { getBusiness, getServices } from '@/mock/store'
+import { availabilityScheduleFromView } from '@/api/schedule.mapper'
+import {
+  createBookingEntry,
+  getBooking,
+  getBookingsByPhone,
+  getBusiness,
+  getOccupiedBlocks,
+  getOpenConflicts,
+  getServices,
+  applyScheduleException,
+  listScheduleHistory,
+  resubmitRejectedProof,
+  saveBookingInterval,
+  saveSchedule,
+  scheduleSnapshotOf,
+} from '@/mock/store'
+import { computeAvailableTimes } from '@/mock/availability'
+import { mockRaceSlot } from '@/mock/data'
+import { buildLineItems, prepaymentAmount, totalDurationMinutes, totalPrice } from '@/lib/format'
+import type {
+  Booking,
+  ScheduleConflict,
+  ScheduleSnapshot,
+  ScheduleVersion,
+  Service,
+} from '@/types/models'
 import { MOCK_BUSINESS_PAGES, PRIMARY_BUSINESS_SLUG } from '@/mock/data'
+import { MOCK_OWNER_ACTOR_NAME } from '@/mock/ownedBusinessFixture'
+import { isoWeekdayOf, minutesOf, minutesToTime, nowTimestamp } from '@/lib/time'
 
 /**
  * Stateful test double for the real business API endpoints (Prompt 45).
@@ -24,11 +58,29 @@ export interface RecordedRequest {
   method: string
   url: string
   body?: unknown
+  /** Metadata of the `proof` file field when the request was multipart. */
+  proof?: { fileName: string; sizeBytes: number; mimeType: string }
 }
 
 export interface BusinessApiStub {
   calls: RecordedRequest[]
   restore(): void
+}
+
+/**
+ * The one-time resubmission code this double accepts. Real codes are random and
+ * delivered out-of-band; tests need a known value, so the double fixes it and
+ * exposes it here.
+ */
+export const RESUBMISSION_TEST_CODE = '123456'
+
+export interface BusinessApiStubOptions {
+  /**
+   * Consulted by the availability route ON REQUEST so a test can fail a
+   * specific date's lookup after the date strip has rendered (datesError /
+   * slotsError paths).
+   */
+  failAvailabilityFor?: (date: string) => boolean
 }
 
 const OWNER_ID = '00000000-0000-4000-8000-0000000000a'
@@ -40,13 +92,16 @@ function envelope(status: number, code: string, title: string, detail: string): 
   )
 }
 
-function validationEnvelope(fields: Record<string, string>): Response {
+function validationEnvelope(
+  fields: Record<string, string>,
+  detail = 'One or more fields are invalid.',
+): Response {
   return new Response(
     JSON.stringify({
       error: {
         code: 'VALIDATION_ERROR',
         title: 'Validation failed',
-        detail: 'One or more fields are invalid.',
+        detail,
         fields,
       },
     }),
@@ -141,6 +196,184 @@ function publicViewFromStore(slug: string): PublicBusinessView | undefined {
   }
 }
 
+// --- Schedule (Prompt 47) -----------------------------------------------------
+// The test double round-trips the real schedule wire contract through the mock
+// store's schedule domain: saves apply the snapshot the store derives from (via
+// the same pure availability mapper the public page uses), so assertions on the
+// still-mock business (`workingHours`, `specialDays`, availability…) keep
+// passing while the production path talks to the API client only.
+
+function workingPeriodViewsOf(snapshot: ScheduleSnapshot): WorkingPeriodView[] {
+  const views: WorkingPeriodView[] = []
+  for (let day = 0; day < snapshot.workingHours.length; day++) {
+    for (const period of snapshot.workingHours[day]) {
+      views.push({
+        weekday: ((day + 6) % 7) + 1,
+        startMinutes: minutesOf(period.start),
+        endMinutes: minutesOf(period.end),
+      })
+    }
+  }
+  return views
+}
+
+function blockedPeriodViewsOf(snapshot: ScheduleSnapshot): BlockedPeriodView[] {
+  const seen = new Set<string>()
+  const views: BlockedPeriodView[] = []
+  for (const block of snapshot.blockedPeriods) {
+    const dayOfWeek = isoWeekdayOf(block.date)
+    const startMinutes = minutesOf(block.start)
+    const endMinutes = minutesOf(block.end)
+    const key = `${dayOfWeek}-${startMinutes}-${endMinutes}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    views.push({ dayOfWeek, startMinutes, endMinutes })
+  }
+  return views
+}
+
+function specialDateViewsOf(snapshot: ScheduleSnapshot): SpecialDateView[] {
+  return Object.entries(snapshot.specialDays)
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([date, day]) =>
+      day.kind === 'closed'
+        ? { date, kind: 'CLOSED' as const, startMinutes: null, endMinutes: null }
+        : {
+            date,
+            kind: 'CUSTOM' as const,
+            startMinutes: minutesOf(day.periods[0]?.start ?? '00:00'),
+            endMinutes: minutesOf(day.periods[0]?.end ?? '00:00'),
+          },
+    )
+}
+
+function scheduleViewFromVersion(version: ScheduleVersion, versionNo: number): OwnerScheduleView {
+  return {
+    versionId: version.id,
+    versionNo,
+    status: version.status.toUpperCase() as OwnerScheduleView['status'],
+    name: version.reason,
+    appliedAt: version.at,
+    appliedBy: version.actor,
+    reason: version.reason,
+    createdAt: version.at,
+    workingPeriods: workingPeriodViewsOf(version.snapshot),
+    blockedPeriods: blockedPeriodViewsOf(version.snapshot),
+    specialDates: specialDateViewsOf(version.snapshot),
+  }
+}
+
+function scheduleViewsFor(
+  history: readonly ScheduleVersion[],
+): OwnerScheduleView[] {
+  return history.map((version, index) =>
+    scheduleViewFromVersion(version, history.length - index),
+  )
+}
+
+/** The current schedule the backend would return: newest ACTIVE version (or newest pending/none). */
+function currentScheduleView(slug: string): OwnerScheduleView {
+  const history = listScheduleHistory(slug)
+  const views = scheduleViewsFor(history)
+  const active = views.find((view) => view.status === 'ACTIVE') ?? views[0]
+  if (active) return active
+  const business = getBusiness(slug)!
+  const version: ScheduleVersion = {
+    id: `sch-v-initial-${slug}`,
+    businessSlug: slug,
+    snapshot: scheduleSnapshotOf(business),
+    actor: MOCK_OWNER_ACTOR_NAME,
+    reason: null,
+    automatic: false,
+    at: nowTimestamp(),
+    status: 'active',
+  }
+  return scheduleViewFromVersion(version, 1)
+}
+
+function publicScheduleViewFor(slug: string): PublicScheduleView {
+  const active =
+    listScheduleHistory(slug).find((version) => version.status === 'active')?.snapshot ??
+    scheduleSnapshotOf(getBusiness(slug)!)
+  return {
+    workingPeriods: workingPeriodViewsOf(active),
+    blockedPeriods: blockedPeriodViewsOf(active),
+    specialDates: specialDateViewsOf(active),
+  }
+}
+
+function snapshotFromPayload(
+  slug: string,
+  payload: SaveSchedulePayload,
+  intervalMinutes: number,
+): ScheduleSnapshot {
+  const windowDays = getBusiness(slug)?.bookingWindowDays ?? 14
+  const fields = availabilityScheduleFromView(
+    {
+      workingPeriods: payload.workingPeriods,
+      blockedPeriods: (payload.blockedPeriods ?? []).map((b) => ({
+        dayOfWeek: b.dayOfWeek ?? null,
+        startMinutes: b.startMinutes ?? null,
+        endMinutes: b.endMinutes ?? null,
+      })),
+      specialDates: (payload.specialDates ?? []).map((s) => ({
+        date: s.date,
+        kind: s.kind,
+        startMinutes: s.startMinutes ?? null,
+        endMinutes: s.endMinutes ?? null,
+      })),
+    },
+    { intervalMinutes, bookingWindowDays: windowDays },
+  )
+  return {
+    workingHours: fields.workingHours,
+    bookingIntervalMinutes: intervalMinutes,
+    blockedDays: [...fields.blockedDays],
+    blockedPeriods: [...fields.blockedPeriods],
+    specialDays: { ...fields.specialDays },
+  }
+}
+
+function conflictStatusOf(booking: Booking | undefined): string {
+  if (!booking) return 'CONFIRMED'
+  if (booking.state === 'payment-pending') return 'PAYMENT_PENDING'
+  return booking.state.toUpperCase().replace('-', '_')
+}
+
+function conflictReasonCode(reason: string): OwnerScheduleConflictView['reason'] {
+  if (reason.toLowerCase().includes('closed')) return 'CLOSED'
+  if (reason.toLowerCase().includes('blocked')) return 'BLOCKED'
+  return 'OUTSIDE_HOURS'
+}
+
+function conflictViewOf(conflict: ScheduleConflict): OwnerScheduleConflictView {
+  const booking = getBooking(conflict.businessSlug, conflict.bookingId)
+  const startAt = booking
+    ? `${booking.date}T${booking.time}:00.000Z`
+    : conflict.at
+  const endAt = booking
+    ? `${booking.date}T${minutesToTime(minutesOf(booking.time) + booking.totalDurationMinutes)}:00.000Z`
+    : conflict.at
+  return {
+    bookingId: conflict.bookingId,
+    status: conflictStatusOf(booking),
+    startAt,
+    endAt,
+    createdAt: conflict.at,
+    customerName: booking?.customer.name ?? 'Unknown customer',
+    customerPhone: booking?.customer.phone ?? '',
+    note: booking?.customer.note ?? null,
+    reason: conflictReasonCode(conflict.reason),
+    reasonDetail: conflict.reason,
+    services:
+      booking?.lineItems.map((item) => ({
+        name: item.name,
+        durationMinutes: item.durationMinutes,
+        unitPriceMinor: String(item.unitPrice),
+      })) ?? [],
+  }
+}
+
 // --- Service catalog (Prompt 46) -------------------------------------------
 // The same contract as the real backend: integer-minor money, delta add-ons
 // (REQ-073), and the public projection omits `isActive` because the endpoint
@@ -215,15 +448,136 @@ function validateVariantInput(body: unknown): Record<string, string> | null {
   return Object.keys(fields).length > 0 ? fields : null
 }
 
+// --- Availability (Prompt 48) -------------------------------------------------
+// Models the public availability POST route. The backend is authoritative and
+// computes the appointment totals itself; this double derives the same totals
+// from the catalog (REQ-074) and reuses the mock's pure time projections so
+// the still-mock booking submission re-checks the exact same offered slots.
+
+function serviceFromOwnerView(view: OwnerServiceView): Service {
+  return {
+    id: view.id,
+    name: view.name,
+    basePriceMinor: view.basePriceMinor,
+    baseDurationMinutes: view.baseDurationMinutes,
+    isActive: view.isActive,
+    variations: view.variations.map((v) => ({ ...v })),
+    addOns: view.addOns.map((a) => ({ ...a })),
+  }
+}
+
+interface AvailabilitySelection {
+  serviceId: string
+  variationId?: string
+  addOnIds?: string[]
+}
+
+interface AppointmentTotals {
+  ok: boolean
+  durationMinutes: number
+  totalPriceMinor: number
+  fields?: Record<string, string>
+}
+
+function computeAppointmentTotals(
+  services: readonly Service[],
+  selections: AvailabilitySelection[],
+): AppointmentTotals {
+  if (selections.length === 0) {
+    return { ok: false, durationMinutes: 0, totalPriceMinor: 0, fields: { selections: 'Select at least one service.' } }
+  }
+  let duration = 0
+  let totalPrice = 0
+  for (const sel of selections) {
+    const service = services.find((s) => s.id === sel.serviceId && s.isActive)
+    if (!service) {
+      return { ok: false, durationMinutes: 0, totalPriceMinor: 0, fields: { serviceId: 'One or more selected services are not active.' } }
+    }
+    duration += service.baseDurationMinutes
+    totalPrice += service.basePriceMinor
+    if (sel.variationId) {
+      const variation = service.variations.find((v) => v.id === sel.variationId)
+      if (!variation) {
+        return { ok: false, durationMinutes: 0, totalPriceMinor: 0, fields: { variationId: 'One or more selected variations are not active.' } }
+      }
+      duration += variation.durationDeltaMinutes
+      totalPrice += variation.priceDeltaMinor
+    }
+    for (const addOnId of sel.addOnIds ?? []) {
+      const addOn = service.addOns.find((a) => a.id === addOnId)
+      if (!addOn) {
+        return { ok: false, durationMinutes: 0, totalPriceMinor: 0, fields: { addOnId: 'One or more selected add-ons are not active.' } }
+      }
+      duration += addOn.durationDeltaMinutes
+      totalPrice += addOn.priceDeltaMinor
+    }
+  }
+  return { ok: true, durationMinutes: duration, totalPriceMinor: totalPrice }
+}
+
+function slotInstants(date: string, time: string, durationMinutes: number) {
+  const [y, mo, d] = date.split('-').map(Number)
+  const [hh, mm] = time.split(':').map(Number)
+  const startAt = new Date(y, mo - 1, d, hh, mm)
+  return {
+    startAt: startAt.toISOString(),
+    endAt: new Date(startAt.getTime() + durationMinutes * 60_000).toISOString(),
+  }
+}
+
+/** Customer-safe projection of a store booking (mirrors `CustomerBookingView`). */
+function customerBookingViewOf(booking: Booking, slug: string) {
+  const [y, mo, d] = booking.date.split('-').map(Number)
+  const [hh, mm] = booking.time.split(':').map(Number)
+  const start = new Date(y, mo - 1, d, hh, mm)
+  return {
+    status: booking.state === 'payment-pending' ? 'awaiting-verification' : booking.state,
+    startAt: start.toISOString(),
+    endAt: new Date(
+      start.getTime() + booking.totalDurationMinutes * 60_000,
+    ).toISOString(),
+    serviceNames: booking.lineItems.map((item) => item.name),
+    businessSlug: slug,
+    totalPriceMinor: booking.total,
+    prepaidMinor: booking.deposit,
+    paymentMethod:
+      booking.paymentMethod === 'bank-transfer'
+        ? 'BANK_TRANSFER'
+        : 'TELEBIRR_MOBILE_MONEY',
+    note: booking.customer.note || null,
+  }
+}
+
+/** The most recent rejected booking for a phone (newest first, REQ-230). */
+function latestRejectedFor(slug: string, phone: string): Booking | undefined {
+  return getBookingsByPhone(slug, phone).find(
+    (booking) => booking.state === 'rejected',
+  )
+}
+
 export function installBusinessApiStub(
   delegateTo: typeof fetch = globalThis.fetch,
+  options: BusinessApiStubOptions = {},
 ): BusinessApiStub {
   const calls: RecordedRequest[] = []
   const state = newOwnerState()
   const servicesState = newServicesState()
   let variantSerial = 0
+  let exceptionSerial = 0
   const nextVariantId = () => `variant-${++variantSerial}`
   const nextAddOnId = () => `addon-${++variantSerial}`
+  // Idempotent submission keys (REQ-121): replay of the same key + same
+  // business + same start + same selections replays the original response.
+  const idempotentKeys = new Map<
+    string,
+    { businessSlug: string; startAt: string; signature: string; response: unknown }
+  >()
+  // One live resubmission code per business+phone (REQ-230). Real codes are
+  // random and delivered out-of-band; the double accepts RESUBMISSION_TEST_CODE.
+  const resubmissionCodes = new Map<
+    string,
+    { code: string; used: boolean; expiresAt: number }
+  >()
   const takenSlugs = new Set(
     MOCK_BUSINESS_PAGES.map((page) => page.business.slug).filter(
       (slug) => slug !== state.slug,
@@ -233,20 +587,50 @@ export function installBusinessApiStub(
   // record (`state`); once its slug changes the old slug must 404, so that page
   // is excluded from the "other demo businesses" public fallback.
   const initialOwnedSlug = state.slug
+  // The owned business's schedule lives in the mock store under its ORIGINAL
+  // slug (the store is not renamed when the API slug changes); the API-side
+  // `state.slug` is the live public slug.
+  const storeSlug = initialOwnedSlug
   const originalFetch = globalThis.fetch
 
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = input instanceof URL ? input.href : String(input)
     const method = (init?.method ?? 'GET').toUpperCase()
+    const rawBody = init?.body
     let body: unknown
-    if (typeof init?.body === 'string') {
+    let proofFile: File | null = null
+    if (typeof rawBody === 'string') {
       try {
-        body = JSON.parse(init.body)
+        body = JSON.parse(rawBody)
       } catch {
-        body = init.body
+        body = rawBody
       }
+    } else if (typeof FormData !== 'undefined' && rawBody instanceof FormData) {
+      // Multipart contract (Prompt 50): the JSON lives in the `payload` text
+      // field and the raw bytes in the `proof` file field.
+      const payloadText = rawBody.get('payload')
+      if (typeof payloadText === 'string') {
+        try {
+          body = JSON.parse(payloadText)
+        } catch {
+          body = payloadText
+        }
+      }
+      const file = rawBody.get('proof')
+      if (typeof File !== 'undefined' && file instanceof File) proofFile = file
     }
-    calls.push({ method, url, body })
+    calls.push({
+      method,
+      url,
+      body,
+      proof: proofFile
+        ? {
+            fileName: proofFile.name,
+            sizeBytes: proofFile.size,
+            mimeType: proofFile.type,
+          }
+        : undefined,
+    })
 
     let pathname: string
     try {
@@ -392,11 +776,364 @@ export function installBusinessApiStub(
           }
           return envelope(404, 'NOT_FOUND', 'Not found', 'No fetch stub for this service route.')
         }
+
+        if (action === 'settings' && method === 'PATCH') {
+          const input = (body ?? {}) as { bookingIntervalMinutes?: unknown }
+          if (typeof input.bookingIntervalMinutes === 'number' && Number.isFinite(input.bookingIntervalMinutes)) {
+            state.bookingIntervalMinutes = input.bookingIntervalMinutes
+            saveBookingInterval(storeSlug, input.bookingIntervalMinutes)
+          }
+          return json({ ...state })
+        }
+
+        if (action === 'schedule') {
+          const sub = rest[4]
+          if (sub === 'current' && method === 'GET') {
+            return json(currentScheduleView(storeSlug))
+          }
+          if (sub === 'versions' && method === 'GET') {
+            return json(scheduleViewsFor(listScheduleHistory(storeSlug)))
+          }
+          if (sub === 'conflicts' && method === 'GET') {
+            return json(getOpenConflicts(storeSlug).map(conflictViewOf))
+          }
+          if (sub === 'exceptions' && method === 'POST') {
+            const input = (body ?? {}) as { bookingId?: unknown; versionId?: unknown; reason?: unknown }
+            if (typeof input.bookingId !== 'string' || typeof input.versionId !== 'string') {
+              return envelope(400, 'VALIDATION_ERROR', 'Validation failed', 'bookingId and versionId are required.')
+            }
+            const result = applyScheduleException(storeSlug, input.bookingId, {
+              reason:
+                typeof input.reason === 'string' && input.reason.trim()
+                  ? input.reason.trim()
+                  : null,
+              scheduleVersionId: input.versionId,
+            })
+            if (!result.ok) {
+              return envelope(404, 'NOT_FOUND', 'Not found', result.error ?? 'Booking not found.')
+            }
+            const exception: ScheduleExceptionView = {
+              id: `sched-exc-${++exceptionSerial}`,
+              scheduleVersionId: input.versionId,
+              bookingId: input.bookingId,
+              reason: result.value.scheduleException?.reason ?? null,
+              createdAt: result.value.scheduleException?.at ?? nowTimestamp(),
+            }
+            return json(exception)
+          }
+          if (!sub && method === 'PUT') {
+            const payload = body as SaveSchedulePayload
+            const intervalMinutes = state.bookingIntervalMinutes
+            const snapshot = snapshotFromPayload(storeSlug, payload, intervalMinutes)
+            const saved = saveSchedule(storeSlug, snapshot, {
+              reason:
+                typeof payload.name === 'string' && payload.name.trim()
+                  ? payload.name.trim()
+                  : undefined,
+            })
+            const history = listScheduleHistory(storeSlug)
+            const versionNo = history.length
+            if (!saved.ok) {
+              return envelope(
+                409,
+                'CONFLICT',
+                'CONFLICT',
+                saved.error ?? 'The schedule could not be saved.',
+              )
+            }
+            return json({
+              versionId: saved.value.version.id,
+              versionNo,
+              activated: saved.value.version.status === 'active',
+              version: scheduleViewFromVersion(saved.value.version, versionNo),
+            })
+          }
+          return envelope(404, 'NOT_FOUND', 'Not found', 'No fetch stub for this schedule route.')
+        }
+
         return envelope(404, 'NOT_FOUND', 'Not found', 'No fetch stub for this owner business route.')
+      }
+
+      if (rest[0] === 'customer') {
+        const action = rest[1]
+        if (action === 'bookings' && method === 'POST') {
+          const payload = (body ?? {}) as Record<string, unknown>
+          const slug = String(payload.businessSlug ?? '')
+          const selections = Array.isArray(payload.selections) ? payload.selections : []
+          const customerName = String(payload.customerName ?? '')
+          const customerPhone = String(payload.customerPhone ?? '')
+          const startAtText = String(payload.startAt ?? '')
+          const submissionKey = String(payload.submissionKey ?? '')
+
+          const fields: Record<string, string> = {}
+          if (!slug.trim() || slug.trim().length < 2) fields.businessSlug = 'Business slug is required.'
+          if (selections.length === 0) fields.selections = 'Select at least one service.'
+          if (!customerName.trim()) fields.customerName = 'Customer name is required.'
+          if (!customerPhone.trim()) fields.customerPhone = 'Customer phone is required.'
+          if (!startAtText || Number.isNaN(new Date(startAtText).getTime())) fields.startAt = 'startAt must be a valid ISO datetime.'
+          if (!submissionKey.trim()) fields.submissionKey = 'submissionKey is required.'
+          if (Object.keys(fields).length > 0) return validationEnvelope(fields)
+
+          const enrichServices =
+            state.slug === slug ? servicesState.map((s) => serviceFromOwnerView(s)) : getServices(slug)
+          if (enrichServices.length === 0) {
+            return envelope(404, 'NOT_FOUND', 'Not found', 'Business not found.')
+          }
+          const wireSelections: AvailabilitySelection[] = selections.map((sel) => {
+            const s = sel as Record<string, unknown>
+            return {
+              serviceId: String(s.serviceId ?? ''),
+              variationId: typeof s.variationId === 'string' ? s.variationId : undefined,
+              addOnIds: Array.isArray(s.addOnIds) ? s.addOnIds.map((id) => String(id)) : undefined,
+            }
+          })
+          const totals = computeAppointmentTotals(enrichServices, wireSelections)
+          if (!totals.ok) {
+            return validationEnvelope(totals.fields ?? {})
+          }
+
+          const seqSignature = (sel: AvailabilitySelection) => {
+            const addOns = [...(sel.addOnIds ?? [])].sort().join(',')
+            return `${sel.serviceId}|${sel.variationId ?? ''}|${addOns}`
+          }
+          const signature = wireSelections.map(seqSignature).join(';;')
+          const existing = idempotentKeys.get(submissionKey)
+          if (existing) {
+            if (
+              existing.businessSlug !== slug ||
+              existing.startAt !== startAtText ||
+              existing.signature !== signature
+            ) {
+              return envelope(
+                409,
+                'CONFLICT',
+                'Conflict',
+                'This submission key was already used for a different booking request.',
+              )
+            }
+            return json(existing.response)
+          }
+
+          // Same first-wins + idempotency contract as the backend: the slot is
+          // conceded to whoever claimed it first (existing store bookings), and
+          // a mock-only "requested time was taken meanwhile" race is possible.
+          const start = new Date(startAtText)
+          const [y, mo, d] = [start.getFullYear(), start.getMonth() + 1, start.getDate()]
+          const date = `${String(y).padStart(4, '0')}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+          const hh = String(start.getHours()).padStart(2, '0')
+          const mm = String(start.getMinutes()).padStart(2, '0')
+          const time = `${hh}:${mm}`
+          const bizSlug = state.slug === slug ? storeSlug : slug
+          const business = state.slug === slug ? getBusiness(storeSlug) : getBusiness(slug)
+
+          const race = mockRaceSlot(bizSlug)
+          if (race && race.date === date && race.time === time) {
+            return envelope(409, 'SLOT_UNAVAILABLE', 'Conflict', 'The requested time is no longer available.')
+          }
+          const times = computeAvailableTimes(
+            business!,
+            date,
+            totals.durationMinutes,
+            getOccupiedBlocks(bizSlug, date),
+          )
+          if (!times.includes(time)) {
+            return envelope(409, 'SLOT_UNAVAILABLE', 'Conflict', 'The requested time is no longer available.')
+          }
+
+          const lineItems = buildLineItems(
+            enrichServices,
+            wireSelections.map((sel) => ({
+              serviceId: sel.serviceId,
+              variationId: sel.variationId ?? null,
+              addOnIds: sel.addOnIds ?? [],
+            })),
+          )
+          const total = totalPrice(lineItems)
+          const deposit = prepaymentAmount(business!.prepayment, total) ?? 0
+          // Backend rule (REQ-117/118): a deposit-bearing booking must carry a
+          // valid proof; the server is authoritative and re-validates content.
+          if (deposit > 0 && !proofFile) {
+            return validationEnvelope({ proof: 'A proof file is required.' })
+          }
+          const created = createBookingEntry({
+            businessSlug: bizSlug,
+            lineItems: lineItems.map((item) => ({
+              name: item.name,
+              unitPrice: item.unitPrice,
+              durationMinutes: item.durationMinutes,
+            })),
+            total,
+            totalDurationMinutes: totalDurationMinutes(lineItems),
+            deposit,
+            customer: { name: customerName, phone: customerPhone, note: String(payload.note ?? '') },
+            date,
+            time,
+            paymentMethod: String(payload.paymentMethod ?? 'bank-transfer') as 'bank-transfer',
+            proof: proofFile
+              ? {
+                  fileName: proofFile.name,
+                  sizeBytes: proofFile.size,
+                  mimeType: proofFile.type,
+                }
+              : {
+                  fileName: 'proof.png',
+                  sizeBytes: 1024,
+                  mimeType: 'image/png',
+                },
+          })
+          if (!created.ok) {
+            return envelope(409, 'SLOT_UNAVAILABLE', 'Conflict', 'The requested time is no longer available.')
+          }
+
+          const response = {
+            status: 'awaiting-verification',
+            startAt: new Date(
+              start.getFullYear(),
+              start.getMonth(),
+              start.getDate(),
+              start.getHours(),
+              start.getMinutes(),
+            ).toISOString(),
+            endAt: new Date(
+              start.getTime() + totalDurationMinutes(lineItems) * 60_000,
+            ).toISOString(),
+            serviceNames: lineItems.map((item) => item.name),
+            businessSlug: slug,
+            totalPriceMinor: total,
+            prepaidMinor: deposit,
+            paymentMethod: String(payload.paymentMethod ?? 'BANK_TRANSFER'),
+            note: String(payload.note ?? '') || null,
+          }
+          idempotentKeys.set(submissionKey, {
+            businessSlug: slug,
+            startAt: startAtText,
+            signature,
+            response,
+          })
+          return json(response)
+        }
+
+        if (action === 'status' && method === 'GET') {
+          const searchParams = new URL(url, 'http://localhost').searchParams
+          const slugParam = searchParams.get('slug')
+          const phoneParam = searchParams.get('phone') ?? ''
+          if (!slugParam) {
+            return envelope(400, 'VALIDATION_ERROR', 'Validation failed', 'slug is required.')
+          }
+          if (state.slug !== slugParam && !getBusiness(slugParam)) {
+            return envelope(404, 'NOT_FOUND', 'Not found', 'Business not found.')
+          }
+          const bizSlug = state.slug === slugParam ? storeSlug : slugParam
+          const storeBookings = getBookingsByPhone(bizSlug, phoneParam)
+          return json({
+            bookings: storeBookings.map((booking) => {
+              const start = new Date()
+              const [yy, moo, dd] = booking.date.split('-').map(Number)
+              const [hhh, mmm] = booking.time.split(':').map(Number)
+              start.setFullYear(yy, moo - 1, dd)
+              start.setHours(hhh, mmm, 0, 0)
+              return {
+                startAt: start.toISOString(),
+                endAt: new Date(
+                  start.getTime() + booking.totalDurationMinutes * 60_000,
+                ).toISOString(),
+                status:
+                  booking.state === 'payment-pending'
+                    ? 'awaiting-verification'
+                    : booking.state,
+              }
+            }),
+          })
+        }
+
+        if (action === 'resubmission' && method === 'POST') {
+          const sub = rest[2]
+          const payload = (body ?? {}) as Record<string, unknown>
+          const slug = String(payload.businessSlug ?? '')
+          const phone = String(payload.phone ?? '')
+          const bizSlug = state.slug === slug ? storeSlug : slug
+          const known =
+            state.slug === slug || Boolean(getBusiness(slug))
+
+          if (sub === 'request-code') {
+            const fields: Record<string, string> = {}
+            if (!slug.trim() || slug.trim().length < 2) fields.businessSlug = 'Business slug is required.'
+            if (!phone.trim()) fields.phone = 'Phone number is required.'
+            if (Object.keys(fields).length > 0) return validationEnvelope(fields)
+            if (!known) {
+              return envelope(404, 'NOT_FOUND', 'Not found', 'Business not found.')
+            }
+            if (!latestRejectedFor(bizSlug, phone)) {
+              return envelope(404, 'NOT_FOUND', 'Not found', 'Booking not found.')
+            }
+            const expiresAt = Date.now() + 10 * 60 * 1000
+            resubmissionCodes.set(`${slug}|${phone}`, {
+              code: RESUBMISSION_TEST_CODE,
+              used: false,
+              expiresAt,
+            })
+            return json({ expiresAt: new Date(expiresAt).toISOString() })
+          }
+
+          if (sub === 'verify') {
+            const code = String(payload.code ?? '')
+            const submissionKey = String(payload.submissionKey ?? '')
+            const fields: Record<string, string> = {}
+            if (!slug.trim() || slug.trim().length < 2) fields.businessSlug = 'Business slug is required.'
+            if (!phone.trim()) fields.phone = 'Phone number is required.'
+            if (!/^\d{6}$/.test(code)) fields.code = 'Verification code must be exactly 6 digits.'
+            if (!submissionKey.trim()) fields.submissionKey = 'submissionKey is required.'
+            if (Object.keys(fields).length > 0) return validationEnvelope(fields)
+            if (!known) {
+              return envelope(404, 'NOT_FOUND', 'Not found', 'Business not found.')
+            }
+            const entry = resubmissionCodes.get(`${slug}|${phone}`)
+            if (!entry || entry.used || Date.now() > entry.expiresAt || code !== entry.code) {
+              return validationEnvelope(
+                { code: 'The provided verification code is invalid.' },
+                'The verification code is invalid.',
+              )
+            }
+            if (!proofFile) {
+              return validationEnvelope({ proof: 'A proof file is required.' })
+            }
+            const rejected = latestRejectedFor(bizSlug, phone)
+            if (!rejected) {
+              return envelope(404, 'NOT_FOUND', 'Not found', 'Booking not found.')
+            }
+            const result = resubmitRejectedProof(bizSlug, rejected.id, {
+              fileName: proofFile.name,
+              sizeBytes: proofFile.size,
+              mimeType: proofFile.type,
+            })
+            if (!result.ok) {
+              return envelope(404, 'NOT_FOUND', 'Not found', result.error ?? 'Booking not found.')
+            }
+            entry.used = true
+            return json({
+              booking: customerBookingViewOf(result.value, slug),
+              outcome: 'PROOF_RECEIVED',
+            })
+          }
+
+          return envelope(404, 'NOT_FOUND', 'Not found', 'No fetch stub for this resubmission route.')
+        }
+
+        return envelope(404, 'NOT_FOUND', 'Not found', 'No fetch stub for this customer route.')
       }
 
       if (rest[0] === 'public' && rest[1] === 'businesses' && rest[2]) {
         if (method === 'GET') {
+          if (rest[3] === 'schedule') {
+            if (state.slug === rest[2]) return json(publicScheduleViewFor(storeSlug))
+            // A renamed owner business has no store page under its old slug.
+            const exists =
+              rest[2] === initialOwnedSlug ? undefined : getBusiness(rest[2])
+            if (!exists) {
+              return envelope(404, 'NOT_FOUND', 'Not found', 'Business not found.')
+            }
+            return json(publicScheduleViewFor(rest[2]))
+          }
           if (rest[3] === 'services') {
             if (state.slug === rest[2]) {
               return json(servicesState.filter((s) => s.isActive).map((s) => publicServiceFromOwner(s)))
@@ -416,6 +1153,58 @@ export function installBusinessApiStub(
           if (other) return json(other)
           return envelope(404, 'NOT_FOUND', 'Not found', 'Business not found.')
         }
+
+        if (rest[3] === 'availability' && method === 'POST') {
+          if (rest[2] === initialOwnedSlug && !getBusiness(rest[2])) {
+            return envelope(404, 'NOT_FOUND', 'Not found', 'Business not found.')
+          }
+          const business = state.slug === rest[2] ? getBusiness(storeSlug) : getBusiness(rest[2])
+          if (!business) {
+            return envelope(404, 'NOT_FOUND', 'Not found', 'Business not found.')
+          }
+          const body = (init?.body ?? '{}') as string
+          const parsed = JSON.parse(body) as { date?: unknown; selections?: unknown }
+          if (typeof parsed.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(parsed.date)) {
+            return envelope(422, 'VALIDATION_ERROR', 'Validation failed', 'date must be a YYYY-MM-DD date string.')
+          }
+          if (options.failAvailabilityFor?.(parsed.date)) {
+            return envelope(500, 'SERVER_ERROR', 'Server error', 'Availability could not be loaded.')
+          }
+          const selections = parsed.selections
+          if (!Array.isArray(selections) || selections.length === 0) {
+            return envelope(422, 'VALIDATION_ERROR', 'Validation failed', 'selections must not be empty.')
+          }
+          const wireSelections: AvailabilitySelection[] = selections.map((sel) => {
+            const s = sel as Record<string, unknown>
+            return {
+              serviceId: String(s.serviceId ?? ''),
+              variationId: typeof s.variationId === 'string' ? s.variationId : undefined,
+              addOnIds: Array.isArray(s.addOnIds) ? s.addOnIds.map((id) => String(id)) : undefined,
+            }
+          })
+          const enrichServices =
+            state.slug === rest[2]
+              ? servicesState.map((s) => serviceFromOwnerView(s))
+              : getServices(rest[2])
+          const totals = computeAppointmentTotals(enrichServices, wireSelections)
+          if (!totals.ok) {
+            return validationEnvelope(totals.fields ?? {})
+          }
+          const date = String(parsed.date)
+          const times = computeAvailableTimes(
+            business,
+            date,
+            totals.durationMinutes,
+            getOccupiedBlocks(rest[2], date),
+          )
+          return json({
+            date,
+            slots: times.map((time) => slotInstants(date, time, totals.durationMinutes)),
+            computedDurationMinutes: totals.durationMinutes,
+            computedTotalPriceMinor: totals.totalPriceMinor,
+          })
+        }
+
         return envelope(404, 'NOT_FOUND', 'Not found', 'No fetch stub for this public route.')
       }
     }
