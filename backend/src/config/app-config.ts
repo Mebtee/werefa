@@ -106,6 +106,8 @@ export const appConfigSchema = z.object({
   authRecoveryMaxAttempts: z.coerce.number().int().min(1).max(10).default(5),
   authRecoveryCodeLength: z.coerce.number().int().min(6).max(8).default(6),
   authCookieName: z.string().min(1).max(64).default('werefa_session'),
+  /** Local directory for staged/proof object storage (Prompt 50, REQ-118). */
+  proofStorageDir: z.string().min(1).default('./storage/proofs'),
   productParameters: z.object({
     subscriptionMonthlyPriceMinor: z.number().int().positive().nullable().default(null),
     appTimezone: z.string().min(1).default(APP_TIMEZONE_DESIGN_DEFAULT),
@@ -186,6 +188,7 @@ function rawToParsed(env: Record<string, string | undefined>): z.infer<typeof ap
     authRecoveryMaxAttempts: env.AUTH_RECOVERY_MAX_ATTEMPTS || undefined,
     authRecoveryCodeLength: env.AUTH_RECOVERY_CODE_LENGTH || undefined,
     authCookieName: env.AUTH_COOKIE_NAME || undefined,
+    proofStorageDir: env.PROOF_STORAGE_DIR || undefined,
     productParameters: {
       subscriptionMonthlyPriceMinor: productRaw.PRODUCT_SUBSCRIPTION_MONTHLY_PRICE_MINOR as number | null,
       appTimezone: productRaw.PRODUCT_APP_TIMEZONE as string,
