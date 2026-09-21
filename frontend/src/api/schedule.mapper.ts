@@ -1,8 +1,12 @@
-import { minutesOf, minutesToTime } from '@/lib/time'
+import { isoWeekdayOf, minutesOf, minutesToTime, nextDateStrings } from '@/lib/time'
 import type {
+  BlockedPeriod,
   CanonicalScheduleState,
+  DateString,
   ScheduleVersionHistoryEntry,
+  SpecialDay,
   TimeOfDay,
+  WorkingPeriod,
 } from '@/types/models'
 import type {
   BlockedPeriodView,
@@ -115,8 +119,9 @@ export function toSchedulePayload(form: ScheduleForm): SaveSchedulePayload {
 
   const blockedPeriods: SaveBlockedPeriodInput[] = form.blockedPeriods.map((row) => ({
     dayOfWeek: row.day == null ? null : frontendDayToIsoWeekday(row.day),
-    startMinutes: minutesOf(row.start),
-    endMinutes: minutesOf(row.end),
+    // An "every day / all day" row (REQ-084) keeps empty times → null minutes.
+    startMinutes: row.start ? minutesOf(row.start) : null,
+    endMinutes: row.end ? minutesOf(row.end) : null,
   }))
 
   const specialDates: SaveSpecialDateInput[] = form.specialDays.map((entry) =>
@@ -198,4 +203,75 @@ export function conflictsFromApi(views: readonly OwnerScheduleConflictView[]): S
     reasonDetail: view.reasonDetail,
     services: view.services,
   }))
+}
+
+// --- canonical schedule → mock availability fixture --------------------------------
+// The public booking page consumes the real public-schedule projection (Prompt
+// 47 §18) but the still-mock availability engine reads the legacy BusinessDetails
+// schedule fields. This pure derivation converts the canonical view (weekly
+// periods, weekly blocked periods, single-window special dates) into those fields:
+// - working periods → `workingHours` (sorted per day)
+// - CLOSED special  → `specialDays[date] = { kind: 'closed' }` AND `blockedDays`
+// - CUSTOM special  → `specialDays[date] = { kind: 'hours', periods: [window] }`
+// - weekly blocks   → expanded across the booking window for matching weekdays
+//                     (null dayOfWeek → every date in the window)
+export interface AvailabilityScheduleFields {
+  workingHours: WorkingPeriod[][]
+  specialDays: Record<DateString, SpecialDay>
+  blockedDays: readonly string[]
+  blockedPeriods: readonly BlockedPeriod[]
+}
+
+export function availabilityScheduleFromView(
+  view: Pick<OwnerScheduleView, 'workingPeriods' | 'blockedPeriods' | 'specialDates'>,
+  options: { intervalMinutes: number; bookingWindowDays: number },
+): AvailabilityScheduleFields {
+  const workingHours: WorkingPeriod[][] = [[], [], [], [], [], [], []]
+  for (const period of view.workingPeriods) {
+    const day = isoWeekdayToFrontendDay(period.weekday)
+    workingHours[day] = [
+      ...workingHours[day],
+      { start: minutesToTime(period.startMinutes), end: minutesToTime(period.endMinutes) },
+    ]
+  }
+  const sortedHours = workingHours.map((slots) =>
+    [...slots].sort((a, b) => (a.start < b.start ? -1 : 1)),
+  )
+
+  const specialDays: Record<DateString, SpecialDay> = {}
+  const blockedDays: string[] = []
+  for (const special of view.specialDates) {
+    if (special.kind === 'CLOSED') {
+      specialDays[special.date] = { kind: 'closed' }
+      blockedDays.push(special.date)
+    } else if (special.startMinutes != null && special.endMinutes != null) {
+      specialDays[special.date] = {
+        kind: 'hours',
+        periods: [
+          {
+            start: minutesToTime(special.startMinutes),
+            end: minutesToTime(special.endMinutes),
+          },
+        ],
+      }
+    }
+  }
+
+  const blockedPeriods: BlockedPeriod[] = []
+  for (const block of view.blockedPeriods) {
+    const start = block.startMinutes == null ? '00:00' : minutesToTime(block.startMinutes)
+    const end = block.endMinutes == null ? '23:59' : minutesToTime(block.endMinutes)
+    for (const date of nextDateStrings(options.bookingWindowDays)) {
+      if (block.dayOfWeek == null || isoWeekdayOf(date) === block.dayOfWeek) {
+        blockedPeriods.push({ date, start, end })
+      }
+    }
+  }
+
+  return {
+    workingHours: sortedHours,
+    specialDays,
+    blockedDays,
+    blockedPeriods,
+  }
 }
