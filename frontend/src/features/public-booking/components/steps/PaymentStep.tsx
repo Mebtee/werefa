@@ -137,7 +137,7 @@ export function PaymentStep({
           />
           <p className="line-item__meta">
             Screenshot of your bank/Telebirr transfer, or the PDF receipt. Max
-            5 MB. (Public preview — nothing is really uploaded.)
+            5 MB. Only the business you are booking with can see it.
           </p>
         </div>
       )}
