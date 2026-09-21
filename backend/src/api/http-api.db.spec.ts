@@ -1,8 +1,12 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createTestApp } from '../../test/helpers/test-app';
+import { PROOF_MAX_BYTES } from '../domain/lib/proof-file';
 
 /**
  * DB-gated end-to-end HTTP contract tests (Prompt 42 §22). Run via
@@ -26,15 +30,15 @@ describe.skipIf(!RUN)('HTTP API end-to-end (real DB)', () => {
   const DATE = '2026-11-20';
   const CREATE_BODY = {
     businessSlug: 'happy-salons-test-1',
-    serviceId: '',
-    variationIds: [] as string[],
-    addOnIds: [] as string[],
     customerName: 'Awit Haile',
     customerPhone: '+251911112233',
     note: 'please confirm',
     startAt: `${DATE}T10:00:00.000Z`,
     submissionKey: 'invoice-20261120-0001',
   };
+  const selection = (opts: Partial<{ variationId: string; addOnIds: string[] }> = {}) => [
+    { serviceId, variationId: opts.variationId, addOnIds: opts.addOnIds ?? [] },
+  ];
 
   let businessId = '';
   let serviceId = '';
@@ -43,6 +47,9 @@ describe.skipIf(!RUN)('HTTP API end-to-end (real DB)', () => {
   let versionId = '';
   let booking1Id = 0;
   let booking2Id = 0;
+  let businessBId = '';
+  let serviceBId = '';
+  let proofStorageDir = '';
 
   beforeAll(async () => {
     if (!RUN) return;
@@ -56,9 +63,16 @@ describe.skipIf(!RUN)('HTTP API end-to-end (real DB)', () => {
     });
     await prisma.$executeRawUnsafe(`INSERT INTO "business_category" ("code", "label") VALUES ('SALON_AND_BARBER', 'Salon & Barber'), ('OTHER', 'Other') ON CONFLICT DO NOTHING`);
 
+    // Proof objects land in a throwaway dir (never the repo's ./storage).
+    proofStorageDir = await mkdtemp(join(tmpdir(), 'werefa-http-proofs-'));
     const built = await createTestApp({
       database: 'real',
-      env: { DATABASE_URL: TEST_URL!, AUTH_TEST_ENABLED: 'true', PRODUCT_APP_TIMEZONE: 'UTC' },
+      env: {
+        DATABASE_URL: TEST_URL!,
+        AUTH_TEST_ENABLED: 'true',
+        PRODUCT_APP_TIMEZONE: 'UTC',
+        PROOF_STORAGE_DIR: proofStorageDir,
+      },
     });
     app = built.app;
   });
@@ -68,10 +82,25 @@ describe.skipIf(!RUN)('HTTP API end-to-end (real DB)', () => {
     await app?.close();
     await resetDatabase();
     await prisma.$disconnect();
+    await rm(proofStorageDir, { recursive: true, force: true });
   });
 
   const owner = (id: string) => ({ 'x-actor-role': 'OWNER', 'x-actor-id': id });
   const http = () => request(app.getHttpServer());
+
+  // Prompt 50: booking-create + resubmission-verify are multipart — the JSON
+  // payload rides in a text field named `payload` and the proof file in `proof`.
+  const PROOF_PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]);
+  const postBookingForm = (payload: object) =>
+    http()
+      .post('/api/v1/customer/bookings')
+      .field('payload', JSON.stringify(payload))
+      .attach('proof', PROOF_PNG, { filename: 'receipt.png', contentType: 'image/png' });
+  const postVerifyForm = (payload: object) =>
+    http()
+      .post('/api/v1/customer/resubmission/verify')
+      .field('payload', JSON.stringify(payload))
+      .attach('proof', PROOF_PNG, { filename: 'resub.png', contentType: 'image/png' });
 
   async function createBusiness(): Promise<void> {
     const res = await http()
@@ -212,9 +241,9 @@ describe.skipIf(!RUN)('HTTP API end-to-end (real DB)', () => {
 
   it('customer creates a booking (idempotent by submissionKey) with a customer-safe payload', async () => {
     await setupWorld();
-    const body = { ...CREATE_BODY, serviceId, variationIds: [variationId], addOnIds: [addOnId] };
+    const body = { ...CREATE_BODY, selections: selection({ variationId, addOnIds: [addOnId] }) };
 
-    const res = await http().post('/api/v1/customer/bookings').send(body).expect(201);
+    const res = await postBookingForm(body).expect(201);
     expect(res.body.status).toBe('awaiting-verification');
     expect(res.body.businessSlug).toBe('happy-salons-test-1');
     expect(res.body.totalPriceMinor).toBe(13500);
@@ -223,7 +252,7 @@ describe.skipIf(!RUN)('HTTP API end-to-end (real DB)', () => {
     expect(res.body.bookingId).toBeUndefined();
     expect(res.body.customerPhone).toBeUndefined();
 
-    const again = await http().post('/api/v1/customer/bookings').send(body).expect(201);
+    const again = await postBookingForm(body).expect(201);
     expect(again.body.startAt).toBe(res.body.startAt);
     expect(again.body.status).toBe(res.body.status);
   });
@@ -249,6 +278,92 @@ describe.skipIf(!RUN)('HTTP API end-to-end (real DB)', () => {
     expect(detail.body.history.length).toBeGreaterThan(0);
     expect(detail.body.history[detail.body.history.length - 1].toStatus).toBe('PAYMENT_PENDING');
     expect(detail.body.proofs.length).toBeGreaterThan(0);
+  });
+
+  it('customer creates a multi-service booking via selections (REQ-070/074), snapshotted by the backend', async () => {
+    await setupWorld();
+    const svc2 = await http()
+      .post(`/api/v1/owner/businesses/${businessId}/services`)
+      .set(owner(OWNER_A))
+      .send({ name: 'Deep Clean', basePriceMinor: 6000, baseDurationMinutes: 30 })
+      .expect(201);
+    const var2 = await http()
+      .post(`/api/v1/owner/businesses/${businessId}/services/${svc2.body.id}/variations`)
+      .set(owner(OWNER_A))
+      .send({ name: 'Deluxe', priceDeltaMinor: 1000, durationDeltaMinutes: 10 })
+      .expect(201);
+
+    const res = await postBookingForm({
+      ...CREATE_BODY,
+      selections: [
+        { serviceId, variationId, addOnIds: [addOnId] },
+        { serviceId: svc2.body.id as string, variationId: var2.body.id as string },
+      ],
+      startAt: '2026-11-21T09:00:00.000Z',
+      submissionKey: 'invoice-20261121-0001',
+    }).expect(201);
+    expect(res.body.status).toBe('awaiting-verification');
+    expect(res.body.serviceNames).toEqual(['Haircut', 'Styling', 'Wash', 'Deep Clean', 'Deluxe']);
+    expect(res.body.totalPriceMinor).toBe(20500);
+    expect(res.body.startAt).toBe('2026-11-21T09:00:00.000Z');
+    expect(res.body.endAt).toBe('2026-11-21T10:55:00.000Z');
+
+    const mine = await http().get(`/api/v1/owner/businesses/${businessId}/bookings`).set(owner(OWNER_A)).expect(200);
+    const row = mine.body.find((b: { startAt: string }) => b.startAt === '2026-11-21T09:00:00.000Z');
+    expect(row).toBeTruthy();
+    expect(row.totalPriceMinor).toBe(20500);
+
+    const ownerDetail = await http()
+      .get(`/api/v1/owner/businesses/${businessId}/bookings/${row.bookingId}`)
+      .set(owner(OWNER_A))
+      .expect(200);
+    expect(ownerDetail.body.status).toBe('PAYMENT_PENDING');
+    expect(ownerDetail.body.totalPriceMinor).toBe(20500);
+    expect(ownerDetail.body.components.map((c: { name: string }) => c.name)).toEqual([
+      'Haircut',
+      'Styling',
+      'Wash',
+      'Deep Clean',
+      'Deluxe',
+    ]);
+    expect(ownerDetail.body.history).toBeDefined();
+  });
+
+  it('rejects reusing a submission key for a materially different request (same key + different start or services → CONFLICT)', async () => {
+    await setupWorld();
+    // `invoice-20261120-0001` belongs to the DATE 10:00 booking above.
+    const differentStart = await postBookingForm({
+      ...CREATE_BODY,
+      selections: selection({ variationId, addOnIds: [addOnId] }),
+      startAt: '2026-11-20T11:00:00.000Z',
+    }).expect(409);
+    expect(differentStart.body.error.code).toBe('CONFLICT');
+    expect(differentStart.body.error.detail).toContain('different booking request');
+
+    const differentServices = await postBookingForm({ ...CREATE_BODY, selections: selection({}) }).expect(409);
+    expect(differentServices.body.error.code).toBe('CONFLICT');
+  });
+
+  it('rejects malformed customer booking bodies with a validation envelope', async () => {
+    await setupWorld();
+    const post = (payload: unknown) => http().post('/api/v1/customer/bookings').field('payload', JSON.stringify(payload)).expect(400);
+
+    await post({ ...CREATE_BODY }); // missing selections
+    await post({ ...CREATE_BODY, selections: [] }); // empty selections
+    await post({ ...CREATE_BODY, selections: [{ serviceId: 'not-a-uuid' }] }); // malformed service id
+    await post({ ...CREATE_BODY, selections: [{ serviceId, addOnIds: ['not-a-uuid'] }] }); // malformed add-on id
+    await post({ ...CREATE_BODY, selections: selection(), customerName: '' }); // blank customer name
+    await post({
+      ...CREATE_BODY,
+      selections: Array.from({ length: 9 }, () => ({ serviceId })),
+    }); // too many selections
+
+    const bad = await http()
+      .post('/api/v1/customer/bookings')
+      .field('payload', JSON.stringify({ selections: selection(), customerName: 'Awit', startAt: 'not-a-date', submissionKey: 'x' }))
+      .expect(400);
+    expect(bad.body.error.code).toBe('VALIDATION_ERROR');
+    expect(typeof bad.body.error.fields).toBe('object');
   });
 
   it("enforces tenant isolation: a second owner never learns about the first owner's business", async () => {
@@ -291,13 +406,11 @@ describe.skipIf(!RUN)('HTTP API end-to-end (real DB)', () => {
   it('customer rejection + one-time-code resubmission returns the booking to awaiting-verification', async () => {
     const body2 = {
       ...CREATE_BODY,
-      serviceId,
-      variationIds: [variationId] as string[],
-      addOnIds: [] as string[],
+      selections: selection({ variationId }),
       startAt: '2026-11-22T10:00:00.000Z',
       submissionKey: 'invoice-20261122-0002',
     };
-    await http().post('/api/v1/customer/bookings').send(body2).expect(201);
+    await postBookingForm(body2).expect(201);
 
     const list = await http().get(`/api/v1/owner/businesses/${businessId}/bookings`).set(owner(OWNER_A)).expect(200);
     booking2Id = list.body.find((b: { bookingId: number }) => b.bookingId !== booking1Id).bookingId;
@@ -318,10 +431,12 @@ describe.skipIf(!RUN)('HTTP API end-to-end (real DB)', () => {
       expect(request.body.expiresAt).toBeDefined();
       expect(request.body.code).toBeUndefined();
 
-      const verified = await http()
-        .post('/api/v1/customer/resubmission/verify')
-        .send({ businessSlug: 'happy-salons-test-1', phone: '+251911112233', code: '100000', submissionKey: 'invoice-20261122-0003' })
-        .expect(200);
+      const verified = await postVerifyForm({
+        businessSlug: 'happy-salons-test-1',
+        phone: '+251911112233',
+        code: '100000',
+        submissionKey: 'invoice-20261122-0003',
+      }).expect(200);
       expect(verified.body.outcome).toBe('PROOF_RECEIVED');
       expect(verified.body.booking.status).toBe('awaiting-verification');
     } finally {
@@ -438,11 +553,8 @@ describe.skipIf(!RUN)('HTTP API end-to-end (real DB)', () => {
 
   it('open conflicts: owner keeps a conflicting booking with reason; non-conflict is rejected (REQ-092/093/160/161)', async () => {
     await setupWorld();
-    const body = { ...CREATE_BODY, serviceId, variationIds: [variationId], addOnIds: [addOnId] };
-    await http()
-      .post('/api/v1/customer/bookings')
-      .send({ ...body, startAt: '2026-11-24T10:00:00.000Z', submissionKey: 'invoice-20261124-0009' })
-      .expect(201);
+    const body = { ...CREATE_BODY, selections: selection({ variationId, addOnIds: [addOnId] }) };
+    await postBookingForm({ ...body, startAt: '2026-11-24T10:00:00.000Z', submissionKey: 'invoice-20261124-0009' }).expect(201);
 
     const list = await http().get(`/api/v1/owner/businesses/${businessId}/bookings`).set(owner(OWNER_A)).expect(200);
     const kept = list.body.find((b: { startAt: string }) => b.startAt === '2026-11-24T10:00:00.000Z');
@@ -499,6 +611,216 @@ describe.skipIf(!RUN)('HTTP API end-to-end (real DB)', () => {
     expect(tooGood.body.error.code).toBe('VALIDATION_ERROR');
   });
 
+  it('owner B creates a second salon to host cross-tenant availability checks', async () => {
+    const res = await http()
+      .post('/api/v1/owner/businesses')
+      .set(owner(OWNER_B))
+      .send({ slug: 'happy-salons-test-2', categoryCode: 'SALON_AND_BARBER', name: 'Second Salon', bookingIntervalMinutes: 60 })
+      .expect(201);
+    businessBId = res.body.id;
+    const svc = await http()
+      .post(`/api/v1/owner/businesses/${businessBId}/services`)
+      .set(owner(OWNER_B))
+      .send({ name: 'Cut', basePriceMinor: 5000, baseDurationMinutes: 60 })
+      .expect(201);
+    serviceBId = svc.body.id;
+  });
+
+  it('POST availability supports several services, per-selection variations, and duplicated services (REQ-070/074)', async () => {
+    await setupWorld();
+    const svc2 = await http()
+      .post(`/api/v1/owner/businesses/${businessId}/services`)
+      .set(owner(OWNER_A))
+      .send({ name: 'Deep Clean', basePriceMinor: 6000, baseDurationMinutes: 30 })
+      .expect(201);
+    const svc3 = await http()
+      .post(`/api/v1/owner/businesses/${businessId}/services`)
+      .set(owner(OWNER_A))
+      .send({ name: 'Polish', basePriceMinor: 4000, baseDurationMinutes: 20 })
+      .expect(201);
+    const var2 = await http()
+      .post(`/api/v1/owner/businesses/${businessId}/services/${svc2.body.id}/variations`)
+      .set(owner(OWNER_A))
+      .send({ name: 'Deluxe', priceDeltaMinor: 1000, durationDeltaMinutes: 10 })
+      .expect(201);
+    const s2 = svc2.body.id as string;
+    const s3 = svc3.body.id as string;
+    const v2 = var2.body.id as string;
+
+    const single = await http()
+      .post('/api/v1/public/businesses/happy-salons-test-1/availability')
+      .send({ date: DATE, selections: [{ serviceId: s2 }] })
+      .expect(200);
+    expect(single.body.computedDurationMinutes).toBe(30);
+    expect(single.body.computedTotalPriceMinor).toBe(6000);
+    expect(single.body.slots.length).toBeGreaterThan(0);
+
+    const multi = await http()
+      .post('/api/v1/public/businesses/happy-salons-test-1/availability')
+      .send({ date: DATE, selections: [{ serviceId: s2, variationId: v2 }, { serviceId: s3 }] })
+      .expect(200);
+    expect(multi.body.computedDurationMinutes).toBe(60);
+    expect(multi.body.computedTotalPriceMinor).toBe(11000);
+    expect(multi.body.slots.length).toBeGreaterThan(0);
+
+    const duplicated = await http()
+      .post('/api/v1/public/businesses/happy-salons-test-1/availability')
+      .send({ date: DATE, selections: [{ serviceId: s2 }, { serviceId: s2 }] })
+      .expect(200);
+    expect(duplicated.body.computedDurationMinutes).toBe(60);
+    expect(duplicated.body.computedTotalPriceMinor).toBe(12000);
+  });
+
+  it('POST availability rejects a foreign service under the A slug (tenant isolation)', async () => {
+    await setupWorld();
+    const res = await http()
+      .post('/api/v1/public/businesses/happy-salons-test-1/availability')
+      .send({ date: DATE, selections: [{ serviceId: serviceBId }] })
+      .expect(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    expect(res.body.error.fields.serviceId).toBeTruthy();
+  });
+
+  it('POST /customer/bookings rejects a service that does not belong to the slug business (tenant isolation)', async () => {
+    await setupWorld();
+    const res = await postBookingForm({
+      ...CREATE_BODY,
+      selections: [{ serviceId: serviceBId }],
+      startAt: '2026-11-21T09:00:00.000Z',
+      submissionKey: 'invoice-20261121-0999',
+    }).expect(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    expect(res.body.error.fields.serviceId).toBeTruthy();
+  });
+
+  describe('real-Postgres concurrency (REQ-121 + slot first-wins)', () => {
+    it('same submission key racing concurrently returns an idempotent 201 for both requests', async () => {
+      await setupWorld();
+      const body = {
+        ...CREATE_BODY,
+        selections: selection({ variationId, addOnIds: [addOnId] }),
+        startAt: '2026-11-25T10:00:00.000Z',
+        submissionKey: 'invoice-20261125-0001',
+      };
+      const [a, b] = await Promise.all([
+        postBookingForm(body),
+        postBookingForm(body),
+      ]);
+      expect(a.status).toBe(201);
+      expect(b.status).toBe(201);
+      expect(a.body.bookingId).toBe(b.body.bookingId);
+      expect(a.body.startAt).toBe('2026-11-25T10:00:00.000Z');
+    });
+
+    it('two different keys for the same slot concede the slot to one request (SLOT_UNAVAILABLE for the loser)', async () => {
+      await setupWorld();
+      const mk = (key: string) => ({
+        ...CREATE_BODY,
+        selections: selection({ variationId, addOnIds: [addOnId] }),
+        startAt: '2026-11-26T10:00:00.000Z',
+        submissionKey: key,
+      });
+      const [a, b] = await Promise.all([
+        postBookingForm(mk('invoice-20261126-0001')),
+        postBookingForm(mk('invoice-20261126-0002')),
+      ]);
+      const statuses = [a.status, b.status].sort();
+      expect(statuses).toEqual([201, 409]);
+      const loser = a.status === 409 ? a : b;
+      expect(loser.body.error.code).toBe('SLOT_UNAVAILABLE');
+    });
+  });
+
+  it('POST availability rejects an unknown service id and an unknown slug', async () => {
+    await setupWorld();
+    const unknownService = await http()
+      .post('/api/v1/public/businesses/happy-salons-test-1/availability')
+      .send({ date: DATE, selections: [{ serviceId: '11111111-0000-4000-8000-000000000000' }] })
+      .expect(400);
+    expect(unknownService.body.error.code).toBe('VALIDATION_ERROR');
+
+    await http()
+      .post('/api/v1/public/businesses/no-such-business/availability')
+      .send({ date: DATE, selections: [{ serviceId }] })
+      .expect(404);
+  });
+
+  it('POST availability rejects malformed bodies with a validation envelope', async () => {
+    const post = (body: unknown) =>
+      http().post('/api/v1/public/businesses/happy-salons-test-1/availability').send(body as object).expect(400);
+
+    await post({ selections: [{ serviceId }] }); // missing date
+    await post({ date: DATE, selections: [] }); // empty selections
+    await post({ date: DATE }); // missing selections
+    await post({ date: '2026-11-20T00:00:00.000Z', selections: [{ serviceId }] }); // non-date key
+    await post({ date: DATE, selections: [{ serviceId: 'not-a-uuid' }] }); // malformed id
+    await post({ date: DATE, selections: [{ serviceId, addOnIds: ['not-a-uuid'] }] }); // malformed add-on id
+    await post({
+      date: DATE,
+      selections: Array.from({ length: 9 }, () => ({ serviceId })),
+    }); // too many selections
+  });
+
+  it('POST availability returns an empty slot list for a CLOSED special date (R086)', async () => {
+    expect(businessBId).toBeTruthy();
+    await http()
+      .put(`/api/v1/owner/businesses/${businessBId}/schedule`)
+      .set(owner(OWNER_B))
+      .send({
+        name: 'B open',
+        workingPeriods: Array.from({ length: 7 }, (_, i) => ({ weekday: i + 1, startMinutes: 540, endMinutes: 1020 })),
+        blockedPeriods: [],
+        specialDates: [],
+      })
+      .expect(200);
+
+    const before = await http()
+      .post('/api/v1/public/businesses/happy-salons-test-2/availability')
+      .send({ date: DATE, selections: [{ serviceId: serviceBId }] })
+      .expect(200);
+    expect(before.body.slots.length).toBeGreaterThan(0);
+
+    await http()
+      .put(`/api/v1/owner/businesses/${businessBId}/schedule`)
+      .set(owner(OWNER_B))
+      .send({
+        name: 'B closed',
+        workingPeriods: [],
+        blockedPeriods: [],
+        specialDates: [{ date: DATE, kind: 'CLOSED' }],
+      })
+      .expect(200);
+
+    const after = await http()
+      .post('/api/v1/public/businesses/happy-salons-test-2/availability')
+      .send({ date: DATE, selections: [{ serviceId: serviceBId }] })
+      .expect(200);
+    expect(after.body.slots).toEqual([]);
+    expect(after.body.computedDurationMinutes).toBe(60);
+  });
+
+  it('POST availability excludes a start claimed by an active booking (R090)', async () => {
+    await setupWorld();
+    // Haircut is now 75 min (REQ-076 test updated its base); 13:00 => [13:00, 14:15).
+    await postBookingForm({
+      ...CREATE_BODY,
+      selections: selection(),
+      startAt: '2026-11-27T13:00:00.000Z',
+      submissionKey: 'invoice-20261127-0001',
+    }).expect(201);
+
+    const before = await http()
+      .post('/api/v1/public/businesses/happy-salons-test-1/availability')
+      .send({ date: '2026-11-27', selections: [{ serviceId }] })
+      .expect(200);
+    const starts = before.body.slots as { startAt: string }[];
+    const times = starts.map((s) => s.startAt.slice(11, 16));
+    expect(times).not.toContain('13:00');
+    expect(times).toContain('11:00');
+    expect(times).toContain('15:00');
+    expect(times).toContain('09:00');
+  });
+
   it('public schedule projection and Super Admin-only history access (REQ-167/168)', async () => {
     const pub = await http().get('/api/v1/public/businesses/happy-salons-test-1/schedule').expect(200);
     expect(pub.body.workingPeriods).toHaveLength(6);
@@ -530,6 +852,161 @@ describe.skipIf(!RUN)('HTTP API end-to-end (real DB)', () => {
       .get(`/api/v1/owner/businesses/${businessId}/schedule/versions`)
       .set(owner(OWNER_A))
       .expect(200);
+  });
+
+  describe('payment-proof uploads, download and lineage (Prompt 50)', () => {
+    async function setPrepaidFixed(flag: boolean): Promise<void> {
+      await http()
+        .patch(`/api/v1/owner/businesses/${businessId}/settings`)
+        .set(owner(OWNER_A))
+        .send(flag ? { prepaymentMode: 'FIXED', prepaymentFixedMinor: 5000 } : { prepaymentMode: 'NONE', prepaymentFixedMinor: null })
+        .expect(200);
+    }
+
+    it('owner downloads the proof file with attachment headers; other tenants and unknown ids get 404 (REQ-114/115/118)', async () => {
+      await setupWorld();
+      // booking2 (after reject + resubmission) holds the original (replaced) proof and the latest one.
+      const detail = await http().get(`/api/v1/owner/businesses/${businessId}/bookings/${booking2Id}`).set(owner(OWNER_A)).expect(200);
+      expect(detail.body.proofs.length).toBe(2);
+      expect(detail.body.proofs[0].replaced).toBe(true);
+      expect(detail.body.proofs[1].replaced).toBe(false);
+
+      const proof = detail.body.proofs[1];
+      expect(proof.mimeType).toBe('image/png');
+      expect(proof.fileName).toBe(`payment-proof-${(proof.proofId as string).slice(0, 8)}.png`);
+      expect(proof.sizeBytes).toBe(PROOF_PNG.length);
+
+      const download = await http()
+        .get(`/api/v1/owner/businesses/${businessId}/bookings/${booking2Id}/proofs/${proof.proofId}`)
+        .set(owner(OWNER_A))
+        .expect(200);
+      expect(download.body.equals(PROOF_PNG)).toBe(true);
+      expect(download.headers['content-type']).toBe('image/png');
+      expect(download.headers['content-disposition']).toContain('attachment');
+
+      await http()
+        .get(`/api/v1/owner/businesses/${businessId}/bookings/${booking2Id}/proofs/${proof.proofId}`)
+        .set(owner(OWNER_B))
+        .expect(404);
+      await http()
+        .get(`/api/v1/owner/businesses/${businessId}/bookings/${booking2Id}/proofs/00000000-0000-4000-8000-000000000000`)
+        .set(owner(OWNER_A))
+        .expect(404);
+    });
+
+    it('rejects a booking without proof when prepayment is required and accepts it with a valid proof', async () => {
+      await setupWorld();
+      await setPrepaidFixed(true);
+      try {
+        const without = await http()
+          .post('/api/v1/customer/bookings')
+          .field(
+            'payload',
+            JSON.stringify({
+              ...CREATE_BODY,
+              selections: selection({ variationId }),
+              startAt: '2026-11-28T10:00:00.000Z',
+              submissionKey: 'invoice-20261128-0001',
+            }),
+          )
+          .expect(400);
+        expect(without.body.error.code).toBe('VALIDATION_ERROR');
+        expect(without.body.error.fields.proof).toMatch(/required/i);
+
+        const withProof = await postBookingForm({
+          ...CREATE_BODY,
+          selections: selection({ variationId }),
+          startAt: '2026-11-28T10:00:00.000Z',
+          submissionKey: 'invoice-20261128-0001',
+        }).expect(201);
+        expect(withProof.body.status).toBe('awaiting-verification');
+
+        const rows = await prisma.fileObject.count({ where: { category: 'CUSTOMER_PROOF' } });
+        expect(rows).toBeGreaterThan(0);
+      } finally {
+        await setPrepaidFixed(false);
+      }
+    });
+
+    it('rejects a non-allowed declared MIME (text/plain) with 415 and stores nothing', async () => {
+      await setupWorld();
+      const res = await http()
+        .post('/api/v1/customer/bookings')
+        .field(
+          'payload',
+          JSON.stringify({
+            ...CREATE_BODY,
+            selections: selection({ variationId, addOnIds: [addOnId] }),
+            startAt: '2026-11-28T09:00:00.000Z',
+            submissionKey: 'invoice-20261128-0002',
+          }),
+        )
+        .attach('proof', Buffer.from('this is not a payment proof'), { filename: 'receipt.txt', contentType: 'text/plain' })
+        .expect(415);
+      expect(res.body.error.code).toBe('FILE_TYPE_INVALID');
+    });
+
+    it('sniffs bytes authoritatively: a text file declared as image/png is rejected and the slot stays claimable', async () => {
+      await setupWorld();
+      const slot = '2026-11-28T15:00:00.000Z';
+      const bad = await http()
+        .post('/api/v1/customer/bookings')
+        .field(
+          'payload',
+          JSON.stringify({
+            ...CREATE_BODY,
+            selections: selection({ variationId }),
+            startAt: slot,
+            submissionKey: 'invoice-20261128-0003',
+          }),
+        )
+        .attach('proof', Buffer.from('say nothing, dot not do it'), { filename: 'receipt.png', contentType: 'image/png' })
+        .expect(415);
+      expect(bad.body.error.code).toBe('FILE_TYPE_INVALID');
+
+      // The same slot must remain available: a valid proof now succeeds.
+      const ok = await postBookingForm({
+        ...CREATE_BODY,
+        selections: selection({ variationId }),
+        startAt: slot,
+        submissionKey: 'invoice-20261128-0003',
+      }).expect(201);
+      expect(ok.body.status).toBe('awaiting-verification');
+    });
+
+    it('rejects a proof file larger than 5 MiB with 413 (FILE_TOO_LARGE)', async () => {
+      await setupWorld();
+      const big = Buffer.alloc(PROOF_MAX_BYTES + 1, 0x42);
+      const res = await http()
+        .post('/api/v1/customer/bookings')
+        .field(
+          'payload',
+          JSON.stringify({
+            ...CREATE_BODY,
+            selections: selection({ variationId }),
+            startAt: '2026-11-28T12:00:00.000Z',
+            submissionKey: 'invoice-20261128-0004',
+          }),
+        )
+        .attach('proof', big, { filename: 'huge.png', contentType: 'image/png' })
+        .expect(413);
+      expect(res.body.error.code).toBe('FILE_TOO_LARGE');
+    });
+
+    it('idempotent replays never orphan proof objects or duplicate file rows', async () => {
+      await setupWorld();
+      const payload = {
+        ...CREATE_BODY,
+        selections: selection({ variationId, addOnIds: [addOnId] }),
+        startAt: '2026-11-28T13:00:00.000Z',
+        submissionKey: 'invoice-20261128-0005',
+      };
+      const before = await prisma.fileObject.count({ where: { category: 'CUSTOMER_PROOF' } });
+      await postBookingForm(payload).expect(201);
+      await postBookingForm(payload).expect(201); // idempotent replay
+      const after = await prisma.fileObject.count({ where: { category: 'CUSTOMER_PROOF' } });
+      expect(after).toBe(before + 1);
+    });
   });
 });
 
