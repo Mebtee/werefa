@@ -1,4 +1,5 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Inject } from '@nestjs/common';
+import { MulterError } from 'multer';
 import type { Response } from 'express';
 import { Logger } from 'pino';
 import { getRequestContext } from '../context/request-context';
@@ -64,6 +65,26 @@ export class AllExceptionsFilter implements ExceptionFilter {
     if (exception instanceof AppError) {
       status = ERROR_CODE_TO_HTTP[exception.code];
       payload = exception.toEnvelope().error;
+    } else if (exception instanceof MulterError) {
+      // Multipart upload failures (Prompt 50). Multer surfaces oversized files
+      // as LIMIT_FILE_SIZE; every other multer error is a malformed request.
+      if (exception.code === 'LIMIT_FILE_SIZE') {
+        status = HttpStatus.PAYLOAD_TOO_LARGE;
+        payload = {
+          code: ErrorCode.FILE_TOO_LARGE,
+          title: 'File too large',
+          detail: 'The payment proof file exceeds the allowed size.',
+          fields: null,
+        };
+      } else {
+        status = HttpStatus.BAD_REQUEST;
+        payload = {
+          code: ErrorCode.VALIDATION_ERROR,
+          title: 'Invalid request',
+          detail: 'The uploaded file could not be read.',
+          fields: {},
+        };
+      }
     } else if (exception instanceof HttpException) {
       const mapped = mapHttpExceptionPayload(exception);
       status = mapped.code === ErrorCode.INTERNAL_ERROR ? HttpStatus.INTERNAL_SERVER_ERROR : mapped.status;
