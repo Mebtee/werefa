@@ -1,6 +1,7 @@
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsDateString,
   IsIn,
@@ -16,6 +17,7 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional, PickType } from '@nestjs/swagger';
 
@@ -30,23 +32,15 @@ export function limitValue(limit?: number): number {
 // ---------------------------------------------------------------------------
 // CUSTOMER
 // ---------------------------------------------------------------------------
-export class CreateBookingPayload {
-  @ApiProperty({ example: 'my-salon' })
-  @IsString()
-  @MinLength(2)
-  @MaxLength(64)
-  businessSlug: string;
-
+export class CreateBookingSelectionBody {
   @ApiProperty({ example: 'uuid' })
   @IsUUID('4')
   serviceId: string;
 
-  @ApiPropertyOptional({ example: ['uuid'] })
+  @ApiPropertyOptional({ example: 'uuid' })
   @IsOptional()
-  @IsArray()
-  @ArrayMaxSize(5)
-  @IsUUID('4', { each: true })
-  variationIds?: string[];
+  @IsUUID('4')
+  variationId?: string;
 
   @ApiPropertyOptional({ example: ['uuid'] })
   @IsOptional()
@@ -54,6 +48,26 @@ export class CreateBookingPayload {
   @ArrayMaxSize(5)
   @IsUUID('4', { each: true })
   addOnIds?: string[];
+}
+
+export class CreateBookingPayload {
+  @ApiProperty({ example: 'my-salon' })
+  @IsString()
+  @MinLength(2)
+  @MaxLength(64)
+  businessSlug: string;
+
+  @ApiProperty({
+    type: [CreateBookingSelectionBody],
+    description:
+      'One or more service selections composing the appointment (REQ-070/074). The backend resolves, prices and snapshots every selection itself.',
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(8)
+  @ValidateNested({ each: true })
+  @Type(() => CreateBookingSelectionBody)
+  selections: CreateBookingSelectionBody[];
 
   @ApiProperty({ example: 'Awit' })
   @IsString()
@@ -521,6 +535,39 @@ export class AvailabilityQuery {
   addOnIds?: string[];
 }
 
+export class AvailabilitySelectionBody {
+  @ApiProperty({ example: 'uuid' })
+  @IsUUID('4')
+  serviceId: string;
+
+  @ApiPropertyOptional({ example: 'uuid' })
+  @IsOptional()
+  @IsUUID('4')
+  variationId?: string;
+
+  @ApiPropertyOptional({ example: ['uuid'] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(5)
+  @IsUUID('4', { each: true })
+  addOnIds?: string[];
+}
+
+export class AvailabilityQueryBody {
+  @ApiProperty({ example: '2026-09-20' })
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'Date must be YYYY-MM-DD.' })
+  date: string;
+
+  @ApiProperty({ type: [AvailabilitySelectionBody] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(8)
+  @ValidateNested({ each: true })
+  @Type(() => AvailabilitySelectionBody)
+  selections: AvailabilitySelectionBody[];
+}
+
 export class SlugParamsDto {
   @ApiProperty({ example: 'my-salon' })
   @IsString()
@@ -553,6 +600,12 @@ export class BookingIdParamDto extends BusinessIdParamDto {
   @IsInt()
   @Min(1)
   bookingId: number;
+}
+
+export class ProofIdParamDto extends BookingIdParamDto {
+  @ApiProperty({ example: 'uuid' })
+  @IsUUID('4')
+  proofId: string;
 }
 
 export class ResubmissionResultDto extends PickType(ResubmissionVerifyPayload, ['businessSlug', 'phone'] as const) {}
