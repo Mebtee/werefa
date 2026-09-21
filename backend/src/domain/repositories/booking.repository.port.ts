@@ -44,6 +44,8 @@ export interface CreateBookingArgs {
   paymentMethod: PaymentMethod;
   prepaidMinor: bigint;
   submissionKey: string;
+  /** FileObject of the submitted payment proof (created in the same tx). */
+  proofFileObjectId?: string | null;
   components: BookingComponentInput[];
 }
 
@@ -67,9 +69,16 @@ export interface BookingStatusHistoryRow {
   occurredAt: Date;
 }
 
+export interface ProofTimelineEntry {
+  id: string;
+  submittedAt: Date;
+  replacedByProofId: string | null;
+  file: { mimeType: string; sizeBytes: bigint; storageKey: string } | null;
+}
+
 export interface BookingWithHistory extends BookingWithRelations {
   statusHistory: BookingStatusHistoryRow[];
-  proofsSubmittedAt: Date[];
+  proofTimeline: ProofTimelineEntry[];
 }
 
 export interface OverlapCheck {
