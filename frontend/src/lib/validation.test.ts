@@ -33,11 +33,14 @@ describe('validateCustomerDetails', () => {
 })
 
 describe('validateProofFile', () => {
-  it('accepts an image proof', () => {
+  it('accepts an image proof and carries the raw file for upload', () => {
     const file = new File(['x'], 'proof.png', { type: 'image/png' })
     const result = validateProofFile(file)
     expect(result.ok).toBe(true)
-    if (result.ok) expect(result.proof.fileName).toBe('proof.png')
+    if (result.ok) {
+      expect(result.proof.fileName).toBe('proof.png')
+      expect(result.proof.file).toBe(file)
+    }
   })
 
   it('rejects a disallowed MIME type', () => {
