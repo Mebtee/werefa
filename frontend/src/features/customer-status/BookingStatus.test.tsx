@@ -19,26 +19,25 @@ import {
   cancelBooking,
   markNoShowBooking,
   completeDueBookings,
-  setCustomerTelegramConnected,
-  emitMockReminder,
-  rescheduleBooking,
 } from '@/mock/store'
-import { PRIMARY_BUSINESS_SLUG, MOCK_BUSINESS_PAGES } from '@/mock/data'
-import { installBusinessApiStub } from '@/test/businessApi'
+import { PRIMARY_BUSINESS_SLUG } from '@/mock/data'
 import {
-  BOOKING_STATE_LABEL,
-  PAYMENT_STATE_LABEL,
-} from '@/features/customer-status/lib/labels'
+  installBusinessApiStub,
+  RESUBMISSION_TEST_CODE,
+  type BusinessApiStub,
+} from '@/test/businessApi'
+import { BOOKING_STATE_LABEL } from '@/features/customer-status/lib/labels'
+import { formatDateTime } from '@/lib/time'
 
 const user = userEvent.setup()
 const STATUS_URL = `/p/${PRIMARY_BUSINESS_SLUG}/status`
-const SERVICE_NAME = 'Women’s Haircut & Styling'
 
 let restoreFetch: (() => void) | undefined
+let stub: BusinessApiStub | undefined
 
 beforeEach(() => {
   resetStore()
-  const stub = installBusinessApiStub()
+  stub = installBusinessApiStub()
   restoreFetch = stub.restore
 })
 
@@ -69,22 +68,17 @@ function createBookingFor(
   name: string,
   slot?: { date: string; time: string },
 ): { ok: true; booking: Booking } | { ok: false; error: 'unavailable' } {
-  const page = MOCK_BUSINESS_PAGES.find(
-    (candidate) => candidate.business.slug === PRIMARY_BUSINESS_SLUG,
-  )
-  if (!page) throw new Error('demo business page missing')
-  const service = page.services[0]
   return createBookingEntry({
     businessSlug: PRIMARY_BUSINESS_SLUG,
     lineItems: [
       {
-        name: service.name,
-        unitPrice: service.basePriceMinor,
-        durationMinutes: service.baseDurationMinutes,
+        name: 'Women’s Haircut & Styling',
+        unitPrice: 18000,
+        durationMinutes: 60,
       },
     ],
-    total: service.basePriceMinor,
-    totalDurationMinutes: service.baseDurationMinutes,
+    total: 18000,
+    totalDurationMinutes: 60,
     deposit: 18000,
     customer: { name, phone, note: '' },
     date: slot?.date ?? '2030-03-04',
@@ -92,6 +86,13 @@ function createBookingFor(
     paymentMethod: 'bank-transfer',
     proof: { fileName: 'receipt.png', sizeBytes: 100, mimeType: 'image/png' },
   })
+}
+
+/** The honest card title for a store booking: "Booking on <date/time>". */
+function bookingTitle(date: string, time: string): string {
+  const [y, mo, d] = date.split('-').map(Number)
+  const [hh, mm] = time.split(':').map(Number)
+  return `Booking on ${formatDateTime(new Date(y, mo - 1, d, hh, mm).toISOString())}`
 }
 
 function bookingCards(): HTMLElement[] {
@@ -171,13 +172,25 @@ describe('BookingStatusPage', () => {
     expect(screen.queryByText(/No booking found/)).not.toBeInTheDocument()
   })
 
-  it('shows each customer booking for a matching phone', async () => {
+  it('shows each customer booking as an honest date/time + status card', async () => {
+    // The seeded demo store already has one payment-pending booking for this
+    // phone; its date/time is dynamic, so assert by status + card shape.
     await renderStatusPage()
     await lookup('+251911223344')
-    expect(await screen.findByText('Booking for Martha Bekele')).toBeInTheDocument()
-    expect(screen.getByText('Women’s Haircut & Styling')).toBeInTheDocument()
-    expect(screen.getAllByText('Payment Pending').length).toBeGreaterThanOrEqual(2)
-    expect(bookingCards()).toHaveLength(1)
+    await waitFor(() => {
+      expect(bookingCards()).toHaveLength(1)
+    })
+    const title = bookingCards()[0].querySelector('.status-card__title')?.textContent
+    expect(title).toMatch(/^Booking on /)
+    // The honest card shows date/time + status — never the customer name,
+    // services, payment internals or Telegram state (REQ-109 projection).
+    expect(screen.queryByText('Martha Bekele')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Women’s Haircut/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Payment Accepted|Payment Rejected/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Telegram/i)).not.toBeInTheDocument()
+    expect(
+      screen.getAllByText(BOOKING_STATE_LABEL['payment-pending']).length,
+    ).toBeGreaterThan(0)
   })
 
   it('shows a clear message when no booking matches', async () => {
@@ -189,13 +202,16 @@ describe('BookingStatusPage', () => {
   })
 
   it('is scoped to the business in the URL', async () => {
+    createBookingFor('+251911223344', 'Martha Bekele', {
+      date: '2030-03-04',
+      time: '09:00',
+    })
     renderAt('/p/marathon-auto-care/status')
     await screen.findByRole('heading', { name: 'Check my booking', level: 1 })
     await lookup('+251911223344')
     expect(
       await screen.findByText('No booking found for this phone number.'),
     ).toBeInTheDocument()
-    expect(screen.queryByText('Booking for Martha Bekele')).not.toBeInTheDocument()
   })
 
   it('lists every booking for a phone, newest first', async () => {
@@ -209,37 +225,42 @@ describe('BookingStatusPage', () => {
     })
     await renderStatusPage()
     await lookup('+251912000001')
-    await screen.findByText('Booking for Hiwot')
+    await screen.findByText(bookingTitle('2030-03-04', '10:30'))
     const titles = bookingCards().map((card) =>
       card.querySelector('.status-card__title')?.textContent,
     )
     expect(titles).toEqual([
-      'Booking for Aster',
-      'Booking for Hiwot',
+      bookingTitle('2030-03-04', '10:30'),
+      bookingTitle('2030-03-04', '09:00'),
     ])
   })
 
   it('never reveals internal booking ids or the status history', async () => {
+    createBookingFor('+251911223344', 'Martha Bekele', {
+      date: '2030-03-04',
+      time: '09:00',
+    })
     await renderStatusPage()
     await lookup('+251911223344')
-    await screen.findByText('Booking for Martha Bekele')
+    await screen.findByText(bookingTitle('2030-03-04', '09:00'))
     expect(screen.queryByText(/bk-demo-pending/)).not.toBeInTheDocument()
     expect(screen.queryByText(/status history/i)).not.toBeInTheDocument()
   })
 
   describe('booking state display', () => {
-    it('shows Confirmed with Payment Accepted after the owner accepts', async () => {
+    it('shows Confirmed after the owner accepts the proof', async () => {
       const created = createBookingFor('+251912000002', 'Abebe')
       if (!created.ok) throw new Error('slot unavailable')
       expect(acceptBooking(PRIMARY_BUSINESS_SLUG, created.booking.id).ok).toBe(true)
       await renderStatusPage()
       await lookup('+251912000002')
-      await screen.findByText('Booking for Abebe')
-      expect(screen.getByText(BOOKING_STATE_LABEL.confirmed)).toBeInTheDocument()
-      expect(screen.getByText('Payment Accepted')).toBeInTheDocument()
+      expect(
+        await screen.findByText(BOOKING_STATE_LABEL.confirmed),
+      ).toBeInTheDocument()
+      expect(bookingCards()).toHaveLength(1)
     })
 
-    it('shows rejected with the owner-provided reason', async () => {
+    it('shows Rejected after the owner rejects the proof', async () => {
       const created = createBookingFor('+251912000003', 'Kidist')
       if (!created.ok) throw new Error('slot unavailable')
       const rejected = rejectBooking(
@@ -250,13 +271,8 @@ describe('BookingStatusPage', () => {
       expect(rejected.ok).toBe(true)
       await renderStatusPage()
       await lookup('+251912000003')
-      await screen.findByText('Booking for Kidist')
       expect(
-        screen.getByText(BOOKING_STATE_LABEL.rejected),
-      ).toBeInTheDocument()
-      expect(screen.getByText('Payment Rejected')).toBeInTheDocument()
-      expect(
-        screen.getByText(/Proof did not match the amount/),
+        await screen.findByText(BOOKING_STATE_LABEL.rejected),
       ).toBeInTheDocument()
     })
 
@@ -267,8 +283,9 @@ describe('BookingStatusPage', () => {
       expect(cancelBooking(PRIMARY_BUSINESS_SLUG, created.booking.id).ok).toBe(true)
       await renderStatusPage()
       await lookup('+251912000012')
-      await screen.findByText('Booking for Bethe')
-      expect(screen.getByText(BOOKING_STATE_LABEL.cancelled)).toBeInTheDocument()
+      expect(
+        await screen.findByText(BOOKING_STATE_LABEL.cancelled),
+      ).toBeInTheDocument()
     })
 
     it('shows No Show after the owner marks it', async () => {
@@ -278,8 +295,9 @@ describe('BookingStatusPage', () => {
       expect(markNoShowBooking(PRIMARY_BUSINESS_SLUG, created.booking.id).ok).toBe(true)
       await renderStatusPage()
       await lookup('+251912000013')
-      await screen.findByText('Booking for Hanna')
-      expect(screen.getByText(BOOKING_STATE_LABEL['no-show'])).toBeInTheDocument()
+      expect(
+        await screen.findByText(BOOKING_STATE_LABEL['no-show']),
+      ).toBeInTheDocument()
     })
 
     it('shows Completed for a finished appointment', async () => {
@@ -296,27 +314,27 @@ describe('BookingStatusPage', () => {
       ).toBe(true)
       await renderStatusPage()
       await lookup('+251912000004')
-      await screen.findByText('Booking for Liya')
-      expect(screen.getByText(BOOKING_STATE_LABEL.completed)).toBeInTheDocument()
-      expect(screen.getByText('Payment Accepted')).toBeInTheDocument()
+      expect(
+        await screen.findByText(BOOKING_STATE_LABEL.completed),
+      ).toBeInTheDocument()
     })
   })
 
-  it('reflects payment review outcomes for each payment state', async () => {
+  it('reflects every lifecycle state on its own card', async () => {
     const cases = [
-      { phone: '+251912000005', name: 'Ruth', slot: '09:00', want: PAYMENT_STATE_LABEL.pending },
-      { phone: '+251912000006', name: 'Sara', slot: '10:00', want: PAYMENT_STATE_LABEL.accepted },
-      { phone: '+251912000007', name: 'Tigist', slot: '11:00', want: PAYMENT_STATE_LABEL.rejected },
+      { phone: '+251912000005', name: 'Ruth', time: '09:00', want: BOOKING_STATE_LABEL['payment-pending'] },
+      { phone: '+251912000006', name: 'Sara', time: '10:00', want: BOOKING_STATE_LABEL.confirmed },
+      { phone: '+251912000007', name: 'Tigist', time: '11:00', want: BOOKING_STATE_LABEL.rejected },
     ]
     for (const entry of cases) {
       const created = createBookingFor(entry.phone, entry.name, {
         date: '2030-03-04',
-        time: entry.slot as '09:00',
+        time: entry.time as '09:00',
       })
       if (!created.ok) throw new Error('slot unavailable')
-      if (entry.want === PAYMENT_STATE_LABEL.accepted) {
+      if (entry.want === BOOKING_STATE_LABEL.confirmed) {
         expect(acceptBooking(PRIMARY_BUSINESS_SLUG, created.booking.id).ok).toBe(true)
-      } else if (entry.want === PAYMENT_STATE_LABEL.rejected) {
+      } else if (entry.want === BOOKING_STATE_LABEL.rejected) {
         expect(
           rejectBooking(PRIMARY_BUSINESS_SLUG, created.booking.id, 'Proof unclear').ok,
         ).toBe(true)
@@ -325,10 +343,7 @@ describe('BookingStatusPage', () => {
     await renderStatusPage()
     for (const entry of cases) {
       await lookup(entry.phone)
-      await screen.findByText(`Booking for ${entry.name}`)
-      expect(
-        screen.getAllByText(`Payment ${entry.want}`).length,
-      ).toBeGreaterThanOrEqual(1)
+      expect(await screen.findByText(entry.want)).toBeInTheDocument()
     }
   })
 
@@ -337,22 +352,21 @@ describe('BookingStatusPage', () => {
     if (!created.ok) throw new Error('slot unavailable')
     await renderStatusPage()
     await lookup('+251912000008')
-    await screen.findByText('Booking for Mulu')
-    expect(screen.getAllByText('Payment Pending').length).toBeGreaterThanOrEqual(2)
+    expect(
+      await screen.findByText(BOOKING_STATE_LABEL['payment-pending']),
+    ).toBeInTheDocument()
 
     expect(acceptBooking(PRIMARY_BUSINESS_SLUG, created.booking.id).ok).toBe(true)
 
     await lookup('+251912000008')
-    expect(await screen.findByText('Booking for Mulu')).toBeInTheDocument()
-    expect(screen.getByText('Confirmed')).toBeInTheDocument()
-    expect(screen.getByText('Payment Accepted')).toBeInTheDocument()
+    expect(await screen.findByText(BOOKING_STATE_LABEL.confirmed)).toBeInTheDocument()
   })
 
   it('does not show a booking to a different business owner slice', async () => {
     createBookingFor('+251912000009', 'Weyni')
     await renderStatusPage()
     await lookup('+251912000009')
-    await screen.findByText('Booking for Weyni')
+    await screen.findByText(bookingTitle('2030-03-04', '09:00'))
     expect(screen.queryByText(/bk-/)).not.toBeInTheDocument()
     expect(screen.queryByText(/Demo Owner/)).not.toBeInTheDocument()
   })
@@ -365,15 +379,20 @@ describe('BookingStatusPage', () => {
     expect(
       await screen.findByText('No booking found for this phone number.'),
     ).toBeInTheDocument()
-    expect(screen.queryByText('Booking for Zara')).not.toBeInTheDocument()
   })
 
   it('shows the no-match message but keeps the form usable for retries', async () => {
+    createBookingFor('+251911223344', 'Martha Bekele', {
+      date: '2030-03-04',
+      time: '09:00',
+    })
     await renderStatusPage()
     await lookup('+251999999999')
     await screen.findByText('No booking found for this phone number.')
     await lookup('+251911223344')
-    expect(await screen.findByText('Booking for Martha Bekele')).toBeInTheDocument()
+    expect(
+      await screen.findByText(bookingTitle('2030-03-04', '09:00')),
+    ).toBeInTheDocument()
   })
 
   it('reports how many bookings were found for the customer', async () => {
@@ -387,171 +406,25 @@ describe('BookingStatusPage', () => {
     })
     await renderStatusPage()
     await lookup('+251912000011')
-    await screen.findByText('Booking for Bontu')
+    await screen.findByText(bookingTitle('2030-03-04', '10:30'))
     expect(screen.getByText('2 bookings found.')).toBeInTheDocument()
   })
-})
 
-describe('customer Telegram notifications panel (mock demo)', () => {
-  const PHONE = '+251914000001'
-
-  /** Wait for the panel to render after a lookup, then scope queries to it. */
-  async function openTelegramPanel() {
-    const panel = await screen.findByRole('region', {
-      name: 'Telegram notifications',
-    })
-    return panel
-  }
-
-  it('shows Not connected with the (demo) connect toggle, scoped to never claiming real authorization', async () => {
-    createBookingFor(PHONE, 'Lidya')
-    await renderStatusPage()
-    await lookup(PHONE)
-    const panel = await openTelegramPanel()
-    expect(within(panel).getByText('Not connected')).toBeInTheDocument()
-    expect(
-      within(panel).getByRole('button', { name: 'Connect Telegram (demo)' }),
-    ).toBeInTheDocument()
-    expect(
-      within(panel).getByText(/no real Telegram authorization/),
-    ).toBeInTheDocument()
-    // Never connected → no history list, no events.
-    expect(
-      within(panel).queryByRole('heading', { name: 'Notification history' }),
-    ).not.toBeInTheDocument()
-  })
-
-  it('does not fabricate events while disconnected, even after lifecycle changes', async () => {
-    const created = createBookingFor(PHONE, 'Lidya')
-    if (!created.ok) throw new Error('slot unavailable')
-    acceptBooking(PRIMARY_BUSINESS_SLUG, created.booking.id)
-    await renderStatusPage()
-    await lookup(PHONE)
-    const panel = await openTelegramPanel()
-    expect(within(panel).getByText('Not connected')).toBeInTheDocument()
-    expect(within(panel).queryByText(/Booking confirmed/)).not.toBeInTheDocument()
-  })
-
-  it('connecting via the demo toggle flips the panel to the connected experience', async () => {
-    createBookingFor(PHONE, 'Lidya')
-    await renderStatusPage()
-    await lookup(PHONE)
-    await openTelegramPanel()
-
-    await user.click(screen.getByRole('button', { name: 'Connect Telegram (demo)' }))
-    await waitFor(() =>
-      expect(screen.getByText('Connected')).toBeInTheDocument(),
-    )
-    expect(
-      screen.getByRole('button', { name: 'Disconnect Telegram (demo)' }),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole('heading', {
-        name: 'Notification history',
-        level: 3,
-      }),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByText(/No Telegram notifications yet/),
-    ).toBeInTheDocument()
-  })
-
-  it('shows a chronological notification history after connected lifecycle events', async () => {
-    setCustomerTelegramConnected(PRIMARY_BUSINESS_SLUG, PHONE, true)
-    const created = createBookingFor(PHONE, 'Lidya')
-    if (!created.ok) throw new Error('slot unavailable')
-    // Rejection is only valid from Payment Pending (REQ-062), so the events
-    // on one booking are proof-received then payment-rejected.
-    rejectBooking(
-      PRIMARY_BUSINESS_SLUG,
-      created.booking.id,
-      'Proof unclear — please resubmit.',
-    )
-
-    await renderStatusPage()
-    await lookup(PHONE)
-    const panel = await openTelegramPanel()
-
-    const items = within(panel).getAllByRole('listitem')
-    expect(items.map((item) => item.textContent)).toEqual([
-      expect.stringContaining('Payment proof received'),
-      expect.stringContaining('Payment rejected'),
-    ])
-    expect(
-      within(panel).getByText(
-        'Your payment proof has been received and is awaiting review.',
-      ),
-    ).toBeInTheDocument()
-    expect(
-      within(panel).getByText('Reason: Proof unclear — please resubmit.'),
-    ).toBeInTheDocument()
-  })
-
-  it('shows deterministic mock reminders (24h and 1h) for a connected confirmed booking', async () => {
-    setCustomerTelegramConnected(PRIMARY_BUSINESS_SLUG, PHONE, true)
-    const created = createBookingFor(PHONE, 'Lidya')
-    if (!created.ok) throw new Error('slot unavailable')
-    acceptBooking(PRIMARY_BUSINESS_SLUG, created.booking.id)
-    emitMockReminder(PRIMARY_BUSINESS_SLUG, created.booking.id, 'reminder-24h')
-    emitMockReminder(PRIMARY_BUSINESS_SLUG, created.booking.id, 'reminder-1h')
-
-    await renderStatusPage()
-    await lookup(PHONE)
-    const panel = await openTelegramPanel()
-
-    expect(
-      within(panel).getByText('Reminder: your appointment is tomorrow.'),
-    ).toBeInTheDocument()
-    expect(
-      within(panel).getByText('Reminder: your appointment is in 1 hour.'),
-    ).toBeInTheDocument()
-    expect(within(panel).getByText('Reminder — 24 hours')).toBeInTheDocument()
-    expect(within(panel).getByText('Reminder — 1 hour')).toBeInTheDocument()
-  })
-
-  it('shows the reschedule event with the new date/time for a connected confirmed booking', async () => {
-    setCustomerTelegramConnected(PRIMARY_BUSINESS_SLUG, PHONE, true)
-    const created = createBookingFor(PHONE, 'Lidya', {
+  it('querying is scoped to the real status endpoint (no mock seam)', async () => {
+    createBookingFor('+251911223344', 'Martha Bekele', {
       date: '2030-03-04',
       time: '09:00',
     })
-    if (!created.ok) throw new Error('slot unavailable')
-    acceptBooking(PRIMARY_BUSINESS_SLUG, created.booking.id)
-    expect(
-      rescheduleBooking(
-        PRIMARY_BUSINESS_SLUG,
-        created.booking.id,
-        '2030-03-05',
-        '10:00',
-      ).ok,
-    ).toBe(true)
-
     await renderStatusPage()
-    await lookup(PHONE)
-    const panel = await openTelegramPanel()
-
-    const rescheduledItem = within(panel)
-      .getAllByRole('listitem')
-      .at(-1)
-    expect(rescheduledItem?.textContent).toContain('Rescheduled')
-    expect(rescheduledItem?.textContent).toContain('Your booking has been rescheduled.')
-    expect(rescheduledItem?.textContent).toContain('New appointment:')
-  })
-
-  it('projected history never leaks internal ids, the business slug, or the phone', async () => {
-    setCustomerTelegramConnected(PRIMARY_BUSINESS_SLUG, PHONE, true)
-    const created = createBookingFor(PHONE, 'Lidya')
-    if (!created.ok) throw new Error('slot unavailable')
-    rejectBooking(PRIMARY_BUSINESS_SLUG, created.booking.id, 'Proof unclear')
-
-    await renderStatusPage()
-    await lookup(PHONE)
-    const panel = await openTelegramPanel()
-
-    expect(within(panel).queryByText(/bk-/)).not.toBeInTheDocument()
-    expect(within(panel).queryByText(/ntf-\d/)).not.toBeInTheDocument()
-    expect(within(panel).queryByText(/addis-beauty-lounge/)).not.toBeInTheDocument()
-    expect(within(panel).queryByText(PHONE)).not.toBeInTheDocument()
+    await lookup('+251911223344')
+    await screen.findByText(bookingTitle('2030-03-04', '09:00'))
+    const get = stub?.calls.find(
+      (call) => call.method === 'GET' && call.url.includes('/customer/status'),
+    )
+    expect(get).toBeTruthy()
+    const query = new URLSearchParams(get!.url.split('?')[1] ?? '')
+    expect(query.get('slug')).toBe(PRIMARY_BUSINESS_SLUG)
+    expect(query.get('phone')).toBe('+251911223344')
   })
 })
 
@@ -568,12 +441,10 @@ describe('book-then-lookup end to end', () => {
 
     await screen.findByRole('heading', { name: 'Check my booking', level: 1 })
     await lookup('+251913000001')
-    expect(await screen.findByText('Booking for Theo Alem')).toBeInTheDocument()
-    expect(screen.getByText(SERVICE_NAME)).toBeInTheDocument()
-    expect(screen.getAllByText('Payment Pending').length).toBeGreaterThanOrEqual(2)
     expect(
-      screen.getAllByText(BOOKING_STATE_LABEL['payment-pending']).length,
-    ).toBeGreaterThan(0)
+      await screen.findByText(BOOKING_STATE_LABEL['payment-pending']),
+    ).toBeInTheDocument()
+    expect(bookingCards()).toHaveLength(1)
 
     const created = listBookings(PRIMARY_BUSINESS_SLUG).find(
       (booking) => booking.customer.phone === '+251913000001',
@@ -582,13 +453,115 @@ describe('book-then-lookup end to end', () => {
 
     expect(acceptBooking(PRIMARY_BUSINESS_SLUG, created.id).ok).toBe(true)
     await lookup('+251913000001')
-    expect(await screen.findByText('Booking for Theo Alem')).toBeInTheDocument()
-    expect(screen.getByText(BOOKING_STATE_LABEL.confirmed)).toBeInTheDocument()
-    expect(screen.getByText('Payment Accepted')).toBeInTheDocument()
+    expect(await screen.findByText(BOOKING_STATE_LABEL.confirmed)).toBeInTheDocument()
 
     expect(completeDueBookings(PRIMARY_BUSINESS_SLUG, '2099-01-01T23:59').ok).toBe(true)
     await lookup('+251913000001')
-    expect(await screen.findByText('Booking for Theo Alem')).toBeInTheDocument()
-    expect(screen.getByText(BOOKING_STATE_LABEL.completed)).toBeInTheDocument()
+    expect(await screen.findByText(BOOKING_STATE_LABEL.completed)).toBeInTheDocument()
+  })
+})
+
+describe('rejected-booking resubmission (Prompt 50, REQ-230)', () => {
+  function rejectFor(phone: string, name: string): void {
+    const created = createBookingFor(phone, name, {
+      date: '2030-03-04',
+      time: '09:00',
+    })
+    if (!created.ok) throw new Error('slot unavailable')
+    expect(
+      rejectBooking(PRIMARY_BUSINESS_SLUG, created.booking.id, 'Proof unclear').ok,
+    ).toBe(true)
+  }
+
+  it('offers resubmission only for a rejected booking', async () => {
+    rejectFor('+251912050001', 'Reb')
+    await renderStatusPage()
+    await lookup('+251912050001')
+    await screen.findByText(BOOKING_STATE_LABEL.rejected)
+    expect(
+      screen.getByRole('button', { name: 'Resubmit payment proof' }),
+    ).toBeInTheDocument()
+  })
+
+  it('never offers resubmission for a non-rejected booking', async () => {
+    createBookingFor('+251912050002', 'Pay', { date: '2030-03-04', time: '09:00' })
+    await renderStatusPage()
+    await lookup('+251912050002')
+    await screen.findByText(BOOKING_STATE_LABEL['payment-pending'])
+    expect(
+      screen.queryByRole('button', { name: 'Resubmit payment proof' }),
+    ).not.toBeInTheDocument()
+  })
+
+  async function startResubmission(): Promise<void> {
+    await user.click(screen.getByRole('button', { name: 'Resubmit payment proof' }))
+    await user.click(screen.getByRole('button', { name: 'Request a one-time code' }))
+    await screen.findByLabelText('One-time code')
+  }
+
+  async function submitResubmission(code: string, fileName = 'new-receipt.png'): Promise<void> {
+    await user.type(screen.getByLabelText('One-time code'), code)
+    const input = document.querySelector<HTMLInputElement>('#resubmit-proof-upload')
+    if (!input) throw new Error('resubmit proof input missing')
+    await user.upload(input, new File(['new'], fileName, { type: 'image/png' }))
+    await user.click(screen.getByRole('button', { name: 'Verify & resubmit' }))
+  }
+
+  it('verifies the code + proof and returns the booking to Payment Pending', async () => {
+    rejectFor('+251912050003', 'Nati')
+    await renderStatusPage()
+    await lookup('+251912050003')
+    await screen.findByText(BOOKING_STATE_LABEL.rejected)
+
+    await startResubmission()
+    await submitResubmission(RESUBMISSION_TEST_CODE)
+
+    expect(await screen.findByText(/awaiting review again/i)).toBeInTheDocument()
+    await waitFor(() => {
+      expect(
+        screen.getAllByText(BOOKING_STATE_LABEL['payment-pending']).length,
+      ).toBeGreaterThan(0)
+    })
+  })
+
+  it('sends the code request (JSON) and the proof (multipart) over the real routes', async () => {
+    rejectFor('+251912050004', 'Sena')
+    await renderStatusPage()
+    await lookup('+251912050004')
+    await screen.findByText(BOOKING_STATE_LABEL.rejected)
+
+    await startResubmission()
+    await submitResubmission(RESUBMISSION_TEST_CODE)
+    await screen.findByText(/awaiting review again/i)
+
+    const requestCall = stub?.calls.find((call) =>
+      call.url.includes('/customer/resubmission/request-code'),
+    )
+    expect(requestCall?.body).toMatchObject({
+      businessSlug: PRIMARY_BUSINESS_SLUG,
+      phone: '+251912050004',
+    })
+    const verifyCall = stub?.calls.find((call) =>
+      call.url.includes('/customer/resubmission/verify'),
+    )
+    expect(verifyCall?.body).toMatchObject({ code: RESUBMISSION_TEST_CODE })
+    expect(verifyCall?.proof).toEqual({
+      fileName: 'new-receipt.png',
+      sizeBytes: 3,
+      mimeType: 'image/png',
+    })
+  })
+
+  it('reports an invalid code without changing the booking', async () => {
+    rejectFor('+251912050005', 'Tade')
+    await renderStatusPage()
+    await lookup('+251912050005')
+    await screen.findByText(BOOKING_STATE_LABEL.rejected)
+
+    await startResubmission()
+    await submitResubmission('000000')
+
+    expect(await screen.findByText(/verification code is invalid/i)).toBeInTheDocument()
+    expect(screen.getByText(BOOKING_STATE_LABEL.rejected)).toBeInTheDocument()
   })
 })
