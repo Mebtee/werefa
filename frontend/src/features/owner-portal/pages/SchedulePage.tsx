@@ -25,7 +25,7 @@ import {
   toSchedulePayload,
   versionHistoryEntry,
 } from '@/api/schedule.mapper'
-import { mirrorScheduleIntoBusiness } from '@/mock/scheduleMirror'
+
 import type { OwnerScheduleView } from '@/api/types'
 import type { ScheduleVersionHistoryEntry } from '@/types/models'
 import { WEEKDAY_NAMES } from '@/features/owner-portal/lib/labels'
@@ -320,15 +320,6 @@ export function SchedulePage() {
           // The schedule itself is saved; the interval mismatch surfaces on next load.
         }
       }
-      mirrorScheduleIntoBusiness(
-        business.slug,
-        {
-          ...payload,
-          blockedPeriods: payload.blockedPeriods ?? [],
-          specialDates: payload.specialDates ?? [],
-        },
-        { intervalMinutes: interval, bookingWindowDays: business.bookingWindowDays ?? 14 },
-      )
       setCurrentSchedule(result.version)
       const savedForm = { ...form, reason: '' }
       setSaved(savedForm)
