@@ -61,7 +61,7 @@ export const ACCEPTED_PROOF_MIME = [
   'application/pdf',
 ]
 
-/** Mock proof-of-payment constraints (bounded size + MIME allow-list). */
+/** Payment-proof constraints: bounded size + declared MIME allow-list. */
 export const MAX_PROOF_BYTES = 5 * 1024 * 1024
 
 export interface ProofValidationError {
@@ -105,6 +105,7 @@ export function validateProofFile(file: File | undefined | null):
       fileName: file.name,
       sizeBytes: file.size,
       mimeType: file.type,
+      file,
     },
   }
 }
