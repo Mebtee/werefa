@@ -34,3 +34,13 @@ export const SECURITY_EVENT_AUTH_REPOSITORY = Symbol('SECURITY_EVENT_AUTH_REPOSI
 
 /** DI token for the AuditEventAuthRepository implementation. */
 export const AUDIT_EVENT_AUTH_REPOSITORY = Symbol('AUDIT_EVENT_AUTH_REPOSITORY');
+
+// ---------------------------------------------------------------------------
+// Proof file integration (Prompt 50)
+// ---------------------------------------------------------------------------
+
+/** DI token for the FileRepository implementation. */
+export const FILE_REPOSITORY = Symbol('FILE_REPOSITORY');
+
+/** DI token for the PaymentProofStorage implementation. */
+export const PROOF_STORAGE = Symbol('PROOF_STORAGE');
