@@ -26,7 +26,7 @@ interface BookingWizardProps {
 }
 
 export function BookingWizard({ business, services }: BookingWizardProps) {
-  const flow = useBookingFlow(business, services)
+  const flow = useBookingFlow(business)
   const lineItems = buildLineItems(services, flow.selections)
   const total = totalPrice(lineItems)
   const duration = totalDurationMinutes(lineItems)
@@ -75,6 +75,7 @@ export function BookingWizard({ business, services }: BookingWizardProps) {
         <DateTimeStep
           business={business}
           durationMinutes={duration}
+          selections={flow.selections}
           date={flow.date}
           time={flow.time}
           selectDate={flow.selectDate}
@@ -104,7 +105,7 @@ export function BookingWizard({ business, services }: BookingWizardProps) {
           time={flow.time}
           customer={flow.customer}
           goTo={jumpTo}
-          submit={() => void flow.submit(duration)}
+          submit={() => void flow.submit()}
           submitting={flow.submitting}
         />
       )
@@ -119,7 +120,7 @@ export function BookingWizard({ business, services }: BookingWizardProps) {
           proof={flow.proof}
           setProof={flow.setProofFile}
           onBack={() => jumpTo(STEP_REVIEW)}
-          onSubmit={() => void flow.submit(duration)}
+          onSubmit={() => void flow.submit()}
           submitting={flow.submitting}
         />
       )
@@ -137,7 +138,7 @@ export function BookingWizard({ business, services }: BookingWizardProps) {
           }}
           onChangeServices={() => jumpTo(STEP_SERVICES)}
           onRestart={flow.reset}
-          onRetry={() => void flow.submit(duration)}
+          onRetry={() => void flow.submit()}
         />
       )
   }
