@@ -128,6 +128,73 @@ describe('computeAvailableSlotStarts (pure availability)', () => {
     expect(bounded.map((s) => s.startMinute)).toEqual(all.filter((s) => s.startMinute >= 660 && s.startMinute < 720).map((s) => s.startMinute));
   });
 
+  it('multiple working periods on the same day each produce slots; gaps never bridge (R083/R089)', () => {
+    const slots = computeAvailableSlotStarts(
+      {
+        ...base,
+        durationMinutes: 30,
+        workingPeriods: [
+          { weekday: 1, startMinutes: 540, endMinutes: 600 },
+          { weekday: 1, startMinutes: 660, endMinutes: 720 },
+        ],
+      },
+      [],
+    );
+    expect(slots.map((s) => s.startMinute)).toEqual([540, 570, 660, 690]);
+  });
+
+  it('a blocked period is subtracted from a CUSTOM special-date window (R084/086 precedence)', () => {
+    const slots = computeAvailableSlotStarts(
+      {
+        ...base,
+        durationMinutes: 30,
+        workingPeriods: [{ weekday: 1, startMinutes: 540, endMinutes: 840 }],
+        specialDates: [{ dateKey: '2026-09-14', kind: 'CUSTOM', startMinutes: 540, endMinutes: 720 }],
+        blockedPeriods: [{ dayOfWeek: 1, startMinutes: 600, endMinutes: 660 }],
+      },
+      [],
+    );
+    expect(slots.map((s) => s.startMinute)).toEqual([540, 570, 660, 690]);
+  });
+
+  it('an exactly fitting slot is kept (start + duration == window end, interior by R089)', () => {
+    const slots = computeAvailableSlotStarts(
+      {
+        ...base,
+        durationMinutes: 60,
+        workingPeriods: [{ weekday: 1, startMinutes: 540, endMinutes: 600 }],
+      },
+      [],
+    );
+    expect(slots.map((s) => s.startMinute)).toEqual([540]);
+    expect(slots[0].endMinute).toBe(600);
+  });
+
+  it('a duration longer than the window yields no slots', () => {
+    const slots = computeAvailableSlotStarts(
+      {
+        ...base,
+        durationMinutes: 90,
+        workingPeriods: [{ weekday: 1, startMinutes: 540, endMinutes: 600 }],
+      },
+      [],
+    );
+    expect(slots).toEqual([]);
+  });
+
+  it('a window fully covered by an occupied span yields no slots (R090)', () => {
+    const full = computeAvailableSlotStarts(
+      { ...base, workingPeriods: [{ weekday: 1, startMinutes: 540, endMinutes: 840 }] },
+      [{ startMinute: 540, endMinute: 840 }],
+    );
+    expect(full).toEqual([]);
+    const allDay = computeAvailableSlotStarts(
+      { ...base, workingPeriods: [{ weekday: 1, startMinutes: 540, endMinutes: 840 }] },
+      [{ startMinute: 0, endMinute: 1440 }],
+    );
+    expect(allDay).toEqual([]);
+  });
+
   it('invalid durations/intervals yield no slots', () => {
     expect(computeAvailableSlotStarts({ ...base, durationMinutes: 0 }, [])).toEqual([]);
     expect(computeAvailableSlotStarts({ ...base, intervalMinutes: 0 }, [])).toEqual([]);
