@@ -75,10 +75,16 @@ export async function apiRequest<T>(
     'X-Request-Id': requestId,
   }
 
-  let body: string | undefined
+  let body: BodyInit | undefined
   if (options.body !== undefined) {
-    headers['Content-Type'] = 'application/json'
-    body = JSON.stringify(options.body)
+    // Multipart uploads (payment proof) set their own boundary-bearing
+    // Content-Type, so it must NOT be forced to application/json here.
+    if (typeof FormData !== 'undefined' && options.body instanceof FormData) {
+      body = options.body
+    } else {
+      headers['Content-Type'] = 'application/json'
+      body = JSON.stringify(options.body)
+    }
   }
 
   const doFetch = options.fetchImpl ?? globalThis.fetch
