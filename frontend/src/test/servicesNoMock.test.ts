@@ -49,9 +49,11 @@ describe('service catalog is wired to the real API (no mock on the production pa
     expect(s).not.toMatch(/getBusinessPage.*services/)
   })
 
-  it('useBookingFlow builds selections from the real catalog services passed in', async () => {
+  it('useBookingFlow submits selections to the real customer booking API, never the mock', async () => {
     const s = await source('src/features/public-booking/state/useBookingFlow.ts')
-    expect(s).toMatch(/useBookingFlow\(business[^)]*services/)
+    expect(s).toMatch(/from ['"]@\/api\/booking['"]/)
+    expect(s).toMatch(/createCustomerBooking\(/)
+    expect(s).not.toMatch(/@\/mock\//)
     expect(s).not.toMatch(/getServices\(/)
   })
 
