@@ -9,11 +9,16 @@ import { BusinessRepository } from '../repositories/business.repository.port';
 import { BookingRepository, BookingWithRelations } from '../repositories/booking.repository.port';
 import { PaymentRepository } from '../repositories/payment.repository.port';
 import { ResubmissionVerificationRepository } from '../repositories/resubmission.repository.port';
+import { FileRepository } from '../repositories/file.repository.port';
+import { PaymentProofStorage } from '../repositories/proof-storage.port';
+import { isAllowedProofMimeType, PROOF_MAX_BYTES, sniffProof } from '../lib/proof-file';
 import {
   BUSINESS_REPOSITORY,
   BOOKING_REPOSITORY,
   PAYMENT_REPOSITORY,
   RESUBMISSION_REPOSITORY,
+  FILE_REPOSITORY,
+  PROOF_STORAGE,
 } from '../repositories/tokens';
 import { withBusinessAdvisoryLock } from '../transactions/business-advisory-lock';
 
@@ -41,6 +46,8 @@ export class ResubmissionService {
     @Inject(BOOKING_REPOSITORY) private readonly bookingRepo: BookingRepository,
     @Inject(PAYMENT_REPOSITORY) private readonly paymentRepo: PaymentRepository,
     @Inject(RESUBMISSION_REPOSITORY) private readonly verificationRepo: ResubmissionVerificationRepository,
+    @Inject(FILE_REPOSITORY) private readonly fileRepo: FileRepository,
+    @Inject(PROOF_STORAGE) private readonly proofStorage: PaymentProofStorage,
     @Inject(GLOBAL_CLOCK) private readonly clock: GlobalClock,
     @Inject(DOMAIN_EVENT_BUS) private readonly eventBus: DomainEventBus,
   ) {}
@@ -96,7 +103,13 @@ export class ResubmissionService {
   }
 
   async resubmitForCustomer(
-    input: { businessSlug: string; phone: string; code: string; submissionKey: string },
+    input: {
+      businessSlug: string;
+      phone: string;
+      code: string;
+      submissionKey: string;
+      proof?: { bytes: Buffer; mimeType: string } | null;
+    },
   ): Promise<{ booking: BookingWithRelations; events: BookingNotificationEvent[] }> {
     const biz = await this.businessRepo.findBySlug(input.businessSlug);
     if (!biz) throw domainErrors.businessNotFound();
@@ -106,6 +119,7 @@ export class ResubmissionService {
       bookingId: (await this.latestRejected(biz.id, input.phone)).id,
       code: input.code,
       submissionKey: input.submissionKey,
+      proof: input.proof,
     });
   }
 
@@ -117,7 +131,14 @@ export class ResubmissionService {
   }
 
   async resubmit(
-    input: { businessSlug: string; phone: string; bookingId: number; code: string; submissionKey: string },
+    input: {
+      businessSlug: string;
+      phone: string;
+      bookingId: number;
+      code: string;
+      submissionKey: string;
+      proof?: { bytes: Buffer; mimeType: string } | null;
+    },
   ): Promise<{ booking: BookingWithRelations; events: BookingNotificationEvent[] }> {
     const biz = await this.businessRepo.findBySlug(input.businessSlug);
     if (!biz) throw domainErrors.businessNotFound();
@@ -164,40 +185,74 @@ export class ResubmissionService {
     const latestProof = payment.proofs[0];
     if (!latestProof) throw domainErrors.invalidPaymentState('No payment proof record.');
 
-    await withBusinessAdvisoryLock(this.prisma, biz.id, async (tx) => {
-      // T10: REJECTED → PAYMENT_PENDING / PENDING
-      const bookingOk = await this.bookingRepo.transitionStatus(tx, {
-        bookingId: booking.id,
+    // A resubmission must carry a fresh, valid proof (REQ-230). It is validated
+    // and staged BEFORE the transition transaction so a bad file never takes
+    // the booking out of REJECTED.
+    if (!input.proof) throw domainErrors.proofRequired('A new payment proof is required for resubmission.');
+    if (input.proof.bytes.length > PROOF_MAX_BYTES) throw domainErrors.proofFileTooLarge();
+    const sniffed = sniffProof(input.proof.bytes);
+    if (!sniffed || !isAllowedProofMimeType(sniffed.mimeType)) throw domainErrors.proofFileTypeInvalid();
+    const staged = {
+      ...(await this.proofStorage.store({
         businessId: biz.id,
-        from: 'REJECTED',
-        to: 'PAYMENT_PENDING',
-        actorType: 'CUSTOMER',
-        reason: 'Proof resubmitted',
-      });
-      if (!bookingOk) throw domainErrors.invalidLifecycleTransition('Booking is no longer rejected.');
+        bytes: input.proof.bytes,
+        mimeType: sniffed.mimeType,
+        extension: sniffed.extension,
+      })),
+      mimeType: sniffed.mimeType,
+    };
 
-      const paymentOk = await this.paymentRepo.transitionStatus(tx, {
-        paymentId: payment.id,
-        businessId: biz.id,
-        from: 'REJECTED',
-        to: 'PENDING',
-        actorType: 'CUSTOMER',
-        reason: 'Proof resubmitted',
-      });
-      if (!paymentOk) throw domainErrors.invalidPaymentState('Payment is no longer rejected.');
+    let consumed = false;
+    try {
+      await withBusinessAdvisoryLock(this.prisma, biz.id, async (tx) => {
+        // T10: REJECTED → PAYMENT_PENDING / PENDING
+        const bookingOk = await this.bookingRepo.transitionStatus(tx, {
+          bookingId: booking.id,
+          businessId: biz.id,
+          from: 'REJECTED',
+          to: 'PAYMENT_PENDING',
+          actorType: 'CUSTOMER',
+          reason: 'Proof resubmitted',
+        });
+        if (!bookingOk) throw domainErrors.invalidLifecycleTransition('Booking is no longer rejected.');
 
-      const newProof = await this.paymentRepo.addProof(tx, {
-        paymentId: payment.id,
-        businessId: biz.id,
-        submissionKey: input.submissionKey,
+        const paymentOk = await this.paymentRepo.transitionStatus(tx, {
+          paymentId: payment.id,
+          businessId: biz.id,
+          from: 'REJECTED',
+          to: 'PENDING',
+          actorType: 'CUSTOMER',
+          reason: 'Proof resubmitted',
+        });
+        if (!paymentOk) throw domainErrors.invalidPaymentState('Payment is no longer rejected.');
+
+        const fileObject = await this.fileRepo.create(tx, {
+          businessId: biz.id,
+          category: 'CUSTOMER_PROOF',
+          storageKey: staged.storageKey,
+          mimeType: staged.mimeType,
+          sizeBytes: BigInt(staged.sizeBytes),
+          checksumSha256: staged.checksumSha256,
+        });
+        const newProof = await this.paymentRepo.addProof(tx, {
+          paymentId: payment.id,
+          businessId: biz.id,
+          submissionKey: input.submissionKey,
+          fileObjectId: fileObject.id,
+        });
+        await this.paymentRepo.markProofReplaced(tx, {
+          proofId: latestProof.id,
+          replacedByProofId: newProof.id,
+        });
+        await this.verificationRepo.markUsed(tx, { id: verification.id, businessId: biz.id });
+        await this.securityEvent(biz.id, 'RESUBMISSION_PROOF', 'OK');
+        consumed = true;
       });
-      await this.paymentRepo.markProofReplaced(tx, {
-        proofId: latestProof.id,
-        replacedByProofId: newProof.id,
-      });
-      await this.verificationRepo.markUsed(tx, { id: verification.id, businessId: biz.id });
-      await this.securityEvent(biz.id, 'RESUBMISSION_PROOF', 'OK');
-    });
+    } finally {
+      if (!consumed) {
+        await this.proofStorage.delete(staged.storageKey).catch(() => undefined);
+      }
+    }
 
     // Read-back + publish only AFTER the transaction commits (the outer client
     // cannot see uncommitted rows).
