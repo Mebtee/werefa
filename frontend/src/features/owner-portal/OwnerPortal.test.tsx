@@ -7,8 +7,9 @@ import {
 } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { OWNER_PRINCIPAL, renderAppAt } from '@/test/auth'
-import { resetStore, getBusiness, setPause, listScheduleHistory, getOpenConflicts, createBookingEntry, acceptBooking, getBooking } from '@/mock/store'
+import { resetStore, getBusiness, setPause, listScheduleHistory, getOpenConflicts, createBookingEntry, acceptBooking, getBooking, cancelBooking, cancelPaymentPendingBooking } from '@/mock/store'
 import { computeAvailableTimes } from '@/mock/availability'
+import { isoWeekdayOf, nextDateStrings } from '@/lib/time'
 import { PRIMARY_BUSINESS_SLUG } from '@/mock/data'
 
 const user = userEvent.setup()
@@ -16,6 +17,22 @@ const user = userEvent.setup()
 // A known future Monday (used by the availability fixture).
 const MONDAY = '2030-03-04'
 const TUESDAY = '2030-03-05'
+
+/** The `.hours-day` section whose label is `name` (the weekday name also appears as a select option). */
+function hoursDay(name: string): HTMLElement {
+  const section = screen
+    .getAllByText(name)
+    .map((candidate) => candidate.closest('.hours-day'))
+    .find((container): container is HTMLElement => Boolean(container))
+  if (!section) throw new Error(`No hours-day section for ${name}`)
+  return section
+}
+
+/** Every Monday inside the availability booking window (weekly blocks expand to dated entries there). */
+function mondayDatesInWindow(): string[] {
+  const windowDays = getBusiness(PRIMARY_BUSINESS_SLUG)!.bookingWindowDays ?? 14
+  return nextDateStrings(windowDays).filter((date) => isoWeekdayOf(date) === 1)
+}
 
 function seedConfirmedBooking(
   date: string,
@@ -46,6 +63,12 @@ function renderAt(path: string) {
 
 beforeEach(() => {
   resetStore()
+  // The demo seed books the first two usable weekdays near "today", which
+  // drifts with the run date and would add non-deterministic schedule
+  // conflicts when a schedule test closes that weekday. Remove them up front
+  // so the schedule assertions stay hermetic.
+  cancelBooking(PRIMARY_BUSINESS_SLUG, 'bk-demo-confirmed')
+  cancelPaymentPendingBooking(PRIMARY_BUSINESS_SLUG, 'bk-demo-pending')
 })
 
 describe('owner dashboard', () => {
@@ -286,14 +309,10 @@ describe('schedule', () => {
     renderAt('/owner/schedule')
 
     await screen.findByRole('heading', { name: 'Working hours' })
-    const monday = screen
-      .getByText('Monday')
-      .closest('.hours-day') as HTMLElement
+    const monday = hoursDay('Monday')
     await user.click(within(monday).getByRole('button', { name: 'Open' }))
 
-    const mondayClosed = screen
-      .getByText('Monday')
-      .closest('.hours-day') as HTMLElement
+    const mondayClosed = hoursDay('Monday')
     expect(
       within(mondayClosed).getByRole('button', { name: 'Closed' }),
     ).toBeInTheDocument()
@@ -334,12 +353,10 @@ describe('schedule', () => {
     renderAt('/owner/schedule')
 
     await screen.findByRole('heading', { name: 'Working hours' })
-    const monday = screen
-      .getByText('Monday')
-      .closest('.hours-day') as HTMLElement
+    const monday = hoursDay('Monday')
     const startInput = within(monday).getByLabelText('Monday period 1 start')
-    fireEvent.change(startInput, { target: { value: '14:00' } })
     const endInput = within(monday).getByLabelText('Monday period 1 end')
+    fireEvent.change(startInput, { target: { value: '14:00' } })
     fireEvent.change(endInput, { target: { value: '09:00' } })
 
     await user.click(screen.getByRole('button', { name: 'Save schedule' }))
@@ -596,16 +613,23 @@ describe('schedule editor: blocked days & periods (REQ-084/085)', () => {
     renderAt('/owner/schedule')
     await screen.findByRole('heading', { name: 'Working hours' })
 
-    fireEvent.change(screen.getByLabelText('Blocked day date'), {
-      target: { value: MONDAY },
-    })
-    await user.click(screen.getByRole('button', { name: 'Add blocked day' }))
-    expect(screen.getByText('Closed all day — 2030-03-04')).toBeInTheDocument()
+    // REQ-085 in the current UI: a one-off closed date blocks the whole day.
+    await user.click(screen.getByRole('button', { name: 'Add special date' }))
+    const newDateInput = screen
+      .getAllByLabelText(/^Special date \d+$/)
+      .find((input) => (input as HTMLInputElement).value === '') as HTMLInputElement
+    fireEvent.change(newDateInput, { target: { value: MONDAY } })
+    const specialRow = screen
+      .getAllByLabelText(/^Special date \d+$/)
+      .find((input) => (input as HTMLInputElement).value === MONDAY)!
+      .closest('.special-day') as HTMLElement
+    await user.click(within(specialRow).getByRole('radio', { name: 'Closed' }))
 
     await user.click(screen.getByRole('button', { name: 'Save schedule' }))
     expect(await screen.findByText(/Schedule saved\./)).toBeInTheDocument()
 
     const business = getBusiness(PRIMARY_BUSINESS_SLUG)!
+    expect(business.specialDays[MONDAY]).toEqual({ kind: 'closed' })
     expect(business.blockedDays).toContain(MONDAY)
     expect(computeAvailableTimes(business, MONDAY, 30)).toEqual([])
   })
@@ -614,8 +638,8 @@ describe('schedule editor: blocked days & periods (REQ-084/085)', () => {
     renderAt('/owner/schedule')
     await screen.findByRole('heading', { name: 'Working hours' })
 
-    fireEvent.change(screen.getByLabelText('Blocked period date'), {
-      target: { value: MONDAY },
+    fireEvent.change(screen.getByLabelText('Blocked period weekday'), {
+      target: { value: '1' },
     })
     fireEvent.change(screen.getByLabelText('Blocked period start'), {
       target: { value: '09:30' },
@@ -625,33 +649,47 @@ describe('schedule editor: blocked days & periods (REQ-084/085)', () => {
     })
     await user.click(screen.getByRole('button', { name: 'Add blocked period' }))
     expect(
-      screen.getByText(/Blocked 09:30.*10:30 on 2030-03-04/),
+      screen.getByText('Blocked 09:30–10:30 on Monday'),
     ).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Save schedule' }))
     expect(await screen.findByText(/Schedule saved\./)).toBeInTheDocument()
-    expect(
-      getBusiness(PRIMARY_BUSINESS_SLUG)!.blockedPeriods,
-    ).toContainEqual({ date: MONDAY, start: '09:30', end: '10:30' })
+
+    // The weekly block is expanded into a dated blocked period on every Monday
+    // in the availability booking window (REQ-084).
+    const mondays = mondayDatesInWindow()
+    expect(mondays.length).toBeGreaterThan(0)
+    const business = getBusiness(PRIMARY_BUSINESS_SLUG)!
+    for (const date of mondays) {
+      expect(business.blockedPeriods).toContainEqual({
+        date,
+        start: '09:30',
+        end: '10:30',
+      })
+    }
 
     await user.click(
-      screen.getByRole('button', { name: `Remove blocked period on ${MONDAY}` }),
+      screen.getByRole('button', {
+        name: 'Remove blocked period on Monday',
+      }),
     )
-    expect(screen.queryByText(/Blocked 09:30.*10:30 on 2030-03-04/)).not.toBeInTheDocument()
+    expect(screen.queryByText('Blocked 09:30–10:30 on Monday')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Save schedule' }))
     expect(await screen.findByText(/Schedule saved\./)).toBeInTheDocument()
-    expect(
-      getBusiness(PRIMARY_BUSINESS_SLUG)!.blockedPeriods,
-    ).not.toContainEqual({ date: MONDAY, start: '09:30', end: '10:30' })
+    for (const date of mondays) {
+      expect(getBusiness(PRIMARY_BUSINESS_SLUG)!.blockedPeriods).not.toContainEqual({
+        date,
+        start: '09:30',
+        end: '10:30',
+      })
+    }
   })
 
   it('rejects overlapping weekly periods with a focused error', async () => {
     renderAt('/owner/schedule')
     await screen.findByRole('heading', { name: 'Working hours' })
 
-    const monday = screen
-      .getByText('Monday')
-      .closest('.hours-day') as HTMLElement
+    const monday = hoursDay('Monday')
     await user.click(within(monday).getByRole('button', { name: 'Add period' }))
     // Default 09:00–13:00 plus added 09:00–12:00 overlap.
     await user.click(screen.getByRole('button', { name: 'Save schedule' }))
@@ -662,56 +700,32 @@ describe('schedule editor: blocked days & periods (REQ-084/085)', () => {
   })
 })
 
-describe('schedule editor: multi-period special days (REQ-083/PHC-002)', () => {
-  it('saves a special day with two periods the public page offers', async () => {
+describe('schedule editor: multi-period days (REQ-083)', () => {
+  it('offers the public page a weekday with two working periods', async () => {
     renderAt('/owner/schedule')
     await screen.findByRole('heading', { name: 'Working hours' })
 
-    await user.click(screen.getByRole('button', { name: 'Add special date' }))
-    const empty = screen
-      .getAllByLabelText(/^Special date \d+$/)
-      .find((input) => (input as HTMLInputElement).value === '') as HTMLInputElement
-    const index = ((empty.getAttribute('aria-label') as string).match(/\d+/) as string[])[0]
-    fireEvent.change(empty, { target: { value: MONDAY } })
-
-    const specialRow = screen
-      .getByLabelText(`Special date ${index}`)
-      .closest('.special-day') as HTMLElement
-    await user.click(within(specialRow).getByRole('button', { name: 'Add period' }))
-    await user.click(within(specialRow).getByRole('button', { name: 'Add period' }))
-
-    fireEvent.change(
-      screen.getByLabelText(`Special date ${index} period 1 start`),
-      { target: { value: '08:00' } },
-    )
-    fireEvent.change(
-      screen.getByLabelText(`Special date ${index} period 1 end`),
-      { target: { value: '10:00' } },
-    )
-    fireEvent.change(
-      screen.getByLabelText(`Special date ${index} period 2 start`),
-      { target: { value: '15:00' } },
-    )
-    fireEvent.change(
-      screen.getByLabelText(`Special date ${index} period 2 end`),
-      { target: { value: '16:00' } },
-    )
+    const monday = hoursDay('Monday')
+    await user.click(within(monday).getByRole('button', { name: 'Add period' }))
+    // The added row defaults to 09:00–12:00 (overlapping); set an evening
+    // window that is open on Monday.
+    fireEvent.change(within(monday).getByLabelText('Monday period 3 start'), {
+      target: { value: '18:00' },
+    })
+    fireEvent.change(within(monday).getByLabelText('Monday period 3 end'), {
+      target: { value: '20:00' },
+    })
 
     await user.click(screen.getByRole('button', { name: 'Save schedule' }))
     expect(await screen.findByText(/Schedule saved\./)).toBeInTheDocument()
 
     const business = getBusiness(PRIMARY_BUSINESS_SLUG)!
-    expect(business.specialDays[MONDAY]).toEqual({
-      kind: 'hours',
-      periods: [
-        { start: '08:00', end: '10:00' },
-        { start: '15:00', end: '16:00' },
-      ],
-    })
+    expect(business.workingHours[1]).toHaveLength(3)
+    // Both periods are offered publicly: daytime and the added evening window.
     const times = computeAvailableTimes(business, MONDAY, 60)
-    expect(times).toContain('08:00')
-    expect(times).toContain('15:00')
-    expect(times).not.toContain('10:00')
+    expect(times).toContain('09:00')
+    expect(times).toContain('18:00')
+    expect(times).toContain('19:00')
   })
 })
 
@@ -741,9 +755,7 @@ describe('schedule history + reason (REQ-162/163/164/166/169)', () => {
     await user.click(screen.getByRole('button', { name: 'Save schedule' }))
     expect(await screen.findByText(/Schedule saved\./)).toBeInTheDocument()
 
-    const monday = screen
-      .getByText('Monday')
-      .closest('.hours-day') as HTMLElement
+    const monday = hoursDay('Monday')
     fireEvent.change(within(monday).getByLabelText('Monday period 2 end'), {
       target: { value: '17:00' },
     })
@@ -800,8 +812,10 @@ describe('saving while paused (REQ-147/150)', () => {
 
     const history = listScheduleHistory(PRIMARY_BUSINESS_SLUG)
     expect(history[0].status).toBe('pending')
-    expect(history[0].snapshot.bookingIntervalMinutes).toBe(45)
+    // The schedule version does not carry the booking interval — that lives on
+    // business settings and is saved through its own settings PATCH (REQ-086).
     expect(getOpenConflicts(PRIMARY_BUSINESS_SLUG)).toEqual([])
+    expect(getBusiness(PRIMARY_BUSINESS_SLUG)!.bookingIntervalMinutes).toBe(45)
 
     setPause(PRIMARY_BUSINESS_SLUG, null)
     const after = listScheduleHistory(PRIMARY_BUSINESS_SLUG)
@@ -819,9 +833,7 @@ describe('schedule conflicts (REQ-091/092/093/099/159/160)', () => {
     renderAt('/owner/schedule')
     await screen.findByRole('heading', { name: 'Working hours' })
 
-    const monday = screen
-      .getByText('Monday')
-      .closest('.hours-day') as HTMLElement
+    const monday = hoursDay('Monday')
     await user.click(within(monday).getByRole('button', { name: 'Open' }))
     await user.click(screen.getByRole('button', { name: 'Save schedule' }))
     expect(await screen.findByText(/Schedule saved\./)).toBeInTheDocument()
@@ -841,9 +853,7 @@ describe('schedule conflicts (REQ-091/092/093/099/159/160)', () => {
     seedConfirmedBooking(MONDAY, '10:00')
     const { router } = renderAt('/owner/schedule')
     await screen.findByRole('heading', { name: 'Working hours' })
-    const monday = screen
-      .getByText('Monday')
-      .closest('.hours-day') as HTMLElement
+    const monday = hoursDay('Monday')
     await user.click(within(monday).getByRole('button', { name: 'Open' }))
     await user.click(screen.getByRole('button', { name: 'Save schedule' }))
     expect(await screen.findByText(/Schedule saved\./)).toBeInTheDocument()
@@ -871,9 +881,7 @@ describe('schedule conflicts (REQ-091/092/093/099/159/160)', () => {
     const { id } = seedConfirmedBooking(MONDAY, '10:00')
     const { router } = renderAt('/owner/schedule')
     await screen.findByRole('heading', { name: 'Working hours' })
-    const monday = screen
-      .getByText('Monday')
-      .closest('.hours-day') as HTMLElement
+    const monday = hoursDay('Monday')
     await user.click(within(monday).getByRole('button', { name: 'Open' }))
     await user.click(screen.getByRole('button', { name: 'Save schedule' }))
     expect(await screen.findByText(/Schedule saved\./)).toBeInTheDocument()
@@ -909,9 +917,7 @@ describe('schedule conflicts (REQ-091/092/093/099/159/160)', () => {
     const { id: bookingId } = seedConfirmedBooking(MONDAY, '10:00')
     const { router } = renderAt('/owner/schedule')
     await screen.findByRole('heading', { name: 'Working hours' })
-    const monday = screen
-      .getByText('Monday')
-      .closest('.hours-day') as HTMLElement
+    const monday = hoursDay('Monday')
     await user.click(within(monday).getByRole('button', { name: 'Open' }))
     await user.click(screen.getByRole('button', { name: 'Save schedule' }))
     expect(await screen.findByText(/Schedule saved\./)).toBeInTheDocument()
@@ -945,9 +951,7 @@ describe('schedule conflicts (REQ-091/092/093/099/159/160)', () => {
     const { id } = seedConfirmedBooking(MONDAY, '10:00')
     renderAt('/owner/schedule')
     await screen.findByRole('heading', { name: 'Working hours' })
-    const monday = screen
-      .getByText('Monday')
-      .closest('.hours-day') as HTMLElement
+    const monday = hoursDay('Monday')
     await user.click(within(monday).getByRole('button', { name: 'Open' }))
     await user.click(screen.getByRole('button', { name: 'Save schedule' }))
     expect(await screen.findByText(/Schedule saved\./)).toBeInTheDocument()
@@ -968,9 +972,7 @@ describe('schedule conflicts (REQ-091/092/093/099/159/160)', () => {
 
     // Closing a different (demo-free) day afterwards does not re-flag the kept
     // Monday booking.
-    const saturday = screen
-      .getByText('Saturday')
-      .closest('.hours-day') as HTMLElement
+    const saturday = hoursDay('Saturday')
     await user.click(within(saturday).getByRole('button', { name: 'Open' }))
     await user.click(screen.getByRole('button', { name: 'Save schedule' }))
     expect(await screen.findByText(/Schedule saved\./)).toBeInTheDocument()
