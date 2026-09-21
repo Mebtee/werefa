@@ -1,11 +1,14 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import type { CSSProperties } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import type {
   BusinessPage,
-  CustomerBookingStatus,
-  CustomerTelegramNotificationView,
+  CustomerBookingStatusEntry,
 } from '@/types/models'
+import { getPublicBusiness, isNotFoundError } from '@/api/business'
+import { getCustomerBookingStatus } from '@/api/booking'
+import { statusEntriesFromView } from '@/api/booking.mapper'
+import { hybridizePublicBusiness } from '@/api/business.mapper'
 import { mockApi } from '@/mock/api'
 import { PRIMARY_BUSINESS_SLUG } from '@/mock/data'
 import { isValidPhone } from '@/lib/validation'
@@ -14,44 +17,57 @@ import { Button } from '@/components/ui/Button'
 import { Field } from '@/components/ui/Field'
 import { Spinner } from '@/components/ui/Spinner'
 import { BookingStatusCard } from '@/features/customer-status/BookingStatusCard'
-import { TelegramNotificationsSection } from '@/features/customer-status/TelegramNotificationsSection'
+import { ResubmissionPanel } from '@/features/customer-status/ResubmissionPanel'
 
 type LoadState =
   | { status: 'loading' }
   | { status: 'ready'; page: BusinessPage }
   | { status: 'notfound' }
+  | { status: 'error' }
 
 type LookupState =
   | { phase: 'idle' }
   | { phase: 'loading' }
-  | { phase: 'results'; bookings: readonly CustomerBookingStatus[] }
-
-/** Chronological order of customer-safe Telegram notification events. */
-function chronological(
-  notices: readonly CustomerTelegramNotificationView[],
-): CustomerTelegramNotificationView[] {
-  return [...notices].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0))
-}
+  | { phase: 'results'; bookings: readonly CustomerBookingStatusEntry[] }
+  | { phase: 'error' }
 
 export function BookingStatusPage() {
   const { slug } = useParams<{ slug: string }>()
   const [load, setLoad] = useState<LoadState>({ status: 'loading' })
   const [phone, setPhone] = useState('')
-  const [searchedPhone, setSearchedPhone] = useState('')
   const [phoneError, setPhoneError] = useState<string | null>(null)
   const [lookup, setLookup] = useState<LookupState>({ phase: 'idle' })
+  const [resubmitting, setResubmitting] = useState(false)
+  const [resubmitNotice, setResubmitNotice] = useState<string | null>(null)
   const resultsRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     let cancelled = false
     setLoad({ status: 'loading' })
     setLookup({ phase: 'idle' })
+    setResubmitting(false)
+    setResubmitNotice(null)
     setPhone('')
     setPhoneError(null)
-    mockApi.getBusinessPage(slug ?? '').then((page) => {
-      if (cancelled) return
-      setLoad(page ? { status: 'ready', page } : { status: 'notfound' })
-    })
+    void (async () => {
+      try {
+        const [view, mockPage] = await Promise.all([
+          getPublicBusiness(slug ?? ''),
+          mockApi.getBusinessPage(slug ?? ''),
+        ])
+        if (cancelled) return
+        setLoad({
+          status: 'ready',
+          page: {
+            business: hybridizePublicBusiness(view, mockPage?.business),
+            services: mockPage?.services ?? [],
+          },
+        })
+      } catch (error) {
+        if (cancelled) return
+        setLoad(isNotFoundError(error) ? { status: 'notfound' } : { status: 'error' })
+      }
+    })()
     return () => {
       cancelled = true
     }
@@ -74,6 +90,19 @@ export function BookingStatusPage() {
     }
   }, [lookup])
 
+  const performLookup = useCallback(
+    async (value: string) => {
+      setLookup({ phase: 'loading' })
+      try {
+        const view = await getCustomerBookingStatus(slug ?? '', value)
+        setLookup({ phase: 'results', bookings: statusEntriesFromView(view) })
+      } catch {
+        setLookup({ phase: 'error' })
+      }
+    },
+    [slug],
+  )
+
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault()
     const trimmed = phone.trim()
@@ -82,17 +111,9 @@ export function BookingStatusPage() {
       return
     }
     setPhoneError(null)
-    setSearchedPhone(trimmed)
-    setLookup({ phase: 'loading' })
-    const results = await mockApi.lookupBookingsByPhone(slug ?? '', trimmed)
-    setLookup({ phase: 'results', bookings: results })
-  }
-
-  const handleTelegramToggle = async (target: boolean) => {
-    if (!searchedPhone) return
-    await mockApi.setCustomerTelegramConnected(slug ?? '', searchedPhone, target)
-    const results = await mockApi.lookupBookingsByPhone(slug ?? '', searchedPhone)
-    setLookup({ phase: 'results', bookings: results })
+    setResubmitting(false)
+    setResubmitNotice(null)
+    await performLookup(trimmed)
   }
 
   return (
@@ -126,6 +147,14 @@ export function BookingStatusPage() {
                 Go to the demo business
               </Link>
             </div>
+          </div>
+        )}
+
+        {load.status === 'error' && (
+          <div className="container" style={{ paddingBlock: 'var(--space-8)' }}>
+            <Alert tone="danger" title="Could not load this page">
+              We could not load this business page right now. Please try again.
+            </Alert>
           </div>
         )}
 
@@ -189,6 +218,14 @@ export function BookingStatusPage() {
               </div>
             )}
 
+            {lookup.phase === 'error' && (
+              <div style={{ paddingBlock: 'var(--space-5)' }}>
+                <Alert tone="danger" title="Could not check your booking">
+                  We could not look up your booking right now. Please try again.
+                </Alert>
+              </div>
+            )}
+
             {lookup.phase === 'results' && lookup.bookings.length === 0 && (
               <div style={{ paddingBlock: 'var(--space-5)' }}>
                 <Alert tone="info" title="No booking found">
@@ -207,21 +244,42 @@ export function BookingStatusPage() {
                 <div className="sr-only" aria-live="polite">
                   {lookup.bookings.length} booking{lookup.bookings.length === 1 ? '' : 's'} found.
                 </div>
-                {lookup.bookings.map((booking) => (
+
+                {resubmitNotice && (
+                  <div style={{ marginBottom: 'var(--space-4)' }}>
+                    <Alert tone="success" title="Proof resubmitted">
+                      {resubmitNotice}
+                    </Alert>
+                  </div>
+                )}
+
+                {lookup.bookings.map((entry, index) => (
                   <BookingStatusCard
-                    key={`${booking.date}:${booking.time}`}
-                    booking={booking}
+                    key={`${entry.startAt}:${index}`}
+                    booking={entry}
+                    onResubmit={() => {
+                      setResubmitNotice(null)
+                      setResubmitting(true)
+                    }}
                   />
                 ))}
-                <TelegramNotificationsSection
-                  connected={lookup.bookings[0].telegramConnected}
-                  notifications={chronological(
-                    lookup.bookings.flatMap(
-                      (booking) => booking.telegramNotifications,
-                    ),
-                  )}
-                  onToggle={(target) => handleTelegramToggle(target)}
-                />
+
+                {resubmitting && (
+                  <div style={{ marginTop: 'var(--space-4)' }}>
+                    <ResubmissionPanel
+                      businessSlug={slug ?? ''}
+                      phone={phone.trim()}
+                      onDone={() => {
+                        setResubmitting(false)
+                        setResubmitNotice(
+                          'Your new payment proof was received. This booking is awaiting review again.',
+                        )
+                        void performLookup(phone.trim())
+                      }}
+                      onClose={() => setResubmitting(false)}
+                    />
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -230,8 +288,8 @@ export function BookingStatusPage() {
 
       <footer className="page-footer">
         <div className="container">
-          Werefa — public preview build. Everything you see uses in-memory mock
-          data; no bookings are stored.
+          Werefa — preview build. The business profile is real, and bookings are
+          stored and reported by the real backing service.
         </div>
       </footer>
     </div>
