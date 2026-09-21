@@ -19,6 +19,7 @@ import {
   createBookingEntry,
   acceptBooking,
   cancelBooking,
+  cancelPaymentPendingBooking,
   rescheduleBooking,
   keepBooking,
   getOpenConflicts,
@@ -88,6 +89,13 @@ function closeTuesday(): ScheduleSnapshot {
 
 beforeEach(() => {
   resetStore()
+  // The demo seed places two near-today bookings (REQ-203/204) so the owner
+  // queue has realistic rows. Their weekdays drift with "today", which would
+  // turn closing a matching weekday into a non-deterministic extra conflict
+  // (and the tests below use fixed 2030 dates). Remove them up front so the
+  // suite is hermetic regardless of the date the test runs on.
+  cancelBooking(SLUG, 'bk-demo-confirmed')
+  cancelPaymentPendingBooking(SLUG, 'bk-demo-pending')
 })
 
 describe('saveSchedule + versioning (REQ-162/163/164/166)', () => {
