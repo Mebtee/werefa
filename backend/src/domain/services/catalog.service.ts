@@ -187,36 +187,62 @@ export class CatalogService {
     businessId: string,
     input: { serviceId: string; variationIds?: string[]; addOnIds?: string[] },
   ): Promise<{ components: BookingComponentInput[]; totalPriceMinor: bigint; totalDurationMinutes: number }> {
-    const service = await this.prisma.service.findFirst({ where: { id: input.serviceId, businessId, isActive: true } });
-    if (!service) throw domainErrors.inactiveService({ serviceId: 'Service is not active.' });
+    return this.validateCombinations(businessId, [input]);
+  }
 
-    const components: BookingComponentInput[] = [
-      { serviceId: service.id, componentType: 'SERVICE', nameSnapshot: service.name, unitPriceMinor: service.basePriceMinor, durationMinutes: service.baseDurationMinutes },
-    ];
-    let total = service.basePriceMinor;
-    let duration = service.baseDurationMinutes;
+  /**
+   * Multi-selection validation (REQ-070): an appointment may span several
+   * services, each with its own variation/add-ons. All active services are read
+   * in one round trip and every selection is resolved against them. Duplicates
+   * *within* one selection are rejected (existing single-combination semantics);
+   * the same service chosen again in a *different* selection is allowed — the
+   * canon (REQ-070 · REQ-074) implies no prohibition and duration/price simply
+   * accumulate. Returns immutable component snapshots + appointment totals.
+   */
+  async validateCombinations(
+    businessId: string,
+    selections: { serviceId: string; variationIds?: string[]; addOnIds?: string[] }[],
+  ): Promise<{ components: BookingComponentInput[]; totalPriceMinor: bigint; totalDurationMinutes: number }> {
+    const services = await this.prisma.service.findMany({
+      where: { id: { in: selections.map((s) => s.serviceId) }, businessId, isActive: true },
+      include: { variations: { where: { isActive: true } }, addOns: { where: { isActive: true } } },
+    });
+    const byId = new Map(services.map((s) => [s.id, s]));
 
-    const variationIds = input.variationIds ?? [];
-    const addOnIds = input.addOnIds ?? [];
-    if (variationIds.length > 0) {
-      const vars = await this.prisma.serviceVariation.findMany({ where: { id: { in: variationIds }, serviceId: service.id, isActive: true } });
-      if (vars.length !== variationIds.length) throw domainErrors.inactiveService({ variationIds: 'One or more variations are not active.' });
-      for (const v of vars) {
-        components.push({ serviceId: null, componentType: 'VARIATION', nameSnapshot: v.name, unitPriceMinor: v.priceDeltaMinor, durationMinutes: v.durationDeltaMinutes });
-        total += v.priceDeltaMinor;
-        duration += v.durationDeltaMinutes;
+    const components: BookingComponentInput[] = [];
+    let total = 0n;
+    let duration = 0;
+
+    for (const sel of selections) {
+      const service = byId.get(sel.serviceId);
+      if (!service) throw domainErrors.inactiveService({ serviceId: 'Service is not active.' });
+
+      components.push({ serviceId: service.id, componentType: 'SERVICE', nameSnapshot: service.name, unitPriceMinor: service.basePriceMinor, durationMinutes: service.baseDurationMinutes });
+      total += service.basePriceMinor;
+      duration += service.baseDurationMinutes;
+
+      const variationIds = sel.variationIds ?? [];
+      const addOnIds = sel.addOnIds ?? [];
+      if (variationIds.length > 0) {
+        const vars = service.variations.filter((v) => variationIds.includes(v.id));
+        if (vars.length !== variationIds.length) throw domainErrors.inactiveService({ variationIds: 'One or more variations are not active.' });
+        for (const v of vars) {
+          components.push({ serviceId: null, componentType: 'VARIATION', nameSnapshot: v.name, unitPriceMinor: v.priceDeltaMinor, durationMinutes: v.durationDeltaMinutes });
+          total += v.priceDeltaMinor;
+          duration += v.durationDeltaMinutes;
+        }
       }
-    }
-    if (addOnIds.length > 0) {
-      const addons = await this.prisma.addOn.findMany({ where: { id: { in: addOnIds }, serviceId: service.id, isActive: true } });
-      if (addons.length !== addOnIds.length) throw domainErrors.inactiveService({ addOnIds: 'One or more add-ons are not active.' });
-      for (const a of addons) {
-        components.push({ serviceId: null, componentType: 'ADD_ON', nameSnapshot: a.name, unitPriceMinor: a.priceDeltaMinor, durationMinutes: a.durationDeltaMinutes });
-        total += a.priceDeltaMinor;
-        duration += a.durationDeltaMinutes;
+      if (addOnIds.length > 0) {
+        const addons = service.addOns.filter((a) => addOnIds.includes(a.id));
+        if (addons.length !== addOnIds.length) throw domainErrors.inactiveService({ addOnIds: 'One or more add-ons are not active.' });
+        for (const a of addons) {
+          components.push({ serviceId: null, componentType: 'ADD_ON', nameSnapshot: a.name, unitPriceMinor: a.priceDeltaMinor, durationMinutes: a.durationDeltaMinutes });
+          total += a.priceDeltaMinor;
+          duration += a.durationDeltaMinutes;
+        }
       }
+      if (duration <= 0) throw domainErrors.inactiveService({ duration: 'Selected combination has no duration.' });
     }
-    if (duration <= 0) throw domainErrors.inactiveService({ duration: 'Selected combination has no duration.' });
     return { components, totalPriceMinor: total, totalDurationMinutes: duration };
   }
 
