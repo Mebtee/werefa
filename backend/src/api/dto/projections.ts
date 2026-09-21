@@ -367,12 +367,31 @@ export class OwnerBookingHistoryView {
 }
 
 export class OwnerBookingProofView {
+  @ApiProperty({ example: 'uuid' }) proofId: string;
   @ApiProperty({ example: '2026-09-20T09:05:00.000Z' }) submittedAt: string;
+  @ApiProperty({ example: 'payment-proof-xxxx.png' }) fileName: string;
+  @ApiProperty({ example: 'image/png' }) mimeType: string;
+  @ApiProperty({ example: 5120 }) sizeBytes: number;
+  @ApiProperty({ example: false, description: 'True when a later resubmitted proof replaced this one.' }) replaced: boolean;
 }
 
 export class OwnerBookingDetailView extends OwnerBookingView {
   @ApiProperty({ type: [OwnerBookingHistoryView] }) history: OwnerBookingHistoryView[];
   @ApiProperty({ type: [OwnerBookingProofView] }) proofs: OwnerBookingProofView[];
+}
+
+const PROOF_EXTENSION: Record<string, string> = {
+  'image/bmp': 'bmp',
+  'image/gif': 'gif',
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'application/pdf': 'pdf',
+};
+
+export function proofFileName(id: string, mimeType: string): string {
+  const ext = PROOF_EXTENSION[mimeType] ?? 'bin';
+  return `payment-proof-${id.slice(0, 8)}.${ext}`;
 }
 
 export function ownerBookingDetailProjection(booking: BookingWithHistory): OwnerBookingDetailView {
@@ -386,7 +405,14 @@ export function ownerBookingDetailProjection(booking: BookingWithHistory): Owner
       actorUserId: h.actorUserId,
       reason: h.reason,
     })),
-    proofs: booking.proofsSubmittedAt.map((d) => ({ submittedAt: d.toISOString() })),
+    proofs: booking.proofTimeline.map((p) => ({
+      proofId: p.id,
+      submittedAt: p.submittedAt.toISOString(),
+      fileName: p.file ? proofFileName(p.id, p.file.mimeType) : `payment-proof-${p.id.slice(0, 8)}.bin`,
+      mimeType: p.file?.mimeType ?? '',
+      sizeBytes: p.file ? Number(p.file.sizeBytes) : 0,
+      replaced: p.replacedByProofId != null,
+    })),
   };
 }
 
