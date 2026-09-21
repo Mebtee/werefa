@@ -10,6 +10,8 @@ import { PrismaSessionRepository } from './repositories/prisma-session.repositor
 import { PrismaEmergencyRecoveryRepository } from './repositories/prisma-emergency-recovery.repository';
 import { PrismaSecurityEventAuthRepository } from './repositories/prisma-security-event-auth.repository';
 import { PrismaAuditEventAuthRepository } from './repositories/prisma-audit-event-auth.repository';
+import { PrismaFileRepository } from './repositories/prisma-file.repository';
+import { LocalProofStorage } from './repositories/local-proof-storage';
 import {
   BUSINESS_REPOSITORY,
   BOOKING_REPOSITORY,
@@ -22,6 +24,8 @@ import {
   EMERGENCY_RECOVERY_REPOSITORY,
   SECURITY_EVENT_AUTH_REPOSITORY,
   AUDIT_EVENT_AUTH_REPOSITORY,
+  FILE_REPOSITORY,
+  PROOF_STORAGE,
 } from './repositories/tokens';
 
 /**
@@ -43,6 +47,8 @@ import {
     { provide: EMERGENCY_RECOVERY_REPOSITORY, useClass: PrismaEmergencyRecoveryRepository },
     { provide: SECURITY_EVENT_AUTH_REPOSITORY, useClass: PrismaSecurityEventAuthRepository },
     { provide: AUDIT_EVENT_AUTH_REPOSITORY, useClass: PrismaAuditEventAuthRepository },
+    { provide: FILE_REPOSITORY, useClass: PrismaFileRepository },
+    { provide: PROOF_STORAGE, useClass: LocalProofStorage },
   ],
   exports: [
     BUSINESS_REPOSITORY,
@@ -56,6 +62,8 @@ import {
     EMERGENCY_RECOVERY_REPOSITORY,
     SECURITY_EVENT_AUTH_REPOSITORY,
     AUDIT_EVENT_AUTH_REPOSITORY,
+    FILE_REPOSITORY,
+    PROOF_STORAGE,
   ],
 })
 export class DomainModule {}
