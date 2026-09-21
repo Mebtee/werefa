@@ -1,4 +1,4 @@
-import { Controller, Get, HttpCode, Inject, NotFoundException, Param, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, NotFoundException, Param, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { BusinessService } from '../../domain/services/business.service';
 import { CatalogService } from '../../domain/services/catalog.service';
@@ -13,7 +13,7 @@ import {
   publicScheduleProjection,
   publicServicesProjection,
 } from '../dto/projections';
-import { AvailabilityQuery, SlugParamsDto } from '../dto/payloads';
+import { AvailabilityQuery, AvailabilityQueryBody, SlugParamsDto } from '../dto/payloads';
 
 /**
  * Public, unauthenticated business page contract (spec §13, §25.3; Prompt 42 §6).
@@ -70,18 +70,49 @@ export class PublicController {
   })
   @ApiOkResponse({ type: PublicAvailabilityView })
   async availability(@Param() params: SlugParamsDto, @Query() query: AvailabilityQuery): Promise<PublicAvailabilityView> {
-    const profile = await this.requireBusiness(params.slug);
-    const { totalPriceMinor, totalDurationMinutes } = await this.catalogService.validateCombination(profile.business.id, {
-      serviceId: query.serviceId,
-      variationIds: query.variationIds,
-      addOnIds: query.addOnIds,
-    });
+    return this.buildAvailability(params.slug, query.date, [
+      { serviceId: query.serviceId, variationIds: query.variationIds, addOnIds: query.addOnIds },
+    ]);
+  }
+
+  @Post(':slug/availability')
+  @ApiOperation({
+    summary:
+      'Available slot starts for a date and a multi-service selection (REQ-070, read-only). Duration/price computed for the whole appointment.',
+  })
+  @ApiOkResponse({ type: PublicAvailabilityView })
+  @HttpCode(200)
+  async availabilityForSelections(
+    @Param() params: SlugParamsDto,
+    @Body() body: AvailabilityQueryBody,
+  ): Promise<PublicAvailabilityView> {
+    return this.buildAvailability(
+      params.slug,
+      body.date,
+      body.selections.map((s) => ({
+        serviceId: s.serviceId,
+        variationIds: s.variationId ? [s.variationId] : [],
+        addOnIds: s.addOnIds,
+      })),
+    );
+  }
+
+  private async buildAvailability(
+    slug: string,
+    date: string,
+    selections: { serviceId: string; variationIds?: string[]; addOnIds?: string[] }[],
+  ): Promise<PublicAvailabilityView> {
+    const profile = await this.requireBusiness(slug);
+    const { totalPriceMinor, totalDurationMinutes } = await this.catalogService.validateCombinations(
+      profile.business.id,
+      selections,
+    );
     const slots = await this.availabilityService.getSlotsForDay(profile.business.id, {
-      dateKey: query.date,
+      dateKey: date,
       durationMinutes: totalDurationMinutes,
     });
     return {
-      date: query.date,
+      date,
       slots: slots.map((s) => ({ startAt: s.startAt.toISOString(), endAt: s.endAt.toISOString() })),
       computedDurationMinutes: totalDurationMinutes,
       computedTotalPriceMinor: Number(totalPriceMinor),
