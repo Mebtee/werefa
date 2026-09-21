@@ -1,8 +1,13 @@
-import { useEffect, useState } from 'react'
-import type { BusinessDetails, DateString, TimeOfDay } from '@/types/models'
-import { weekdayLabel } from '@/lib/time'
-import { mockApi } from '@/mock/api'
-import type { BookingDate } from '@/mock/availability'
+import { useEffect, useMemo, useState } from 'react'
+import type { BusinessDetails, DateString, ServiceSelection, TimeOfDay } from '@/types/models'
+import { nextDateStrings, weekdayLabel } from '@/lib/time'
+import { getPublicAvailability } from '@/api/availability'
+import {
+  bookingDatesFromViews,
+  slotTimesFromView,
+  type BookingDate,
+} from '@/api/availability.mapper'
+import type { PublicAvailabilityView } from '@/api/types'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
@@ -10,6 +15,7 @@ import { Spinner } from '@/components/ui/Spinner'
 interface DateTimeStepProps {
   business: BusinessDetails
   durationMinutes: number
+  selections: readonly ServiceSelection[]
   date: DateString | null
   time: TimeOfDay | null
   selectDate: (date: DateString) => void
@@ -30,6 +36,7 @@ interface DateTimeState {
 export function DateTimeStep({
   business,
   durationMinutes,
+  selections,
   date,
   time,
   selectDate,
@@ -46,21 +53,42 @@ export function DateTimeStep({
     clearedReason: false,
   })
 
+  // Wire selections match the backend body exactly (v1: no client duration —
+  // the API computes the appointment's duration/price itself, REQ-074).
+  const wireSelections = useMemo(
+    () =>
+      selections.map((s) => ({
+        serviceId: s.serviceId,
+        variationId: s.variationId ?? undefined,
+        addOnIds: s.addOnIds.length > 0 ? [...s.addOnIds] : undefined,
+      })),
+    [selections],
+  )
+
+  // The date strip comes from one availability call per window date (parallel).
   useEffect(() => {
     let cancelled = false
     setState((s) => ({ ...s, dates: null, datesError: false }))
-    mockApi
-      .getBookingDates(business, durationMinutes)
-      .then((dates) => {
-        if (!cancelled) setState((s) => ({ ...s, dates, datesError: false }))
-      })
-      .catch(() => {
-        if (!cancelled) setState((s) => ({ ...s, datesError: true }))
-      })
+    const dates = nextDateStrings(business.bookingWindowDays ?? 14)
+    Promise.allSettled(
+      dates.map((date) =>
+        getPublicAvailability(business.slug, { date, selections: wireSelections }),
+      ),
+    ).then((results) => {
+      if (cancelled) return
+      if (results.some((r) => r.status === 'rejected')) {
+        setState((s) => ({ ...s, datesError: true }))
+        return
+      }
+      const views = results.map(
+        (r) => (r as PromiseFulfilledResult<PublicAvailabilityView>).value,
+      )
+      setState((s) => ({ ...s, dates: bookingDatesFromViews(views), datesError: false }))
+    })
     return () => {
       cancelled = true
     }
-  }, [business, durationMinutes, state.retryToken])
+  }, [business, wireSelections, state.retryToken])
 
   useEffect(() => {
     if (!date) {
@@ -69,10 +97,9 @@ export function DateTimeStep({
     }
     let cancelled = false
     setState((s) => ({ ...s, slots: null, slotsError: false }))
-    mockApi
-      .getSlotTimes(business, date, durationMinutes)
-      .then((slots) => {
-        if (!cancelled) setState((s) => ({ ...s, slots, slotsError: false }))
+    getPublicAvailability(business.slug, { date, selections: wireSelections })
+      .then((view) => {
+        if (!cancelled) setState((s) => ({ ...s, slots: [...slotTimesFromView(view)], slotsError: false }))
       })
       .catch(() => {
         if (!cancelled) setState((s) => ({ ...s, slotsError: true }))
@@ -80,7 +107,7 @@ export function DateTimeStep({
     return () => {
       cancelled = true
     }
-  }, [business, date, durationMinutes, state.retryToken])
+  }, [business, date, wireSelections, state.retryToken])
 
   // If the previously picked time no longer fits the new selection (e.g. after
   // going back and changing services), clear it instead of letting the user
