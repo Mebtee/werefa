@@ -63,6 +63,7 @@ export class PrismaBookingRepository implements BookingRepository {
               create: {
                 businessId: args.businessId,
                 submissionKey: args.submissionKey,
+                fileObjectId: args.proofFileObjectId ?? null,
               },
             },
             history: {
@@ -169,16 +170,38 @@ export class PrismaBookingRepository implements BookingRepository {
     });
     if (!booking) return null;
     const paymentId = booking.payment?.id;
-    const proofsSubmittedAt = paymentId
-      ? (
-          await this.prisma.paymentProof.findMany({
-            where: { paymentId },
-            select: { submittedAt: true },
-            orderBy: { submittedAt: 'asc' },
-          })
-        ).map((p) => p.submittedAt)
+    const proofTimeline = paymentId
+      ? await this.proofTimelineFor(paymentId)
       : [];
-    return { ...booking, proofsSubmittedAt } as unknown as BookingWithHistory;
+    return { ...booking, proofTimeline } as unknown as BookingWithHistory;
+  }
+
+  private async proofTimelineFor(paymentId: string): Promise<import('./booking.repository.port').ProofTimelineEntry[]> {
+    const proofs = await this.prisma.paymentProof.findMany({
+      where: { paymentId },
+      select: { id: true, submittedAt: true, replacedByProofId: true, fileObjectId: true },
+      orderBy: { submittedAt: 'asc' },
+    });
+    const fileIds = proofs.map((p) => p.fileObjectId).filter((id): id is string => Boolean(id));
+    const files = fileIds.length
+      ? await this.prisma.fileObject.findMany({
+          where: { id: { in: fileIds } },
+          select: { id: true, mimeType: true, sizeBytes: true, storageKey: true },
+        })
+      : [];
+    const fileById = new Map(files.map((f) => [f.id, f]));
+    return proofs.map((p) => ({
+      id: p.id,
+      submittedAt: p.submittedAt,
+      replacedByProofId: p.replacedByProofId,
+      file: p.fileObjectId && fileById.has(p.fileObjectId)
+        ? {
+            mimeType: fileById.get(p.fileObjectId)!.mimeType,
+            sizeBytes: fileById.get(p.fileObjectId)!.sizeBytes,
+            storageKey: fileById.get(p.fileObjectId)!.storageKey,
+          }
+        : null,
+    }));
   }
 
   async listDueForCompletion(businessId: string, upTo: Date, limit = 100): Promise<Booking[]> {
