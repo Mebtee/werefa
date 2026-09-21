@@ -1,10 +1,17 @@
-import { Body, Controller, Get, HttpCode, Inject, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Param, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiOkResponse, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { BookingService } from '../../domain/services/booking.service';
 import { ActorContext } from '../../domain/authorization/actor-context';
 import { Actor, ApiAuthGuard } from '../auth/api-auth.guard';
-import { OwnerBookingDetailView, OwnerBookingView, ownerBookingDetailProjection, ownerBookingProjection } from '../dto/projections';
-import { BookingIdParamDto, BusinessIdParamDto, OwnerBookingListQuery, RejectPayload, ReschedulePayload } from '../dto/payloads';
+import {
+  OwnerBookingDetailView,
+  OwnerBookingView,
+  ownerBookingDetailProjection,
+  ownerBookingProjection,
+  proofFileName,
+} from '../dto/projections';
+import { BookingIdParamDto, BusinessIdParamDto, OwnerBookingListQuery, ProofIdParamDto, RejectPayload, ReschedulePayload } from '../dto/payloads';
 
 /**
  * Owner booking management (Prompt 42 §9; REQ-100 … REQ-126, REQ-159). Every
@@ -69,6 +76,27 @@ export class OwnerBookingController {
   ): Promise<OwnerBookingDetailView> {
     await this.bookingService.rejectProof(actor, params.businessId, params.bookingId, payload.reason);
     return this.detailAfter(actor, params.businessId, params.bookingId);
+  }
+
+  @Get(':businessId/bookings/:bookingId/proofs/:proofId')
+  @ApiOperation({ summary: 'Download a payment-proof file (tenant + booking scoped, binary, REQ-118).' })
+  @ApiOkResponse({ description: 'Binary proof file with an attachment filename.' })
+  async downloadProof(
+    @Actor() actor: ActorContext,
+    @Param() params: ProofIdParamDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const file = await this.bookingService.getOwnerProofDownload(
+      actor,
+      params.businessId,
+      params.bookingId,
+      params.proofId,
+    );
+    res.setHeader('Content-Type', file.mimeType);
+    res.setHeader('Content-Disposition', `attachment; filename="${proofFileName(file.proofId, file.mimeType)}"`);
+    res.setHeader('Content-Length', file.sizeBytes.toString());
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.end(file.bytes);
   }
 
   @Post(':businessId/bookings/:bookingId/cancel')
