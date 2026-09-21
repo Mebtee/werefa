@@ -1,7 +1,7 @@
 import { ValidationError, ValidationPipe } from '@nestjs/common';
 import { ValidationRejectedException } from '../errors/app-error';
 
-function firstConstraint(errors: ValidationError[]): Record<string, string> {
+export function firstConstraint(errors: ValidationError[]): Record<string, string> {
   const fields: Record<string, string> = {};
   for (const err of errors) {
     if (err.constraints) {
