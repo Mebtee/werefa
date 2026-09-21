@@ -298,3 +298,124 @@ export interface ScheduleExceptionView {
   reason: string | null
   createdAt: string
 }
+
+// ---------------------------------------------------------------------------
+// PUBLIC AVAILABILITY wire types (Prompt 48). Mirror the Prompt 43 backend
+// contract; the backend remains authoritative. `POST …/availability` computes
+// duration/price for a whole multi-service appointment (REQ-070/074); the
+// client never sends its own duration.
+// ---------------------------------------------------------------------------
+
+/** One service within an availability request (REQ-070). */
+export interface AvailabilitySelectionInput {
+  serviceId: string
+  variationId?: string
+  addOnIds?: string[]
+}
+
+/** `POST /api/v1/public/businesses/:slug/availability` body. */
+export interface AvailabilityQueryPayload {
+  date: string
+  selections: AvailabilitySelectionInput[]
+}
+
+/** One start/end pair in a business's local timeline, as ISO instants. */
+export interface PublicAvailabilitySlot {
+  startAt: string
+  endAt: string
+}
+
+/** `GET|POST …/availability` response projection (no internal ids). */
+export interface PublicAvailabilityView {
+  date: string
+  slots: PublicAvailabilitySlot[]
+  computedDurationMinutes: number
+  computedTotalPriceMinor: number
+}
+
+// ---------------------------------------------------------------------------
+// CUSTOMER BOOKING wire types (Prompt 49). Mirror the Prompt 43 backend
+// contract; the backend remains authoritative. The client sends `selections`
+// only — never prices/durations — and the backend snapshots each component
+// itself (REQ-074/076). `submissionKey` makes the POST idempotent (REQ-121).
+// ---------------------------------------------------------------------------
+
+/** One service within a booking request (REQ-070) — mirrors `AvailabilitySelectionInput`. */
+export interface CreateCustomerBookingSelectionInput {
+  serviceId: string
+  variationId?: string
+  addOnIds?: string[]
+}
+
+/** `POST /api/v1/customer/bookings` body. */
+export interface CreateCustomerBookingInput {
+  businessSlug: string
+  selections: CreateCustomerBookingSelectionInput[]
+  customerName: string
+  customerPhone: string
+  note?: string
+  /** Preferred appointment start as an ISO instant. */
+  startAt: string
+  submissionKey: string
+  paymentMethod?: 'BANK_TRANSFER' | 'TELEBIRR_MOBILE_MONEY'
+}
+
+/** `POST /api/v1/customer/bookings` response — customer-safe projection. */
+export interface CustomerBookingView {
+  status: string
+  startAt: string
+  endAt: string
+  serviceNames: string[]
+  businessSlug: string
+  totalPriceMinor: number
+  prepaidMinor: number
+  paymentMethod: string
+  note: string | null
+}
+
+/** One entry in `GET /api/v1/customer/status` (newest first). */
+export interface CustomerStatusEntryView {
+  startAt: string
+  endAt: string
+  status: string
+}
+
+/** `GET /api/v1/customer/status?slug=…&phone=…` response (no internal ids). */
+export interface CustomerStatusView {
+  bookings: CustomerStatusEntryView[]
+}
+
+// ---------------------------------------------------------------------------
+// REJECTED-BOOKING RESUBMISSION wire types (Prompt 50). Mirror the backend
+// contract; the backend remains authoritative. Codes are one-time, expiring and
+// phone-scoped (REQ-230); code DELIVERY is out of scope, so the frontend never
+// claims a code was "sent" — it only offers a code-input step.
+// ---------------------------------------------------------------------------
+
+/** `POST /api/v1/customer/resubmission/request-code` body (JSON). */
+export interface ResubmissionRequestInput {
+  businessSlug: string
+  phone: string
+}
+
+/** `POST /api/v1/customer/resubmission/verify` body (multipart `payload` field). */
+export interface ResubmissionVerifyInput extends ResubmissionRequestInput {
+  /** The one-time 6-digit code (delivered out-of-band). */
+  code: string
+  /** Idempotency key (REQ-121), stable across retries of one attempt. */
+  submissionKey: string
+}
+
+/**
+ * `POST …/resubmission/request-code` response. The code itself is never
+ * returned; only its expiry is disclosed (delivery is out of scope).
+ */
+export interface ResubmissionRequestCodeView {
+  expiresAt: string
+}
+
+/** `POST /api/v1/customer/resubmission/verify` response. */
+export interface CustomerResubmissionResultView {
+  booking: CustomerBookingView
+  outcome: string
+}
