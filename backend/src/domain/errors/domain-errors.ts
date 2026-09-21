@@ -104,4 +104,24 @@ export const domainErrors = {
       detail,
     });
   },
+
+  proofFileTooLarge(detail = 'The payment proof file is larger than the 5 MB limit.'): AppError {
+    return new AppError({
+      code: ErrorCode.FILE_TOO_LARGE,
+      title: 'File too large',
+      detail,
+    });
+  },
+
+  proofFileTypeInvalid(detail = 'The payment proof must be an image or a PDF file.'): AppError {
+    return new AppError({
+      code: ErrorCode.FILE_TYPE_INVALID,
+      title: 'Invalid file type',
+      detail,
+    });
+  },
+
+  proofRequired(detail = 'A payment proof is required when a deposit is due.'): AppError {
+    return AppError.validation({ proof: 'A proof file is required.' }, detail);
+  },
 };
