@@ -496,7 +496,15 @@ function promotePendingSchedule(slug: string): void {
   )
   if (pending.length === 0) return
   const latest = pending[pending.length - 1]
+  // Prompt 47: the booking interval lives on business settings (REQ-086), not
+  // on the schedule. A pending save applied the schedule's snapshot interval,
+  // but the owner's settings PATCH may have changed it afterwards — schedules
+  // activating on resume must not clobber the live settings interval.
+  const liveInterval = getBusiness(slug)?.bookingIntervalMinutes
   applySnapshot(slug, latest.snapshot)
+  if (liveInterval != null) {
+    saveBookingInterval(slug, liveInterval)
+  }
   for (const version of scheduleVersions) {
     if (version.businessSlug === slug && version.status === 'pending') {
       version.status = 'superseded'
