@@ -149,6 +149,47 @@ Docker was down when this task resumed; the DB verification was completed at clo
   this task reserves capacity.
 - No commit was made (task rule: do not commit without explicit request).
 
+## Addendum (Prompt 48 §8/§23 — impossible-date hardening)
+
+A follow-up audit of the validation path exposed one genuine gap: the date key regex
+(`@Matches(/^\d{4}-\d{2}-\d{2}$/)`) accepted *impossible* calendar days such as `2026-02-30`
+or `2026-13-01`, and the engine would silently normalize them via `Date.UTC` — `2026-02-30`
+answered for 2026-03-02, `2026-13-01` for 2027-01-01 — instead of returning the established
+validation envelope. This violates Prompt 48 §8 ("do not silently normalize invalid dates;
+return the established API error envelope") and §23 (invalid dates in the validation test
+matrix).
+
+### What changed (files)
+- `common/validation/is-calendar-date.ts` (new) — `isCalendarDateKey()` + class-validator
+  `@IsCalendarDateKey` constraint. Rejects strings matching `YYYY-MM-DD` that are not a real
+  calendar day (round-trips through `Date.UTC` and compares year/month/day; rejects
+  `2026-02-30`, `2027-02-29`, `2026-13-01`, `2026-00-10`, `2026-04-31`, and any non-key shape
+  including ISO timestamps).
+- `api/dto/payloads.ts` — `@IsCalendarDateKey` added to `AvailabilityQuery.date` and
+  `AvailabilityQueryBody.date`; format check (`@Matches`) is retained and still runs first.
+- `api/http-api.spec.ts` `+2` (no-DB) — GET `?date=2026-02-30` and POST body
+  `date: '2026-13-01'` both return 400 `VALIDATION_ERROR` with `fields.date` present, asserted
+  to happen before any service/DB call.
+- `api/http-api.db.spec.ts` `+2` cases in the malformed-body bucket — `2026-02-30` and
+  `2026-13-01` → 400.
+- `common/validation/is-calendar-date.spec.ts` (new, 3 tests) — real days accepted, impossible
+  days rejected, non-key shapes rejected.
+
+### Re-verification (final, local)
+| Layer | Command | Result |
+|---|---|---|
+| Backend | `npm run typecheck` / `npm run lint` | PASS / PASS |
+| Backend | `npm test` (no DB) | 147 passed / 184 skipped; 22 files (DB suites self-skip) |
+| Backend | `/api/v1/public/businesses/:slug/availability` GET+POST impossible-date cases | PASS (no-DB contract) |
+| Frontend | `npx vitest run` | 418 passed / 34 files |
+| Frontend | `npx tsc -b --pretty false` / `npm run lint` | PASS / PASS |
+| Spec | `docs/WEREFA-COMPLETE-SPECIFICATION.md` | unchanged (`git hash-object` = `acb32c9b…`) |
+
+The DB-gated `http-api.db.spec.ts` additions run with `npm test:db` against a live Postgres
+(the environment's Docker was down for this addendum pass, so only the no-DB path executed);
+both new impossible-date cases are pure validation and short-circuit before any DB read, so the
+no-DB contract assertions fully exercise them.
+
 ## Close
 
 - Repo status = expected working set only (backend: 3 modified + 2 untracked + DB spec;
