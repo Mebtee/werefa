@@ -154,3 +154,89 @@ REQ-109 projection.
   `npm run db:up && npm run db:provision && npm run test:db` (×4 consecutive, 252 passed);
   frontend `npx vitest run` (×3 consecutive, 384 passed) `&& npx tsc -b --pretty false &&
   npm run lint`.
+
+---
+
+## Addendum — Owner Booking Management UI on the real API (Prompt 49/51; REQ-102…190)
+
+Extends the booking API integration to the **owner management side**: the owner-queue list,
+detail review and lifecycle actions now talk to the implemented owner routes instead of the
+`mockOwnerApi` voucher seam. The Prompts #28/#29 work had already shipped the backend owner
+routes (list/detail/accept/reject/cancel/no-show/reschedule/release-slot/available-times) and
+the `OwnerBookingView` projections; this addendum migrates the UI onto them.
+
+### Verification results (this addendum, run locally)
+
+| Layer | Command | Result |
+|---|---|---|
+| Backend | `npm run typecheck` / `npm run lint` / `npm run build` | PASS |
+| Backend | `npm test` (no DB) | 147 passed / 185 skipped (DB suites self-skip w/o `RUN_DB_TESTS`) |
+| Backend | `...test:db` (live Postgres) | **276 passed / 16 files** (×2 clean runs); new availability/reschedule-fit DB test green (fixture durations Haircut 60 + Styling 10 + Wash 5 = 75 min) |
+| Frontend | `npx vitest run` | **416 passed / 34 files, exit 0** |
+| Frontend | `npx tsc -b --pretty false` | PASS |
+| Frontend | `npm run lint` / `npm run build` | PASS |
+| Spec | `docs/WEREFA-COMPLETE-SPECIFICATION.md` | unchanged — hash `acb32c9b…` again equals HEAD |
+
+### What changed (frontend)
+
+- `api/types.ts` / `api/ownerBookings.ts` (new client) — owner list/detail/accept/reject/cancel/
+  no-show/reschedule/release-slot (`204`)/available-times + `OwnerRescheduleInput { startAt }`.
+  Tenancy stays enforced server-side; booking id is the numeric surrogate, string-routed.
+- `features/owner-portal/lib/ownerBooking.ts` (new mapper) — `ownerBookingFromWire` /
+  `ownerBookingsFromWire` / `ownerActorLabel` / `slotFromUtcInstant`. UTC-naive `startAt`
+  handling (slot read in UTC; round-trips in any machine TZ); list rows get one synthetic
+  history entry from `actorType` so the client actor sort (REQ-188/190) still works; detail rows
+  keep the real `history` + latest proof. Telegram state / schedule-exception / slot-released
+  map to stable defaults and are no longer rendered.
+- `pages/BookingsPage.tsx` — real `listOwnerBookings(businessId)` + mapper; mock-only
+  schedule-exception badge removed (REQ-184/185 columns + REQ-188/189/190 sorts unchanged).
+- `pages/BookingDetailPage.tsx` — rewritten: loads via `getOwnerBookingDetail`, Schedule card
+  driven by real `listOwnerScheduleConflicts(businessId)` filtered to this booking
+  (`String(conflict.bookingId) === id`); accept/reject through the existing `usePaymentReview`;
+  cancel/no-show/release through real clients wrapped with `toUserMessage`; the mock Telegram
+  section and mock-only Schedule Exception card are gone; RescheduleForm gets `businessId`.
+- `components/RescheduleForm.tsx` — reads `getOwnerBookingAvailableTimes` and submits
+  `rescheduleOwnerBooking` with a UTC-naive `${date}T${time}:00.000Z`; gates (
+  `includeBusinessGates:false`) because REQ-147 gates only NEW bookings.
+- `components/ScheduleConflicts.tsx` — `applyCancel` uses `cancelOwnerBooking`.
+- `state/useOwnedBusiness.ts` — today count from the real list (`startAt` date-keyed, UTC);
+  mock `getOwnedBusiness()` retained only to hybridize the profile shape.
+- `test/businessApi.ts` — full owner-route stub: list/detail/cancel (state-aware:
+  confirmed→`cancelBooking`, payment-pending→`cancelPaymentPendingBooking`,
+  rejected→`releaseRejectedBooking`), no-show, release-slot `204`, reschedule (open-slot re-
+  check), available-times; UTC-naive instant serialization; booking ids are **creation-ordered
+  surrogates** (monotonic with the store's `createdAt`, stable keyed by raw store id); route ids
+  accepted as raw `bk-…` or numeric surrogate.
+
+### Bugs found and fixed during wiring
+
+- `ownerBookingFromWire` called `rejectionReasonFromDetail` on every view — that helper indexes
+  `detail.history.length` directly and crashed on list rows (no `history`). The mapper now
+  derives the rejection reason from its own `historyWire` (latest REJECTED entry with a trimmed
+  reason).
+- The stub emitted numeric ids via a content hash, so booking-id-sort-as-chronology
+  (REQ-188/189) was arbitrary. Surrogates are now assigned in store creation order, mirroring
+  the backend auto-increment, and `createdAt`/`updatedAt` serialize the store values (previously
+  they copied `startAt`, which broke oldest-first ordering).
+
+### Tests
+
+- `BookingsPage.test.tsx` — href matcher → `/owner/bookings/`; schedule-exception list case
+  asserts its absence.
+- `BookingManagement.test.tsx` — `'Demo Owner'` → `'Owner'`; Telegram describes replaced by a
+  single “no Telegram section” test; the keep-booking case asserts no exception card; the
+  duplicate-notices-from-viewing test (mock `TelegramNotificationsSection` seam) was removed.
+- `OwnerPortal.test.tsx` — Keep-Booking tail asserts CONFIRMED with no Schedule Exception card.
+- `PaymentProofReview.test.tsx` — both forced-GET-failure cases now assert the unified
+  `/Booking not found/i` (shell + review share one GET detail).
+- Suite totals moved from 384 → **416** frontend tests, all green.
+
+### Notes / knowns
+
+- `OwnerScheduleConflictView.bookingId` stays `string` in frontend types (backend `number`) —
+  pre-existing stub simplification kept; the detail filter uses `String(...)` equality.
+- A one-time GET happens for the detail plus a second list call for conflicts on
+  `BookingDetailPage`; accepted as-is (no new endpoint invented).
+- **DB verification complete:** Docker/Postgres brought up (`npm run db:up && npm run db:provision`);
+  `npm run test:db` green at 276 passed / 16 files across two consecutive runs.
+- Still no commit (task rule). Working tree = accumulated prompts #25–#51 working set only.
