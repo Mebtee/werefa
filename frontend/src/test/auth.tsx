@@ -5,7 +5,11 @@ import type { AuthPrincipal } from '@/api/types'
 import { AuthProvider } from '@/features/auth/AuthProvider'
 import type { AuthState } from '@/features/auth/auth-context'
 import { appRoutes } from '@/routes'
-import { installBusinessApiStub } from './businessApi'
+import {
+  installBusinessApiStub,
+  type BusinessApiStub,
+  type BusinessApiStubOptions,
+} from './businessApi'
 
 /** Shared principals for tests. Values are obvious fixtures, never real accounts. */
 export const OWNER_PRINCIPAL: AuthPrincipal = {
@@ -41,6 +45,8 @@ export const UNAUTHENTICATED: AuthState = {
 export interface RenderAppOptions {
   /** Defaults to an authenticated owner so existing owner tests are unchanged. */
   auth?: AuthState
+  /** Extra behavior for the stateful business API test double. */
+  businessApi?: BusinessApiStubOptions
 }
 
 const cleanupStubs: Array<() => void> = []
@@ -61,8 +67,11 @@ afterEach(() => {
 export function renderAppAt(
   path: string,
   options: RenderAppOptions = {},
-): RenderResult & { router: ReturnType<typeof createMemoryRouter> } {
-  const stub = installBusinessApiStub()
+): RenderResult & {
+  router: ReturnType<typeof createMemoryRouter>
+  stub: BusinessApiStub
+} {
+  const stub = installBusinessApiStub(undefined, options.businessApi)
   cleanupStubs.push(stub.restore)
   const router = createMemoryRouter(appRoutes, { initialEntries: [path] })
   const result = render(
@@ -70,5 +79,5 @@ export function renderAppAt(
       <RouterProvider router={router} />
     </AuthProvider>,
   )
-  return { router, ...result }
+  return { router, stub, ...result }
 }

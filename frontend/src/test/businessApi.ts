@@ -1,5 +1,6 @@
 import type {
   BlockedPeriodView,
+  OwnerBookingDetailView,
   OwnerBusinessView,
   OwnerScheduleConflictView,
   OwnerScheduleView,
@@ -14,6 +15,7 @@ import type {
 } from '@/api/types'
 import { availabilityScheduleFromView } from '@/api/schedule.mapper'
 import {
+  acceptBooking,
   createBookingEntry,
   getBooking,
   getBookingsByPhone,
@@ -23,6 +25,7 @@ import {
   getServices,
   applyScheduleException,
   listScheduleHistory,
+  rejectBooking,
   resubmitRejectedProof,
   saveBookingInterval,
   saveSchedule,
@@ -81,6 +84,12 @@ export interface BusinessApiStubOptions {
    * slotsError paths).
    */
   failAvailabilityFor?: (date: string) => boolean
+  /**
+   * Consulted by the owner booking routes ON REQUEST (Prompt 51). Return a
+   * `Response` to force an error for a specific method/path, or null to let the
+   * double handle it. Used to exercise 403/404/409/5xx on the review surface.
+   */
+  failOwnerBookingRequest?: (request: { method: string; path: string }) => Response | null
 }
 
 const OWNER_ID = '00000000-0000-4000-8000-0000000000a'
@@ -555,6 +564,103 @@ function latestRejectedFor(slug: string, phone: string): Booking | undefined {
   )
 }
 
+// ---------------------------------------------------------------------------
+// Owner payment-proof review routes (Prompt 51). The double projects a store
+// booking into the real owner wire shapes (`OwnerBookingDetailView`) and routes
+// accept/reject through the same store functions the mock owner API used, so
+// render tests exercise the real client against the authoritative contract.
+// ---------------------------------------------------------------------------
+
+const OWNER_BOOKING_STATE_CODE: Record<Booking['state'], string> = {
+  'payment-pending': 'PAYMENT_PENDING',
+  confirmed: 'CONFIRMED',
+  completed: 'COMPLETED',
+  'no-show': 'NO_SHOW',
+  cancelled: 'CANCELLED',
+  rejected: 'REJECTED',
+}
+
+/** Stable, addressable id for a store booking's single proof record. */
+function ownerProofId(booking: Booking): string {
+  return `proof-${booking.id}`
+}
+
+function ownerProofViewOf(booking: Booking) {
+  return {
+    proofId: ownerProofId(booking),
+    submittedAt: booking.updatedAt,
+    fileName: booking.proof.fileName,
+    mimeType: booking.proof.mimeType,
+    sizeBytes: booking.proof.sizeBytes,
+    replaced: false,
+  }
+}
+
+/** Projects a store booking into the real `OwnerBookingDetailView` shape. */
+function ownerBookingDetailViewOf(booking: Booking): OwnerBookingDetailView {
+  const startAt = new Date(`${booking.date}T${booking.time}:00`)
+  return {
+    bookingId: hashBookingId(booking.id),
+    status: OWNER_BOOKING_STATE_CODE[booking.state],
+    customerName: booking.customer.name,
+    customerPhone: booking.customer.phone,
+    note: booking.customer.note || null,
+    startAt: startAt.toISOString(),
+    endAt: new Date(startAt.getTime() + booking.totalDurationMinutes * 60_000).toISOString(),
+    createdAt: startAt.toISOString(),
+    updatedAt: startAt.toISOString(),
+    payment: {
+      status:
+        booking.paymentState === 'pending'
+          ? 'PENDING'
+          : booking.paymentState === 'accepted'
+            ? 'ACCEPTED'
+            : 'REJECTED',
+      method:
+        booking.paymentMethod === 'bank-transfer' ? 'BANK_TRANSFER' : 'TELEBIRR_MOBILE_MONEY',
+      prepaidMinor: booking.deposit,
+    },
+    components: booking.lineItems.map((item) => ({
+      componentType: 'SERVICE',
+      name: item.name,
+      unitPriceMinor: item.unitPrice,
+      durationMinutes: item.durationMinutes,
+    })),
+    totalPriceMinor: booking.total,
+    history: booking.history.map((entry) => ({
+      occurredAt: entry.at,
+      fromStatus: entry.previous ? OWNER_BOOKING_STATE_CODE[entry.previous] : null,
+      toStatus: OWNER_BOOKING_STATE_CODE[entry.state],
+      actorType: 'OWNER',
+      actorUserId: null,
+      reason: entry.state === 'rejected' ? booking.rejectionReason : null,
+    })),
+    proofs: [ownerProofViewOf(booking)],
+  }
+}
+
+/** Deterministic positive surrogate for the numeric backend booking id. */
+function hashBookingId(id: string): number {
+  let hash = 0
+  for (let i = 0; i < id.length; i += 1) {
+    hash = (hash * 31 + id.charCodeAt(i)) % 1_000_000
+  }
+  return hash + 1
+}
+
+/** A binary proof response, mirroring the streaming download route. */
+function ownerProofBinaryResponse(booking: Booking): Response {
+  const mimeType = booking.proof.mimeType || 'application/octet-stream'
+  return new Response(new Blob([`proof-bytes:${booking.id}`], { type: mimeType }), {
+    status: 200,
+    headers: {
+      'content-type': mimeType,
+      'content-disposition': `attachment; filename="${booking.proof.fileName}"`,
+      'x-request-id': 'stub-owner-proof',
+    },
+  })
+}
+
 export function installBusinessApiStub(
   delegateTo: typeof fetch = globalThis.fetch,
   options: BusinessApiStubOptions = {},
@@ -652,6 +758,49 @@ export function installBusinessApiStub(
         }
         const action = rest[3]
         if (!action && method === 'GET') return json({ ...state })
+        if (action === 'bookings') {
+          const forced = options.failOwnerBookingRequest?.({ method, path: pathname })
+          if (forced) return forced
+          const bookingId = rest[4]
+          if (!bookingId) {
+            return envelope(404, 'NOT_FOUND', 'Not found', 'No fetch stub for the owner bookings list.')
+          }
+          const sub = rest[5]
+          if (!sub && method === 'GET') {
+            const booking = getBooking(storeSlug, bookingId)
+            if (!booking) return envelope(404, 'NOT_FOUND', 'Not found', 'Booking not found.')
+            return json(ownerBookingDetailViewOf(booking))
+          }
+          if (sub === 'accept' && method === 'POST') {
+            const result = acceptBooking(storeSlug, bookingId)
+            if (!result.ok) return envelope(409, 'CONFLICT', 'Conflict', result.error)
+            return json(ownerBookingDetailViewOf(result.value))
+          }
+          if (sub === 'reject' && method === 'POST') {
+            const reason =
+              typeof (body as { reason?: unknown } | undefined)?.reason === 'string'
+                ? (body as { reason: string }).reason
+                : ''
+            if (!reason.trim()) {
+              return validationEnvelope({
+                reason: 'Please provide a reason for the rejection.',
+              })
+            }
+            const result = rejectBooking(storeSlug, bookingId, reason)
+            if (!result.ok) return envelope(409, 'CONFLICT', 'Conflict', result.error)
+            return json(ownerBookingDetailViewOf(result.value))
+          }
+          if (sub === 'proofs' && method === 'GET') {
+            const proofId = rest[6]
+            const booking = getBooking(storeSlug, bookingId)
+            if (!booking) return envelope(404, 'NOT_FOUND', 'Not found', 'Booking not found.')
+            if (proofId !== ownerProofId(booking)) {
+              return envelope(404, 'NOT_FOUND', 'Not found', 'Proof not found.')
+            }
+            return ownerProofBinaryResponse(booking)
+          }
+          return envelope(404, 'NOT_FOUND', 'Not found', 'No fetch stub for this owner booking route.')
+        }
         if (!action && method === 'PATCH') {
           const patch = (body ?? {}) as Record<string, unknown>
           if (typeof patch.name === 'string') state.name = patch.name
