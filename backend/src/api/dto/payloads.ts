@@ -20,6 +20,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional, PickType } from '@nestjs/swagger';
+import { IsCalendarDateKey } from '../../common/validation/is-calendar-date';
 
 // ---------------------------------------------------------------------------
 // Shared
@@ -502,6 +503,14 @@ export class ReschedulePayload {
   startAt: string;
 }
 
+export class OwnerBookingAvailableTimesQuery {
+  @ApiProperty({ example: '2026-09-20' })
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'Date must be YYYY-MM-DD.' })
+  @IsCalendarDateKey()
+  date: string;
+}
+
 export class RejectPayload {
   @ApiProperty({ example: 'The transfer did not include the account number.' })
   @IsString()
@@ -514,6 +523,7 @@ export class AvailabilityQuery {
   @ApiProperty({ example: '2026-09-20' })
   @IsString()
   @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'Date must be YYYY-MM-DD.' })
+  @IsCalendarDateKey()
   date: string;
 
   @ApiProperty({ example: 'uuid' })
@@ -557,6 +567,7 @@ export class AvailabilityQueryBody {
   @ApiProperty({ example: '2026-09-20' })
   @IsString()
   @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'Date must be YYYY-MM-DD.' })
+  @IsCalendarDateKey()
   date: string;
 
   @ApiProperty({ type: [AvailabilitySelectionBody] })

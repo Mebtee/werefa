@@ -44,6 +44,24 @@ describe('HTTP API contract (no DB)', () => {
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
+  it('rejects an impossible calendar date on GET availability before any service call', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/public/businesses/my-salon/availability')
+      .query({ date: '2026-02-30', serviceId: '12345678-1234-4123-8123-123456789abc' })
+      .expect(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    expect(res.body.error.fields.date).toBeDefined();
+  });
+
+  it('rejects an impossible calendar date in the POST availability body', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/v1/public/businesses/my-salon/availability')
+      .send({ date: '2026-13-01', selections: [] })
+      .expect(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    expect(res.body.error.fields.date).toBeDefined();
+  });
+
   it('denies owner routes with an explicit actor resolver when auth testing is off', async () => {
     const res = await request(app.getHttpServer())
       .get('/api/v1/owner/businesses')
