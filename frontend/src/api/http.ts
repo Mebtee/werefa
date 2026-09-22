@@ -35,6 +35,34 @@ export interface ApiResponse<T> {
   requestId?: string
 }
 
+/** Result of a binary (non-JSON) download such as an owner payment proof. */
+export interface ApiDownloadResponse {
+  data: Blob
+  /** Parsed `Content-Disposition` filename, when the server supplies one. */
+  fileName: string | null
+  contentType: string | null
+  status: number
+  requestId?: string
+}
+
+/**
+ * Derives a filename from a `Content-Disposition` header, preferring the
+ * RFC 5987 `filename*=UTF-8''…` form and falling back to `filename="…"`.
+ */
+export function fileNameFromContentDisposition(header: string | null): string | null {
+  if (!header) return null
+  const extended = /filename\*=UTF-8''([^;]+)/i.exec(header)
+  if (extended) {
+    try {
+      return decodeURIComponent(extended[1].trim())
+    } catch {
+      return extended[1].trim()
+    }
+  }
+  const quoted = /filename="?([^";]+)"?/i.exec(header)
+  return quoted ? quoted[1].trim() : null
+}
+
 type UnauthorizedHandler = () => void
 
 let unauthorizedHandler: UnauthorizedHandler | null = null
@@ -125,4 +153,56 @@ export async function apiRequest<T>(
   }
 
   return { data: parsed as T, status: response.status, requestId: responseRequestId }
+}
+
+/**
+ * Fetches a binary resource (Prompt 51: owner payment-proof download). Always
+ * sends the session cookie; a JSON error envelope is parsed into an `ApiError`
+ * exactly like `apiRequest`, while a success returns the raw `Blob` plus the
+ * server-supplied filename/content type.
+ */
+export async function apiDownload(
+  path: string,
+  options: ApiRequestOptions = {},
+): Promise<ApiDownloadResponse> {
+  const requestId = createRequestId()
+  const doFetch = options.fetchImpl ?? globalThis.fetch
+  let response: Response
+  try {
+    response = await doFetch(buildUrl(path, options.query), {
+      method: options.method ?? 'GET',
+      headers: { Accept: 'application/octet-stream', 'X-Request-Id': requestId },
+      credentials: 'include',
+      signal: options.signal,
+    })
+  } catch {
+    throw ApiError.network(requestId)
+  }
+
+  const responseRequestId = response.headers.get('x-request-id') ?? requestId
+
+  if (!response.ok) {
+    if (response.status === 401 && options.handleUnauthorized !== false) {
+      unauthorizedHandler?.()
+    }
+    const text = await response.text()
+    let parsed: unknown
+    if (text) {
+      try {
+        parsed = JSON.parse(text)
+      } catch {
+        parsed = undefined
+      }
+    }
+    throw ApiError.fromResponse(response.status, parsed, responseRequestId)
+  }
+
+  const data = await response.blob()
+  return {
+    data,
+    fileName: fileNameFromContentDisposition(response.headers.get('content-disposition')),
+    contentType: response.headers.get('content-type'),
+    status: response.status,
+    requestId: responseRequestId,
+  }
 }
