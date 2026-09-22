@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ActorType,
   BookingState,
   BookingComponentType,
   PaymentMethod,
@@ -327,9 +328,16 @@ export class OwnerBookingView {
   @ApiProperty({ type: OwnerPaymentView, nullable: true }) payment: OwnerPaymentView | null;
   @ApiProperty({ type: [OwnerBookingComponentView] }) components: OwnerBookingComponentView[];
   @ApiProperty({ example: 10000 }) totalPriceMinor: number;
+  /**
+   * Actor of the latest status transition (REQ-188/190 owner list sorting). For
+   * list rows this is the last history entry loaded; for details the last of the
+   * full asc history — both resolve to the most recent transition.
+   */
+  @ApiProperty({ example: 'OWNER', enum: ActorType }) actorType: ActorType;
 }
 
 export function ownerBookingProjection(booking: BookingWithRelations): OwnerBookingView {
+  const latest = booking.statusHistory?.[booking.statusHistory.length - 1];
   return {
     bookingId: booking.id,
     status: booking.status,
@@ -340,6 +348,7 @@ export function ownerBookingProjection(booking: BookingWithRelations): OwnerBook
     endAt: booking.endAt.toISOString(),
     createdAt: booking.createdAt.toISOString(),
     updatedAt: booking.updatedAt.toISOString(),
+    actorType: latest?.actorType ?? 'SYSTEM',
     payment: booking.payment
       ? {
           status: booking.payment.status,
@@ -413,6 +422,29 @@ export function ownerBookingDetailProjection(booking: BookingWithHistory): Owner
       sizeBytes: p.file ? Number(p.file.sizeBytes) : 0,
       replaced: p.replacedByProofId != null,
     })),
+  };
+}
+
+export class OwnerRescheduleAvailabilitySlotView {
+  @ApiProperty({ example: '2026-09-20T09:00:00.000Z' }) startAt: string;
+  @ApiProperty({ example: '2026-09-20T09:30:00.000Z' }) endAt: string;
+}
+
+export class OwnerRescheduleAvailabilityView {
+  @ApiProperty({ example: '2026-09-20' }) date: string;
+  @ApiProperty({ example: 30 }) durationMinutes: number;
+  @ApiProperty({ type: [OwnerRescheduleAvailabilitySlotView] }) slots: OwnerRescheduleAvailabilitySlotView[];
+}
+
+export function ownerRescheduleAvailabilityProjection(result: {
+  date: string;
+  durationMinutes: number;
+  slots: Array<{ startAt: Date; endAt: Date }>;
+}): OwnerRescheduleAvailabilityView {
+  return {
+    date: result.date,
+    durationMinutes: result.durationMinutes,
+    slots: result.slots.map((s) => ({ startAt: s.startAt.toISOString(), endAt: s.endAt.toISOString() })),
   };
 }
 

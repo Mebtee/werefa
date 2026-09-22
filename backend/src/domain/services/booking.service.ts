@@ -379,6 +379,39 @@ export class BookingService {
     };
   }
 
+  /**
+   * Free + fitting slots for rescheduling one booking on a date (REQ-106/089).
+   * Duration comes from the booking's own snapshot and business gates are
+   * skipped (same rule as the reschedule mutation), so the picker never offers
+   * a slot the mutation would refuse. Slot occupancy uses the same window as
+   * the mutation's in-transaction overlap re-check.
+   */
+  async getRescheduleAvailability(
+    ctx: ActorContext,
+    businessId: string,
+    bookingId: number,
+    dateKey: string,
+  ): Promise<{ date: string; durationMinutes: number; slots: Array<{ startAt: Date; endAt: Date }> }> {
+    await this.tenantGuard.requireOwnedBusiness(ctx, businessId);
+    const booking = await this.bookingRepo.findById(businessId, bookingId);
+    if (!booking) throw domainErrors.businessNotFound('Booking not found.');
+    const durationMs = booking.endAt.getTime() - booking.startAt.getTime();
+    if (durationMs <= 0 || durationMs % 60_000 !== 0) {
+      throw domainErrors.invalidBookingState('Invalid booking duration.');
+    }
+    const durationMinutes = Math.round(durationMs / 60_000);
+    const slots = await this.availabilityService.getSlotsForDay(businessId, {
+      dateKey,
+      durationMinutes,
+      includeBusinessGates: false,
+    });
+    return {
+      date: dateKey,
+      durationMinutes,
+      slots: slots.map((s) => ({ startAt: s.startAt, endAt: s.endAt })),
+    };
+  }
+
   async reschedule(
     ctx: ActorContext,
     businessId: string,
@@ -393,6 +426,23 @@ export class BookingService {
       if (durationMs <= 0 || durationMs % 60_000 !== 0) throw domainErrors.invalidBookingState('Invalid booking duration.');
       const newStart = this.stripSeconds(newStartAt);
       const newEnd = new Date(newStart.getTime() + durationMs);
+
+      // Pre-check schedule fit (REQ-106/089): the target slot must actually
+      // exist on the business's active schedule and fit the full duration.
+      // Business gates (pause/subscription/deactivation) are intentionally
+      // ignored — REQ-147 forbids only NEW bookings while paused; rescheduling
+      // an existing CONFIRMED booking (REQ-105) stays permitted. The booking's
+      // own current slot counts as occupied, so moving to the identical slot is
+      // refused (matches the picker offering only free slots).
+      const dayKey = this.clock.dateKey(newStart);
+      const slots = await this.availabilityService.getSlotsForDay(businessId, {
+        dateKey: dayKey,
+        durationMinutes: Math.round(durationMs / 60_000),
+        includeBusinessGates: false,
+      });
+      if (!slots.some((s) => Math.abs(s.startAt.getTime() - newStart.getTime()) < 60_000)) {
+        throw domainErrors.unavailableAppointment('The requested time does not fit the current schedule.');
+      }
 
       await withBusinessAdvisoryLock(this.prisma, businessId, async (tx) => {
         const occupied = await this.bookingRepo.hasActiveOverlap(tx, {

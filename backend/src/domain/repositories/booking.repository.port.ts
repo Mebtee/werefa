@@ -57,10 +57,15 @@ export interface BookingWithRelations extends Booking {
     method: PaymentMethod;
     prepaidMinor: bigint;
   } | null;
+  /**
+   * Newest-last status-history rows when loaded (owner list loads the latest
+   * entry only for the actor sort; owner detail loads the full history asc).
+   */
+  statusHistory?: BookingStatusHistoryRow[];
 }
 
 export interface BookingStatusHistoryRow {
-  id: string;
+  id: number;
   fromStatus: BookingState | null;
   toStatus: BookingState;
   actorType: ActorType;

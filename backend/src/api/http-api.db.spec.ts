@@ -403,6 +403,59 @@ describe.skipIf(!RUN)('HTTP API end-to-end (real DB)', () => {
     await http().post(`/api/v1/owner/businesses/${businessId}/bookings/${booking1Id}/release-slot`).set(owner(OWNER_A)).expect(204);
   });
 
+  it('refuses to reschedule a CONFIRMED booking to a time outside schedule hours (REQ-106/089) and serves the reschedule picker', async () => {
+    const createdRes = await postBookingForm({
+      ...CREATE_BODY,
+      selections: selection({ variationId, addOnIds: [addOnId] }),
+      startAt: '2026-11-23T10:00:00.000Z',
+      submissionKey: 'invoice-20261123-0004',
+    }).expect(201);
+    expect(createdRes.body.status).toBe('awaiting-verification');
+    const list = await http()
+      .get(`/api/v1/owner/businesses/${businessId}/bookings`)
+      .set(owner(OWNER_A))
+      .expect(200);
+    const row = list.body.find((b: { startAt: string }) => b.startAt === '2026-11-23T10:00:00.000Z');
+    expect(row).toBeTruthy();
+    expect(row.actorType).toBe('CUSTOMER'); // owner list exposes the last transition actor (REQ-188/190)
+    const booking3Id: number = row.bookingId;
+
+    const accepted = await http()
+      .post(`/api/v1/owner/businesses/${businessId}/bookings/${booking3Id}/accept`)
+      .set(owner(OWNER_A))
+      .expect(200);
+    expect(accepted.body.status).toBe('CONFIRMED');
+    expect(accepted.body.actorType).toBe('OWNER');
+
+    // The available-times read offers free + fitting hourly slots for the 75-min
+    // booking (Haircut 60 + Styling 10 + Wash 5). 10:00 is excluded (its own
+    // occupied slot) and 17:30 falls after the 17:00 schedule close.
+    const times = await http()
+      .get(`/api/v1/owner/businesses/${businessId}/bookings/${booking3Id}/available-times`)
+      .set(owner(OWNER_A))
+      .query({ date: '2026-11-23' })
+      .expect(200);
+    expect(times.body.date).toBe('2026-11-23');
+    expect(times.body.durationMinutes).toBe(75);
+    expect(times.body.slots.some((s: { startAt: string }) => s.startAt === '2026-11-23T13:00:00.000Z')).toBe(true);
+    expect(times.body.slots.some((s: { startAt: string }) => s.startAt === '2026-11-23T10:00:00.000Z')).toBe(false);
+    expect(times.body.slots.some((s: { startAt: string }) => s.startAt === '2026-11-23T17:30:00.000Z')).toBe(false);
+
+    const refused = await http()
+      .post(`/api/v1/owner/businesses/${businessId}/bookings/${booking3Id}/reschedule`)
+      .set(owner(OWNER_A))
+      .send({ startAt: '2026-11-23T17:30:00.000Z' })
+      .expect(409);
+    expect(refused.body.error.code).toBe('SLOT_UNAVAILABLE');
+
+    const stillConfirmed = await http()
+      .get(`/api/v1/owner/businesses/${businessId}/bookings/${booking3Id}`)
+      .set(owner(OWNER_A))
+      .expect(200);
+    expect(stillConfirmed.body.status).toBe('CONFIRMED');
+    expect(stillConfirmed.body.startAt).toBe('2026-11-23T10:00:00.000Z');
+  });
+
   it('customer rejection + one-time-code resubmission returns the booking to awaiting-verification', async () => {
     const body2 = {
       ...CREATE_BODY,
@@ -753,6 +806,8 @@ describe.skipIf(!RUN)('HTTP API end-to-end (real DB)', () => {
     await post({ date: DATE, selections: [] }); // empty selections
     await post({ date: DATE }); // missing selections
     await post({ date: '2026-11-20T00:00:00.000Z', selections: [{ serviceId }] }); // non-date key
+    await post({ date: '2026-02-30', selections: [{ serviceId }] }); // impossible calendar day
+    await post({ date: '2026-13-01', selections: [{ serviceId }] }); // impossible month
     await post({ date: DATE, selections: [{ serviceId: 'not-a-uuid' }] }); // malformed id
     await post({ date: DATE, selections: [{ serviceId, addOnIds: ['not-a-uuid'] }] }); // malformed add-on id
     await post({

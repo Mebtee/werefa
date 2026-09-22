@@ -142,6 +142,12 @@ export class PrismaBookingRepository implements BookingRepository {
       include: {
         components: true,
         payment: { select: { id: true, status: true, method: true, prepaidMinor: true } },
+        // The latest transition only — the owner list sorts by the last actor
+        // (REQ-188/190); the full history stays on the detail read.
+        statusHistory: {
+          orderBy: { occurredAt: 'desc' },
+          take: 1,
+        },
       },
       orderBy: { id: opts.order === 'asc' ? 'asc' : 'desc' },
       take: opts.limit,

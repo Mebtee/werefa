@@ -23,19 +23,37 @@ export class AvailabilityService {
     @Inject(GLOBAL_CLOCK) private readonly clock: GlobalClock,
   ) {}
 
-  /** Slot starts for a single calendar day (global-tz 'YYYY-MM-DD'). */
+  /**
+   * Slot starts for a single calendar day (global-tz 'YYYY-MM-DD').
+   *
+   * `includeBusinessGates` (default true) applies the business gates: paused →
+   * none (R147), expired subscription → none (R133), deactivated → none. The
+   * reschedule flow passes `false` because REQ-147 gates only NEW bookings —
+   * moving an existing CONFIRMED booking (REQ-105) must not be blocked by a
+   * pause; the schedule fit (REQ-106/089) still applies.
+   */
   async getSlotsForDay(
     businessId: string,
-    args: { dateKey: string; durationMinutes: number; fromMinutes?: number; untilMinutes?: number },
+    args: {
+      dateKey: string;
+      durationMinutes: number;
+      fromMinutes?: number;
+      untilMinutes?: number;
+      includeBusinessGates?: boolean;
+    },
   ): Promise<SlotStart[]> {
+    const includeGates = args.includeBusinessGates ?? true;
+
     const biz = await this.prisma.business.findUnique({ where: { id: businessId }, select: { deactivatedAt: true } });
-    if (!biz || biz.deactivatedAt) return [];
+    if (!biz || (includeGates && biz.deactivatedAt)) return [];
 
     const settings = await this.prisma.businessSettings.findUnique({ where: { businessId } });
-    if (!settings || settings.isPaused) return [];
+    if (!settings || (includeGates && settings.isPaused)) return [];
 
-    const sub = await this.prisma.subscription.findUnique({ where: { businessId }, select: { status: true } });
-    if (!sub || !['TRIAL', 'TRIAL_GRACE', 'ACTIVE', 'PAID_GRACE'].includes(sub.status)) return [];
+    if (includeGates) {
+      const sub = await this.prisma.subscription.findUnique({ where: { businessId }, select: { status: true } });
+      if (!sub || !['TRIAL', 'TRIAL_GRACE', 'ACTIVE', 'PAID_GRACE'].includes(sub.status)) return [];
+    }
 
     const version = await this.scheduleRepo.getActiveVersion(businessId);
     if (!version) return [];

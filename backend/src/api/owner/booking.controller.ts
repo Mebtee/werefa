@@ -7,11 +7,13 @@ import { Actor, ApiAuthGuard } from '../auth/api-auth.guard';
 import {
   OwnerBookingDetailView,
   OwnerBookingView,
+  OwnerRescheduleAvailabilityView,
   ownerBookingDetailProjection,
   ownerBookingProjection,
+  ownerRescheduleAvailabilityProjection,
   proofFileName,
 } from '../dto/projections';
-import { BookingIdParamDto, BusinessIdParamDto, OwnerBookingListQuery, ProofIdParamDto, RejectPayload, ReschedulePayload } from '../dto/payloads';
+import { BookingIdParamDto, BusinessIdParamDto, OwnerBookingAvailableTimesQuery, OwnerBookingListQuery, ProofIdParamDto, RejectPayload, ReschedulePayload } from '../dto/payloads';
 
 /**
  * Owner booking management (Prompt 42 §9; REQ-100 … REQ-126, REQ-159). Every
@@ -49,6 +51,25 @@ export class OwnerBookingController {
   async detail(@Actor() actor: ActorContext, @Param() params: BookingIdParamDto): Promise<OwnerBookingDetailView> {
     const booking = await this.bookingService.getForOwner(actor, params.businessId, params.bookingId);
     return ownerBookingDetailProjection(booking);
+  }
+
+  @Get(':businessId/bookings/:bookingId/available-times')
+  @ApiOperation({
+    summary: 'Free + fitting slots for rescheduling a booking on a date (REQ-106/089). Duration comes from the booking snapshot.',
+  })
+  @ApiOkResponse({ type: OwnerRescheduleAvailabilityView })
+  async availableTimes(
+    @Actor() actor: ActorContext,
+    @Param() params: BookingIdParamDto,
+    @Query() query: OwnerBookingAvailableTimesQuery,
+  ): Promise<OwnerRescheduleAvailabilityView> {
+    const result = await this.bookingService.getRescheduleAvailability(
+      actor,
+      params.businessId,
+      params.bookingId,
+      query.date,
+    );
+    return ownerRescheduleAvailabilityProjection(result);
   }
 
   private async detailAfter(actor: ActorContext, businessId: string, bookingId: number): Promise<OwnerBookingDetailView> {
