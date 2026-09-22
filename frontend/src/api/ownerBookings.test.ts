@@ -37,6 +37,7 @@ const DETAIL: OwnerBookingDetailView = {
     { componentType: 'SERVICE', name: 'Haircut', unitPriceMinor: 20000, durationMinutes: 30 },
   ],
   totalPriceMinor: 20000,
+  actorType: 'CUSTOMER',
   history: [
     {
       occurredAt: '2026-09-18T09:00:00.000Z',

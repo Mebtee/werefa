@@ -460,6 +460,8 @@ export interface OwnerBookingView {
   payment: OwnerPaymentView | null
   components: OwnerBookingComponentView[]
   totalPriceMinor: number
+  /** Last status-transition actor (`OWNER` | `CUSTOMER` | `SYSTEM` …) — list sort (REQ-188/190). */
+  actorType: string
 }
 
 /** One booking-history entry on `OwnerBookingDetailView`. */
@@ -492,4 +494,31 @@ export interface OwnerBookingDetailView extends OwnerBookingView {
 /** `POST …/bookings/:bookingId/reject` body (REQ-118 rejection reason). */
 export interface OwnerBookingRejectInput {
   reason: string
+}
+
+/** `GET …/bookings` query parameters (all optional — the owner re-filters client-side). */
+export interface OwnerBookingListQuery {
+  status?: string
+  from?: string
+  to?: string
+  search?: string
+  limit?: number
+}
+
+/** `POST …/bookings/:bookingId/reschedule` body — the target as an ISO instant. */
+export interface OwnerRescheduleInput {
+  startAt: string
+}
+
+/** One free + fitting slot of the reschedule picker (REQ-106/089). */
+export interface OwnerRescheduleAvailabilitySlotView {
+  startAt: string
+  endAt: string
+}
+
+/** `GET …/bookings/:bookingId/available-times?date=…` response. */
+export interface OwnerRescheduleAvailabilityView {
+  date: string
+  durationMinutes: number
+  slots: OwnerRescheduleAvailabilitySlotView[]
 }
