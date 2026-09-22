@@ -419,3 +419,77 @@ export interface CustomerResubmissionResultView {
   booking: CustomerBookingView
   outcome: string
 }
+
+// ---------------------------------------------------------------------------
+// OWNER PAYMENT-PROOF REVIEW wire types (Prompt 51). Mirror the backend owner
+// projections (`OwnerBookingView` / `OwnerBookingDetailView` /
+// `OwnerBookingProofView`). The backend remains authoritative for statuses,
+// prices and proof metadata; the UI never recomputes them. Booking status and
+// payment status are distinct backend values and are carried separately.
+// ---------------------------------------------------------------------------
+
+/** `OwnerPaymentView` on `GET /api/v1/owner/businesses/:id/bookings/:bookingId`. */
+export interface OwnerPaymentView {
+  /** Backend payment-status code: `PENDING` | `ACCEPTED` | `REJECTED`. */
+  status: string
+  /** Backend payment-method code, e.g. `BANK_TRANSFER` | `TELEBIRR_MOBILE_MONEY`. */
+  method: string
+  prepaidMinor: number
+}
+
+/** One resolved component line on the owner booking projection. */
+export interface OwnerBookingComponentView {
+  componentType: string
+  name: string
+  unitPriceMinor: number
+  durationMinutes: number
+}
+
+/** `OwnerBookingView` — the owner booking list item and detail base. */
+export interface OwnerBookingView {
+  bookingId: number
+  /** Backend booking-state code, e.g. `PAYMENT_PENDING` | `CONFIRMED`. */
+  status: string
+  customerName: string
+  customerPhone: string
+  note: string | null
+  startAt: string
+  endAt: string
+  createdAt: string
+  updatedAt: string
+  payment: OwnerPaymentView | null
+  components: OwnerBookingComponentView[]
+  totalPriceMinor: number
+}
+
+/** One booking-history entry on `OwnerBookingDetailView`. */
+export interface OwnerBookingHistoryView {
+  occurredAt: string
+  fromStatus: string | null
+  toStatus: string
+  actorType: string
+  actorUserId: string | null
+  reason: string | null
+}
+
+/** One proof in the owner proof timeline (metadata only, newest last). */
+export interface OwnerBookingProofView {
+  proofId: string
+  submittedAt: string
+  fileName: string
+  mimeType: string
+  sizeBytes: number
+  /** True when a later resubmitted proof replaced this one. */
+  replaced: boolean
+}
+
+/** `GET /api/v1/owner/businesses/:id/bookings/:bookingId` response. */
+export interface OwnerBookingDetailView extends OwnerBookingView {
+  history: OwnerBookingHistoryView[]
+  proofs: OwnerBookingProofView[]
+}
+
+/** `POST …/bookings/:bookingId/reject` body (REQ-118 rejection reason). */
+export interface OwnerBookingRejectInput {
+  reason: string
+}
