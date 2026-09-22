@@ -1,6 +1,7 @@
 import type {
   BlockedPeriodView,
   OwnerBookingDetailView,
+  OwnerBookingView,
   OwnerBusinessView,
   OwnerScheduleConflictView,
   OwnerScheduleView,
@@ -16,6 +17,8 @@ import type {
 import { availabilityScheduleFromView } from '@/api/schedule.mapper'
 import {
   acceptBooking,
+  cancelBooking,
+  cancelPaymentPendingBooking,
   createBookingEntry,
   getBooking,
   getBookingsByPhone,
@@ -24,8 +27,12 @@ import {
   getOpenConflicts,
   getServices,
   applyScheduleException,
+  listBookings,
   listScheduleHistory,
+  markNoShowBooking,
   rejectBooking,
+  releaseRejectedBooking,
+  rescheduleBooking,
   resubmitRejectedProof,
   saveBookingInterval,
   saveSchedule,
@@ -596,19 +603,45 @@ function ownerProofViewOf(booking: Booking) {
   }
 }
 
-/** Projects a store booking into the real `OwnerBookingDetailView` shape. */
-function ownerBookingDetailViewOf(booking: Booking): OwnerBookingDetailView {
-  const startAt = new Date(`${booking.date}T${booking.time}:00`)
+/**
+ * The store records actor trails as display labels; the wire carries actor
+ * codes. Every store action maps to exactly one code, so the round-trip is a
+ * pure label→code table (unknown labels mean an automated/system action).
+ */
+function wireActorTypeOf(actorLabel: string): string {
+  if (actorLabel === 'Demo Owner' || actorLabel === 'Owner') return 'OWNER'
+  if (actorLabel === 'Customer') return 'CUSTOMER'
+  return 'SYSTEM'
+}
+
+/** A store booking's last status-transition actor, as a wire actor code. */
+function lastActorOf(booking: Booking): string {
+  const last = booking.history[booking.history.length - 1]
+  return wireActorTypeOf(last?.actor ?? 'System')
+}
+
+/** The booking slot as a UTC instant · startAt/endAt round-trip in any TZ. */
+function bookedInstant(date: string, time: string): string {
+  return `${date}T${time}:00.000Z`
+}
+
+/** Serializes the persistent booking fields shared by list and detail views. */
+function ownerBookingViewOf(booking: Booking): OwnerBookingView {
+  const startAt = bookedInstant(booking.date, booking.time)
+  const surrogate = storeBookingSurrogates(booking.businessSlug).get(booking.id) ?? 0
   return {
-    bookingId: hashBookingId(booking.id),
+    bookingId: surrogate,
     status: OWNER_BOOKING_STATE_CODE[booking.state],
     customerName: booking.customer.name,
     customerPhone: booking.customer.phone,
     note: booking.customer.note || null,
-    startAt: startAt.toISOString(),
-    endAt: new Date(startAt.getTime() + booking.totalDurationMinutes * 60_000).toISOString(),
-    createdAt: startAt.toISOString(),
-    updatedAt: startAt.toISOString(),
+    startAt,
+    endAt: bookedInstant(
+      booking.date,
+      minutesToTime(minutesOf(booking.time) + booking.totalDurationMinutes),
+    ),
+    createdAt: naiveInstantFromMinuteString(booking.createdAt),
+    updatedAt: naiveInstantFromMinuteString(booking.updatedAt),
     payment: {
       status:
         booking.paymentState === 'pending'
@@ -627,11 +660,19 @@ function ownerBookingDetailViewOf(booking: Booking): OwnerBookingDetailView {
       durationMinutes: item.durationMinutes,
     })),
     totalPriceMinor: booking.total,
+    actorType: lastActorOf(booking),
+  }
+}
+
+/** Projects a store booking into the real `OwnerBookingDetailView` shape. */
+function ownerBookingDetailViewOf(booking: Booking): OwnerBookingDetailView {
+  return {
+    ...ownerBookingViewOf(booking),
     history: booking.history.map((entry) => ({
       occurredAt: entry.at,
       fromStatus: entry.previous ? OWNER_BOOKING_STATE_CODE[entry.previous] : null,
       toStatus: OWNER_BOOKING_STATE_CODE[entry.state],
-      actorType: 'OWNER',
+      actorType: wireActorTypeOf(entry.actor),
       actorUserId: null,
       reason: entry.state === 'rejected' ? booking.rejectionReason : null,
     })),
@@ -639,13 +680,38 @@ function ownerBookingDetailViewOf(booking: Booking): OwnerBookingDetailView {
   }
 }
 
-/** Deterministic positive surrogate for the numeric backend booking id. */
-function hashBookingId(id: string): number {
-  let hash = 0
-  for (let i = 0; i < id.length; i += 1) {
-    hash = (hash * 31 + id.charCodeAt(i)) % 1_000_000
+/**
+ * The backend booking id is a numeric surrogate issued in creation order.
+ * Route ids may also be raw store ids from tests. Resolve either form to the
+ * store id, or null.
+ */
+function storeBookingSurrogates(slug: string): ReadonlyMap<string, number> {
+  const ordered = [...listBookings(slug)].sort(
+    (a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
+  )
+  const index = new Map<string, number>()
+  ordered.forEach((booking, position) => index.set(booking.id, position + 1))
+  return index
+}
+
+/** `YYYY-MM-DDTHH:MM` → a naive-UTC wire instant (same convention as startAt). */
+function naiveInstantFromMinuteString(value: string): string {
+  return `${value.slice(0, 16)}:00.000Z`
+}
+
+function resolveStoreBookingId(
+  routeId: string | undefined,
+  slug: string,
+): string | null {
+  if (!routeId) return null
+  if (routeId.startsWith('bk-')) return routeId
+  const numeric = Number(routeId)
+  if (!Number.isFinite(numeric)) return null
+  const indexes = storeBookingSurrogates(slug)
+  for (const [storeId, surrogate] of indexes) {
+    if (surrogate === numeric) return storeId
   }
-  return hash + 1
+  return null
 }
 
 /** A binary proof response, mirroring the streaming download route. */
@@ -761,9 +827,16 @@ export function installBusinessApiStub(
         if (action === 'bookings') {
           const forced = options.failOwnerBookingRequest?.({ method, path: pathname })
           if (forced) return forced
-          const bookingId = rest[4]
+          const routeBookingId = rest[4]
+          if (method === 'GET' && !routeBookingId) {
+            const routes = [...listBookings(storeSlug)].sort(
+              (a, b) => (b.createdAt < a.createdAt ? -1 : 1),
+            )
+            return json(routes.map(ownerBookingViewOf))
+          }
+          const bookingId = resolveStoreBookingId(routeBookingId, storeSlug)
           if (!bookingId) {
-            return envelope(404, 'NOT_FOUND', 'Not found', 'No fetch stub for the owner bookings list.')
+            return envelope(404, 'NOT_FOUND', 'Not found', 'Booking not found.')
           }
           const sub = rest[5]
           if (!sub && method === 'GET') {
@@ -789,6 +862,76 @@ export function installBusinessApiStub(
             const result = rejectBooking(storeSlug, bookingId, reason)
             if (!result.ok) return envelope(409, 'CONFLICT', 'Conflict', result.error)
             return json(ownerBookingDetailViewOf(result.value))
+          }
+          if (sub === 'cancel' && method === 'POST') {
+            const current = getBooking(storeSlug, bookingId)
+            if (!current) return envelope(404, 'NOT_FOUND', 'Not found', 'Booking not found.')
+            const result =
+              current.state === 'payment-pending'
+                ? cancelPaymentPendingBooking(storeSlug, bookingId)
+                : current.state === 'rejected'
+                  ? releaseRejectedBooking(storeSlug, bookingId)
+                  : cancelBooking(storeSlug, bookingId)
+            if (!result.ok) return envelope(409, 'CONFLICT', 'Conflict', result.error)
+            return json(ownerBookingDetailViewOf(result.value))
+          }
+          if (sub === 'no-show' && method === 'POST') {
+            const result = markNoShowBooking(storeSlug, bookingId)
+            if (!result.ok) return envelope(409, 'CONFLICT', 'Conflict', result.error)
+            return json(ownerBookingDetailViewOf(result.value))
+          }
+          if (sub === 'release-slot' && method === 'POST') {
+            const result = releaseRejectedBooking(storeSlug, bookingId)
+            if (!result.ok) return envelope(409, 'CONFLICT', 'Conflict', result.error)
+            return new Response(null, { status: 204 })
+          }
+          if (sub === 'reschedule' && method === 'POST') {
+            const startAt =
+              typeof (body as { startAt?: unknown } | undefined)?.startAt === 'string'
+                ? (body as { startAt: string }).startAt
+                : ''
+            const date = startAt.slice(0, 10)
+            const time = startAt.slice(11, 16)
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) {
+              return validationEnvelope({ startAt: 'startAt must be an ISO instant.' })
+            }
+            const result = rescheduleBooking(storeSlug, bookingId, date, time)
+            if (!result.ok) return envelope(409, 'CONFLICT', 'Conflict', result.error)
+            return json(ownerBookingDetailViewOf(result.value))
+          }
+          if (sub === 'available-times' && method === 'GET') {
+            let date = ''
+            try {
+              date = new URL(url).searchParams.get('date') ?? ''
+            } catch {
+              date = ''
+            }
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+              return validationEnvelope({ date: 'date must be a YYYY-MM-DD date-key.' })
+            }
+            const booking = getBooking(storeSlug, bookingId)
+            const business = getBusiness(storeSlug)
+            if (!booking || !business) {
+              return envelope(404, 'NOT_FOUND', 'Not found', 'Booking not found.')
+            }
+            const occupied = getOccupiedBlocks(storeSlug, date)
+            const free = computeAvailableTimes(
+              business,
+              date,
+              booking.totalDurationMinutes,
+              occupied,
+            )
+            return json({
+              date,
+              durationMinutes: booking.totalDurationMinutes,
+              slots: free.map((time) => ({
+                startAt: bookedInstant(date, time),
+                endAt: bookedInstant(
+                  date,
+                  minutesToTime(minutesOf(time) + booking.totalDurationMinutes),
+                ),
+              })),
+            })
           }
           if (sub === 'proofs' && method === 'GET') {
             const proofId = rest[6]
