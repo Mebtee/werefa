@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import type { Booking, ScheduleConflict } from '@/types/models'
 import { mockOwnerApi } from '@/mock/ownerApi'
 import { useOwnedBusiness } from '@/features/owner-portal/state/useOwnedBusiness'
+import { usePaymentReview } from '@/features/owner-portal/state/usePaymentReview'
 import { LoadState } from '@/features/owner-portal/components/LoadState'
 import { RescheduleForm } from '@/features/owner-portal/components/RescheduleForm'
 import {
@@ -27,8 +28,10 @@ type ConfirmMode =
   | null
 
 export function BookingDetailPage() {
-  const { business, loading, error, reload } = useOwnedBusiness()
+  const { business, businessId, loading, error, reload } = useOwnedBusiness()
   const { bookingId } = useParams<{ bookingId: string }>()
+
+  const paymentReview = usePaymentReview(businessId, bookingId)
 
   const [booking, setBooking] = useState<Booking | null>(null)
   const [missing, setMissing] = useState(false)
@@ -63,7 +66,7 @@ export function BookingDetailPage() {
   const onMutationSucceeded = async () => {
     setConfirming(null)
     setRejection('')
-    await load()
+    await Promise.all([load(), paymentReview.reload()])
   }
 
   const run = async (action: () => Promise<{ ok: boolean; error?: string }>) => {
@@ -88,18 +91,24 @@ export function BookingDetailPage() {
   ): { ok: boolean; error?: string } =>
     result.ok ? { ok: true } : { ok: false, error: result.error }
 
-  const accept = () =>
-    void run(async () => toResult(await mockOwnerApi.acceptBooking(booking!.id)))
+  const accept = () => {
+    if (busy || paymentReview.reviewing) return
+    void (async () => {
+      const ok = await paymentReview.accept()
+      if (ok) await onMutationSucceeded()
+    })()
+  }
 
   const reject = () => {
+    if (busy || paymentReview.reviewing) return
     if (!rejection.trim()) {
       setRejectionError('Please provide a reason for the rejection.')
       return
     }
-    void run(async () => {
-      const result = await mockOwnerApi.rejectBooking(booking!.id, rejection)
-      return toResult(result)
-    })
+    void (async () => {
+      const ok = await paymentReview.reject(rejection)
+      if (ok) await onMutationSucceeded()
+    })()
   }
 
   const cancelConfirmed = () =>
@@ -141,6 +150,8 @@ export function BookingDetailPage() {
       )?.label ?? booking.paymentMethod)
     : booking.paymentMethod
 
+  const reviewPaymentStatus = paymentReview.review?.paymentStatus ?? null
+
   return (
     <>
       <nav aria-label="Breadcrumb" className="booking-breadcrumb">
@@ -171,15 +182,15 @@ export function BookingDetailPage() {
         </div>
       </header>
 
-      {actionError && (
+      {(actionError || paymentReview.actionError) && (
         <div style={{ marginBottom: 'var(--space-4)' }}>
-          <Alert tone="danger">{actionError}</Alert>
+          <Alert tone="danger">{actionError ?? paymentReview.actionError}</Alert>
         </div>
       )}
 
       <BookingActions
         booking={booking}
-        busy={busy}
+        busy={busy || paymentReview.reviewing}
         confirming={confirming}
         setConfirming={setConfirming}
         rejection={rejection}
@@ -253,34 +264,66 @@ export function BookingDetailPage() {
         </p>
         <p className="booking-detail__row">
           <span className="booking-detail__label">Status</span>
-          <span
-            className={`booking-chip ${PAYMENT_STATE_CHIP[booking.paymentState]}`}
-          >
-            {PAYMENT_STATE_LABEL[booking.paymentState]}
-          </span>
+          {reviewPaymentStatus ? (
+            <span
+              className={`booking-chip ${PAYMENT_STATE_CHIP[reviewPaymentStatus]}`}
+            >
+              {PAYMENT_STATE_LABEL[reviewPaymentStatus]}
+            </span>
+          ) : (
+            <span className="card__subtitle">
+              {paymentReview.loading ? 'Loading…' : 'Unavailable'}
+            </span>
+          )}
         </p>
         <p className="card__subtitle">
-          {booking.paymentState === 'pending' &&
+          {reviewPaymentStatus === 'pending' &&
             'Awaiting review of the submitted proof.'}
-          {booking.paymentState === 'accepted' &&
+          {reviewPaymentStatus === 'accepted' &&
             `Proof accepted — ${formatMoney(booking.deposit, business?.currency ?? 'ETB')} deposit locked in.`}
-          {booking.paymentState === 'rejected' && 'Proof rejected by the owner.'}
+          {reviewPaymentStatus === 'rejected' && 'Proof rejected by the owner.'}
+          {reviewPaymentStatus === null && paymentReview.loading && 'Loading payment status…'}
         </p>
-        <div className="proof-card">
-          <div>
-            <strong>{booking.proof.fileName}</strong>
-            <span className="line-item__meta">
-              {' '}
-              ({formatBytes(booking.proof.sizeBytes)} · {booking.proof.mimeType})
-            </span>
-          </div>
-          <span className="badge">Preview only — no download in this slice</span>
-        </div>
-        {booking.rejectionReason && (
+        {paymentReview.error ? (
+          <Alert tone="danger" title="Could not load the payment proof">
+            {paymentReview.error}
+          </Alert>
+        ) : (
+          <ul className="proof-timeline">
+            {paymentReview.review && paymentReview.review.proofs.length > 0 ? (
+              paymentReview.review.proofs.map((proof) => (
+                <li key={proof.proofId} className="proof-card">
+                  <div>
+                    <strong>{proof.fileName}</strong>
+                    <span className="line-item__meta">
+                      {' '}
+                      ({formatBytes(proof.sizeBytes)} · {proof.mimeType})
+                    </span>
+                    {proof.replaced && <span className="badge">Replaced</span>}
+                  </div>
+                  <Button
+                    variant="outline"
+                    disabled={paymentReview.reviewing}
+                    onClick={() => void paymentReview.download(proof)}
+                  >
+                    Download proof
+                  </Button>
+                </li>
+              ))
+            ) : (
+              <li className="card__subtitle">
+                {paymentReview.loading
+                  ? 'Loading the payment proof…'
+                  : 'No payment proof was submitted.'}
+              </li>
+            )}
+          </ul>
+        )}
+        {paymentReview.review?.rejectionReason && (
           <div className="booking-rejection">
             <p className="booking-detail__label">Rejection reason</p>
             <p className="booking-value booking-rejection__text">
-              {booking.rejectionReason}
+              {paymentReview.review.rejectionReason}
             </p>
           </div>
         )}
