@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import {
   fireEvent,
   screen,
+  within,
 } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { renderAppAt } from '@/test/auth'
@@ -85,7 +86,7 @@ async function waitForBookings() {
 function cardNames(): string[] {
   return screen
     .getAllByRole('link')
-    .filter((el) => el.getAttribute('href')?.startsWith('/owner/bookings/bk-'))
+    .filter((el) => el.getAttribute('href')?.startsWith('/owner/bookings/'))
     .map((el) => el.querySelector('.booking-card__name')?.textContent ?? '')
 }
 
@@ -336,7 +337,7 @@ describe('sort controls', () => {
     expect(dirBtn.textContent).toContain('A–Z')
     const cards = screen
       .getAllByRole('link')
-      .filter((el) => el.getAttribute('href')?.startsWith('/owner/bookings/bk-'))
+      .filter((el) => el.getAttribute('href')?.startsWith('/owner/bookings/'))
     const weights = cards.map((el) => {
       const chip = el.querySelector('.booking-card__status .booking-chip')
       return chipWeight(chip?.textContent ?? '')
@@ -504,8 +505,8 @@ describe('date range safety on the page (Prompt 38)', () => {
   })
 })
 
-describe('schedule exception indicator in the list (Prompt 38, REQ-160)', () => {
-  it('shows a Schedule Exception badge for a kept booking', async () => {
+describe('schedule exceptions absent from the list (Prompt 49)', () => {
+  it('a kept booking shows no Schedule Exception badge', async () => {
     const created = createBookingEntry(fakeBooking({ date: '2030-03-04', time: '10:30', name: 'Kept Customer', phone: '+251966666666' }))
     if (!created.ok) throw new Error('seed failed')
     acceptBooking(PRIMARY_BUSINESS_SLUG, created.booking.id)
@@ -520,7 +521,11 @@ describe('schedule exception indicator in the list (Prompt 38, REQ-160)', () => 
     keepBooking(PRIMARY_BUSINESS_SLUG, created.booking.id, 'Customer confirmed by phone.')
     renderAt('/owner/bookings')
     await waitForBookings()
-    expect(screen.getByText('Schedule Exception')).toBeInTheDocument()
+    const card = screen
+      .getByText('Kept Customer')
+      .closest('.booking-card') as HTMLElement
+    expect(within(card).getByText('Confirmed')).toBeInTheDocument()
+    expect(within(card).queryByText('Schedule Exception')).not.toBeInTheDocument()
   })
 })
 

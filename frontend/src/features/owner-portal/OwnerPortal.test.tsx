@@ -877,7 +877,7 @@ describe('schedule conflicts (REQ-091/092/093/099/159/160)', () => {
     expect(within(card).getByText('Cancelled')).toBeInTheDocument()
   })
 
-  it('Keep Booking records a Schedule Exception visible on the booking', async () => {
+  it('Keep Booking resolves the conflict without a mock Schedule Exception card', async () => {
     const { id } = seedConfirmedBooking(MONDAY, '10:00')
     const { router } = renderAt('/owner/schedule')
     await screen.findByRole('heading', { name: 'Working hours' })
@@ -904,13 +904,17 @@ describe('schedule conflicts (REQ-091/092/093/099/159/160)', () => {
     const card = await screen
       .findByText('Test Customer')
       .then((node) => node.closest('.booking-card') as HTMLElement)
-    expect(within(card).getByText('Schedule Exception')).toBeInTheDocument()
+    // Keeping resolves the conflict; the booking is unchanged and no mock-only
+    // Schedule Exception badge is drawn (Prompt 49).
+    expect(within(card).getByText('Confirmed')).toBeInTheDocument()
+    expect(within(card).queryByText('Schedule Exception')).not.toBeInTheDocument()
 
     router.navigate(`/owner/bookings/${id}`)
+    await screen.findByRole('heading', { name: 'Test Customer' })
     expect(
-      await screen.findByRole('heading', { name: 'Schedule Exception' }),
-    ).toBeInTheDocument()
-    expect(screen.getByText('Confirmed by phone.')).toBeInTheDocument()
+      screen.queryByRole('heading', { name: 'Schedule Exception' }),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText('Confirmed by phone.')).not.toBeInTheDocument()
   })
 
   it('Reschedule moves the affected booking to a free slot and clears the conflict', async () => {

@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
-  cleanup,
   fireEvent,
   screen,
   waitFor,
@@ -200,15 +199,17 @@ describe('booking detail information (REQ-174)', () => {
       screen.getByText(`(${formatBytes(b.proof.sizeBytes)} · ${b.proof.mimeType})`),
     ).toBeInTheDocument()
 
-    // State history carries the current marker and the actor trail.
+    // State history carries the current marker and the actor trail. The last
+    // transition's actor is the owner (label from the wire actor code).
     expect(screen.getByText(/\(current\)/)).toBeInTheDocument()
-    expect(screen.getByText(new RegExp(`from .* · Demo Owner ·`))).toBeInTheDocument()
+    expect(screen.getByText(new RegExp(`from .* · Owner ·`))).toBeInTheDocument()
 
-    // Telegram section defaults are honest for an unconnected customer.
-    expect(await screen.findByText('Not connected')).toBeInTheDocument()
+    // No Telegram section is rendered — the owner surface never fabricates
+    // customer Telegram state (Prompt 49).
+    expect(screen.queryByText('Not connected')).not.toBeInTheDocument()
     expect(
-      screen.getByText('No Telegram notifications sent so far.'),
-    ).toBeInTheDocument()
+      screen.queryByText('No Telegram notifications sent so far.'),
+    ).not.toBeInTheDocument()
   })
 })
 
@@ -397,31 +398,10 @@ describe('terminal state guards (REQ-102/103/104)', () => {
   })
 })
 
-describe('telegram gating on the detail page (REQ-056/060..064)', () => {
-  it('shows Connected and records proof-received + rejection notices with the reason', async () => {
+describe('no Telegram section on the detail page (Prompt 49)', () => {
+  it('renders no customer Telegram state for a connected or unconnected customer', async () => {
     setCustomerTelegramConnected(PRIMARY_BUSINESS_SLUG, '+251900123456', true)
-    const booking = seedBooking({
-      name: 'Telegram Pat',
-      phone: '+251900123456',
-      date: '2030-03-04',
-      time: '10:30',
-    })
 
-    renderAt(`/owner/bookings/${booking.id}`)
-    await screen.findByRole('heading', { name: 'Telegram Pat' })
-    expect(await screen.findByText('Connected')).toBeInTheDocument()
-    // N01 was recorded at booking creation for the connected customer.
-    expect(screen.getByText('Payment proof received')).toBeInTheDocument()
-
-    await user.type(screen.getByPlaceholderText(/e\.g\./), 'Bad proof')
-    await user.click(screen.getByRole('button', { name: 'Reject booking' }))
-
-    // N03 carries the owner's reason to the customer view.
-    expect(await screen.findByText('Payment rejected')).toBeInTheDocument()
-    expect(screen.getByText('Reason: Bad proof')).toBeInTheDocument()
-  })
-
-  it('an unconnected customer gets no Telegram section entries on rejection', async () => {
     const booking = seedBooking({
       name: 'Silent Pat',
       phone: '+251911223377',
@@ -432,10 +412,12 @@ describe('telegram gating on the detail page (REQ-056/060..064)', () => {
 
     renderAt(`/owner/bookings/${booking.id}`)
     await screen.findByRole('heading', { name: 'Silent Pat' })
-    expect(await screen.findByText('Not connected')).toBeInTheDocument()
+    expect(screen.queryByText('Not connected')).not.toBeInTheDocument()
+    expect(screen.queryByText('Connected')).not.toBeInTheDocument()
     expect(
-      screen.getByText('No Telegram notifications sent so far.'),
-    ).toBeInTheDocument()
+      screen.queryByText('No Telegram notifications sent so far.'),
+    ).not.toBeInTheDocument()
+    expect(document.querySelectorAll('.telegram-notice')).toHaveLength(0)
   })
 })
 
@@ -534,22 +516,6 @@ describe('rejection: whitespace-only reason (Prompt 38)', () => {
   })
 })
 
-describe('telegram notices: no duplication from viewing (Prompt 38)', () => {
-  it('viewing a booking does not duplicate its Telegram notices', async () => {
-    setCustomerTelegramConnected(PRIMARY_BUSINESS_SLUG, '+251900123456', true)
-    const booking = seedBooking({ name: 'View Pat', phone: '+251900123456', date: '2030-03-04', time: '10:30' })
-    const before = listBookings(PRIMARY_BUSINESS_SLUG).find((b) => b.id === booking.id)!.telegramNotices.length
-    renderAt(`/owner/bookings/${booking.id}`)
-    await screen.findByRole('heading', { name: 'View Pat' })
-    expect(document.querySelectorAll('.telegram-notice').length).toBe(before)
-    cleanup()
-    renderAt(`/owner/bookings/${booking.id}`)
-    await screen.findByRole('heading', { name: 'View Pat' })
-    expect(document.querySelectorAll('.telegram-notice').length).toBe(before)
-    expect(listBookings(PRIMARY_BUSINESS_SLUG).find((b) => b.id === booking.id)!.telegramNotices).toHaveLength(before)
-  })
-})
-
 describe('rejected recovery: resubmission path text (Prompt 38, T10)', () => {
   it('rejected detail explains the supported customer resubmission path', async () => {
     const booking = seedBooking({ name: 'Resubmit Pat', phone: '+251933445599', date: '2030-03-05', time: '09:00' })
@@ -561,8 +527,8 @@ describe('rejected recovery: resubmission path text (Prompt 38, T10)', () => {
   })
 })
 
-describe('schedule exception visible in detail (Prompt 38, REQ-160)', () => {
-  it('shows the Schedule Exception card with the owner reason for a kept booking', async () => {
+describe('schedule exception absent from the detail page (Prompt 49)', () => {
+  it('a kept booking stays Confirmed with no mock-only Schedule Exception card', async () => {
     const booking = seedConfirmedAt('2030-03-04', '09:00')
     const business = getBusiness(PRIMARY_BUSINESS_SLUG)!
     saveSchedule(PRIMARY_BUSINESS_SLUG, {
@@ -575,8 +541,10 @@ describe('schedule exception visible in detail (Prompt 38, REQ-160)', () => {
     keepBooking(PRIMARY_BUSINESS_SLUG, booking.id, 'Customer confirmed by phone.')
     renderAt(`/owner/bookings/${booking.id}`)
     await screen.findByRole('heading', { name: booking.customer.name })
-    expect(screen.getByRole('heading', { name: 'Schedule Exception' })).toBeInTheDocument()
-    expect(screen.getByText('Customer confirmed by phone.')).toBeInTheDocument()
-    expect(screen.getByText(/stays as booked and the customer was not notified/)).toBeInTheDocument()
+    // Keeping the booking resolves the conflict, so the real Schedule card does
+    // not appear and no mock-only Schedule Exception card is rendered either.
+    expect(screen.getAllByText('Confirmed').length).toBeGreaterThanOrEqual(1)
+    expect(screen.queryByRole('heading', { name: 'Schedule Exception' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Customer confirmed by phone.')).not.toBeInTheDocument()
   })
 })

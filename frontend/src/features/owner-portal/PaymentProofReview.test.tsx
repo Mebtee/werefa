@@ -135,7 +135,7 @@ describe('owner payment-proof review — real API', () => {
 })
 
 describe('owner payment-proof review — error handling', () => {
-  it('shows a safe message when the proof cannot be loaded', async () => {
+  it('does not leak mock booking data when the detail cannot be loaded', async () => {
     const pending = seededPending()
     renderAppAt(`/owner/bookings/${pending.id}`, {
       businessApi: {
@@ -145,9 +145,15 @@ describe('owner payment-proof review — error handling', () => {
             : null,
       },
     })
-    await screen.findByRole('heading', { name: pending.customer.name })
 
-    expect(await screen.findByText(/Something went wrong on our side/i)).toBeInTheDocument()
+    // The detail shell and the review share the same real endpoint, so a
+    // failed load yields the safe not-found state, never mock data.
+    expect(await screen.findByText(/Booking not found/i)).toBeInTheDocument()
+    expect(screen.queryByText(pending.customer.name)).not.toBeInTheDocument()
+    expect(screen.queryByText(pending.proof.fileName)).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Download proof' }),
+    ).not.toBeInTheDocument()
   })
 
   it('keeps the booking Payment Pending when accept conflicts', async () => {
@@ -180,9 +186,8 @@ describe('owner payment-proof review — error handling', () => {
             : null,
       },
     })
-    await screen.findByRole('heading', { name: pending.customer.name })
 
-    expect(await screen.findByText(/Could not load the payment proof/i)).toBeInTheDocument()
+    expect(await screen.findByText(/Booking not found/i)).toBeInTheDocument()
     expect(screen.queryByText(pending.proof.fileName)).not.toBeInTheDocument()
     expect(
       screen.queryByRole('button', { name: 'Download proof' }),
