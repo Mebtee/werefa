@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import type { Booking, ScheduleConflict } from '@/types/models'
-import { mockOwnerApi } from '@/mock/ownerApi'
+import type { Booking } from '@/types/models'
+import type { OwnerScheduleConflictView } from '@/api/types'
+import { toUserMessage } from '@/api/errors'
+import {
+  cancelOwnerBooking,
+  getOwnerBookingDetail,
+  markOwnerBookingNoShow,
+  releaseOwnerBookingSlot,
+} from '@/api/ownerBookings'
+import { listOwnerScheduleConflicts } from '@/api/schedule'
+import { ownerBookingFromWire } from '@/features/owner-portal/lib/ownerBooking'
 import { useOwnedBusiness } from '@/features/owner-portal/state/useOwnedBusiness'
 import { usePaymentReview } from '@/features/owner-portal/state/usePaymentReview'
 import { LoadState } from '@/features/owner-portal/components/LoadState'
@@ -11,7 +20,6 @@ import {
   BOOKING_STATE_LABEL,
   PAYMENT_STATE_CHIP,
   PAYMENT_STATE_LABEL,
-  TELEGRAM_NOTICE_LABEL,
 } from '@/features/owner-portal/lib/labels'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
@@ -40,24 +48,22 @@ export function BookingDetailPage() {
   const [busy, setBusy] = useState(false)
   const [rejection, setRejection] = useState('')
   const [rejectionError, setRejectionError] = useState<string | null>(null)
-  const [openConflicts, setOpenConflicts] = useState<readonly ScheduleConflict[]>([])
-  const [telegramConnected, setTelegramConnected] = useState<boolean | null>(null)
+  const [openConflicts, setOpenConflicts] = useState<readonly OwnerScheduleConflictView[]>([])
 
   const load = useCallback(async () => {
-    if (!bookingId) return
+    if (!businessId || !bookingId) return
     setMissing(false)
     setBooking(null)
     try {
-      const loaded = await mockOwnerApi.getBooking(bookingId)
-      setBooking(loaded)
-      setOpenConflicts(await mockOwnerApi.getOpenConflictsForBooking(bookingId))
-      setTelegramConnected(
-        await mockOwnerApi.isCustomerTelegramConnected(loaded.customer.phone),
-      )
+      const detail = await getOwnerBookingDetail(businessId, bookingId)
+      setBooking(ownerBookingFromWire(detail))
+      // The Schedule card is driven only by the real open conflicts (REQ-092/093).
+      const allConflicts = await listOwnerScheduleConflicts(businessId)
+      setOpenConflicts(allConflicts.filter((conflict) => String(conflict.bookingId) === bookingId))
     } catch {
       setMissing(true)
     }
-  }, [bookingId])
+  }, [businessId, bookingId])
 
   useEffect(() => {
     void load()
@@ -69,27 +75,24 @@ export function BookingDetailPage() {
     await Promise.all([load(), paymentReview.reload()])
   }
 
-  const run = async (action: () => Promise<{ ok: boolean; error?: string }>) => {
+  /**
+   * Runs a real lifecycle mutation; any thrown ApiError is surfaced through the
+   * safe user message and the detail is re-fetched after success (the UI never
+   * assumes the new state locally).
+   */
+  const run = async (action: () => Promise<unknown>) => {
+    if (!booking) return
     setBusy(true)
     setActionError(null)
     try {
-      const result = await action()
-      if (!result.ok) {
-        setActionError(result.error ?? 'That could not be completed. Please try again.')
-        return
-      }
+      await action()
       await onMutationSucceeded()
-    } catch {
-      setActionError('Could not update this booking right now. Please try again.')
+    } catch (err) {
+      setActionError(toUserMessage(err))
     } finally {
       setBusy(false)
     }
   }
-
-  const toResult = (
-    result: { ok: true; value: Booking } | { ok: false; error: string },
-  ): { ok: boolean; error?: string } =>
-    result.ok ? { ok: true } : { ok: false, error: result.error }
 
   const accept = () => {
     if (busy || paymentReview.reviewing) return
@@ -111,17 +114,25 @@ export function BookingDetailPage() {
     })()
   }
 
-  const cancelConfirmed = () =>
-    void run(async () => toResult(await mockOwnerApi.cancelBooking(booking!.id)))
+  const cancelConfirmed = () => {
+    if (!businessId) return
+    void run(() => cancelOwnerBooking(businessId, booking!.id))
+  }
 
-  const markNoShow = () =>
-    void run(async () => toResult(await mockOwnerApi.markNoShowBooking(booking!.id)))
+  const markNoShow = () => {
+    if (!businessId) return
+    void run(() => markOwnerBookingNoShow(businessId, booking!.id))
+  }
 
-  const cancelPending = () =>
-    void run(async () => toResult(await mockOwnerApi.cancelPaymentPendingBooking(booking!.id)))
+  const cancelPending = () => {
+    if (!businessId) return
+    void run(() => cancelOwnerBooking(businessId, booking!.id))
+  }
 
-  const releaseRejected = () =>
-    void run(async () => toResult(await mockOwnerApi.releaseRejectedBooking(booking!.id)))
+  const releaseRejected = () => {
+    if (!businessId) return
+    void run(() => releaseOwnerBookingSlot(businessId, booking!.id))
+  }
 
   if (!booking) {
     return (
@@ -190,6 +201,7 @@ export function BookingDetailPage() {
 
       <BookingActions
         booking={booking}
+        businessId={businessId}
         busy={busy || paymentReview.reviewing}
         confirming={confirming}
         setConfirming={setConfirming}
@@ -362,7 +374,7 @@ export function BookingDetailPage() {
           </h2>
           <Alert tone="warning" title="Affected by a schedule change">
             This booking no longer fits the current schedule:{' '}
-            {openConflicts[0].reason}
+            {openConflicts[0].reasonDetail}
           </Alert>
           <p className="card__subtitle">
             Resolve it from the schedule page with Reschedule, Cancel or Keep
@@ -375,69 +387,6 @@ export function BookingDetailPage() {
           </p>
         </section>
       )}
-
-      {booking.scheduleException && (
-        <section
-          className="card card--padded"
-          aria-labelledby="exception-title"
-        >
-          <h2 className="card__title" id="exception-title">
-            Schedule Exception
-          </h2>
-          <p className="card__subtitle">
-            Approved by the owner when the schedule changed. The appointment
-            stays as booked and the customer was not notified about the change.
-          </p>
-          <p className="booking-value">{booking.scheduleException.reason}</p>
-          <p className="card__subtitle">
-            Approved at {formatTimestamp(booking.scheduleException.at)}.
-          </p>
-        </section>
-      )}
-
-      <section className="card card--padded" aria-labelledby="telegram-title">
-        <h2 className="card__title" id="telegram-title">
-          Telegram
-        </h2>
-        <p className="booking-detail__row">
-          <span className="booking-detail__label">Connection</span>
-          <span
-            className={
-              telegramConnected
-                ? 'telegram-state telegram-state--on'
-                : 'telegram-state'
-            }
-          >
-            {telegramConnected === null
-              ? 'Checking…'
-              : telegramConnected
-                ? 'Connected'
-                : 'Not connected'}
-          </span>
-        </p>
-        {booking.telegramNotices.length > 0 ? (
-          <ul className="telegram-notice-list">
-            {booking.telegramNotices.map((notice) => (
-              <li key={notice.id} className="telegram-notice">
-                <strong>{TELEGRAM_NOTICE_LABEL[notice.type]}</strong>
-                <span className="telegram-notice__meta">
-                  {formatTimestamp(notice.createdAt)}
-                </span>
-                <span className="telegram-notice__message">{notice.message}</span>
-                {notice.rejectionReason && (
-                  <span className="telegram-notice__reason">
-                    Reason: {notice.rejectionReason}
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="card__subtitle">
-            No Telegram notifications sent so far.
-          </p>
-        )}
-      </section>
 
       <p>
         <Link className="btn btn--outline" to="/owner/bookings">
@@ -453,9 +402,12 @@ export function BookingDetailPage() {
  * Payment Pending → accept / reject / cancel (SM-08);
  * Confirmed → reschedule / No Show / cancel;
  * Rejected → release (T9); terminal states have no lifecycle actions.
+ * All actions go through the real owner booking endpoints; a single cancel
+ * route covers the state-aware confirmations.
  */
 function BookingActions({
   booking,
+  businessId,
   busy,
   confirming,
   setConfirming,
@@ -471,6 +423,7 @@ function BookingActions({
   onRescheduleDone,
 }: {
   booking: Booking
+  businessId: string | null
   busy: boolean
   confirming: ConfirmMode
   setConfirming: (mode: ConfirmMode) => void
@@ -485,6 +438,8 @@ function BookingActions({
   onRelease: () => void
   onRescheduleDone: () => Promise<void>
 }) {
+  const bookingForPicker = booking as Pick<Booking, 'id' | 'totalDurationMinutes'>
+
   if (booking.state === 'payment-pending') {
     return (
       <section className="card card--padded" aria-labelledby="actions-title">
@@ -568,9 +523,10 @@ function BookingActions({
         <h2 className="card__title" id="actions-title">
           Manage booking
         </h2>
-        {confirming === 'reschedule' && (
+        {confirming === 'reschedule' && businessId && (
           <RescheduleForm
-            booking={booking}
+            booking={bookingForPicker}
+            businessId={businessId}
             onDone={onRescheduleDone}
             onBack={() => setConfirming(null)}
           />

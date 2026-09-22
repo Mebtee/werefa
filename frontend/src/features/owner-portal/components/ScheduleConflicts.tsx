@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import type { ScheduleConflictItem } from '@/api/schedule.mapper'
 import { recordScheduleException } from '@/api/schedule'
+import { cancelOwnerBooking } from '@/api/ownerBookings'
 import { toUserMessage } from '@/api/errors'
-import { mockOwnerApi } from '@/mock/ownerApi'
 import { Button } from '@/components/ui/Button'
 import { Field } from '@/components/ui/Field'
 import { formatDateTime } from '@/lib/time'
@@ -24,9 +24,9 @@ function totalDuration(conflict: ScheduleConflictItem): number {
 /**
  * Affected-booking warning panel (REQ-092/093/099). The conflict list comes
  * straight from the real schedule API with the booking details embedded
- * (Prompt 47), so no booking lookup is needed to render a row. Keep Booking is
- * recorded as a real schedule exception; Cancel stays on the mock booking seam
- * with Reschedule (the bookings vertical is not part of this slice).
+ * (Prompt 47), so no booking lookup is needed to render a row. The quick
+ * actions all go through the real owner endpoints: Keep Booking records a real
+ * schedule exception, Cancel and Reschedule run the real lifecycle (Prompt 49/51).
  */
 export function ScheduleConflicts({
   conflicts,
@@ -121,8 +121,8 @@ function ConflictRow({
 
   const applyCancel = () =>
     void run(async () => {
-      const result = await mockOwnerApi.cancelBooking(conflict.bookingId)
-      return result.ok ? { ok: true } : { ok: false, error: result.error }
+      await cancelOwnerBooking(businessId, conflict.bookingId)
+      return { ok: true }
     })
 
   const serviceCount = conflict.services.length
@@ -167,6 +167,7 @@ function ConflictRow({
             id: conflict.bookingId,
             totalDurationMinutes: totalDuration(conflict),
           }}
+          businessId={businessId}
           onDone={() => {
             setKeepReason('')
             reset('view')

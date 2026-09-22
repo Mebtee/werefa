@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { Booking, BookingState } from '@/types/models'
-import { mockOwnerApi } from '@/mock/ownerApi'
+import { listOwnerBookings } from '@/api/ownerBookings'
+import { ownerBookingsFromWire } from '@/features/owner-portal/lib/ownerBooking'
 import { useOwnedBusiness } from '@/features/owner-portal/state/useOwnedBusiness'
 import { LoadState } from '@/features/owner-portal/components/LoadState'
 import {
@@ -39,7 +40,7 @@ function directionLabel(sort: BookingSort): string {
 }
 
 export function BookingsPage() {
-  const { business, loading, error, reload } = useOwnedBusiness()
+  const { business, businessId, loading, error, reload } = useOwnedBusiness()
   const [bookings, setBookings] = useState<readonly Booking[] | null>(null)
   const [failed, setFailed] = useState(false)
 
@@ -52,14 +53,15 @@ export function BookingsPage() {
   const [sort, setSort] = useState<BookingSort>(DEFAULT_BOOKING_SORT)
 
   const load = useCallback(async () => {
+    if (!businessId) return
     setFailed(false)
     setBookings(null)
     try {
-      setBookings(await mockOwnerApi.listBookings())
+      setBookings(ownerBookingsFromWire(await listOwnerBookings(businessId)))
     } catch {
       setFailed(true)
     }
-  }, [])
+  }, [businessId])
 
   useEffect(() => {
     void load()
@@ -270,14 +272,6 @@ export function BookingsPage() {
                         {booking.lineItems.length}{' '}
                         {booking.lineItems.length === 1 ? 'service' : 'services'} ·{' '}
                         {formatMoney(booking.total, business.currency)}
-                        {booking.scheduleException && (
-                          <>
-                            {' '}·
-                            <span className="booking-card__exception">
-                              Schedule Exception
-                            </span>
-                          </>
-                        )}
                       </span>
                     </span>
                     <span className="booking-card__status">

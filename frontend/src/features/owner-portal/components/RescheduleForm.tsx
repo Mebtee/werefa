@@ -1,6 +1,10 @@
 import { useState } from 'react'
 import type { Booking, DateString, TimeOfDay } from '@/types/models'
-import { mockOwnerApi } from '@/mock/ownerApi'
+import { toUserMessage } from '@/api/errors'
+import {
+  getOwnerBookingAvailableTimes,
+  rescheduleOwnerBooking,
+} from '@/api/ownerBookings'
 import { Button } from '@/components/ui/Button'
 import { Field } from '@/components/ui/Field'
 
@@ -9,13 +13,18 @@ import { Field } from '@/components/ui/Field'
  * Confirmed booking. Only free+fitting slots are offered (REQ-106 hard gate);
  * the target slot must be available for the booking to move. The booking keeps
  * its identity, payment state and proof; Confirmed stays Confirmed (T7).
+ *
+ * The dates/times are serialized as UTC instants back to the API so the
+ * round-trip is independent of the machine timezone.
  */
 export function RescheduleForm({
   booking,
+  businessId,
   onDone,
   onBack,
 }: {
   booking: Pick<Booking, 'id' | 'totalDurationMinutes'>
+  businessId: string
   onDone: () => Promise<void>
   onBack: () => void
 }) {
@@ -34,12 +43,16 @@ export function RescheduleForm({
     setTimes([])
     setError(null)
     if (!value) return
-    const result = await mockOwnerApi.listAvailableTimesFor(
-      value,
-      booking.totalDurationMinutes,
-    )
-    if (result.ok) setTimes(result.value)
-    else setError(result.error)
+    try {
+      const availability = await getOwnerBookingAvailableTimes(
+        businessId,
+        booking.id,
+        value,
+      )
+      setTimes(availability.slots.map((slot) => `${slot.startAt.slice(11, 16)}`))
+    } catch (err) {
+      setError(toUserMessage(err))
+    }
   }
 
   const apply = async () => {
@@ -50,14 +63,10 @@ export function RescheduleForm({
     setBusy(true)
     setError(null)
     try {
-      const result = await mockOwnerApi.rescheduleBooking(booking.id, date, time)
-      if (!result.ok) {
-        setError(result.error)
-        return
-      }
+      await rescheduleOwnerBooking(businessId, booking.id, `${date}T${time}:00.000Z`)
       await onDone()
-    } catch {
-      setError('That could not be completed. Please try again.')
+    } catch (err) {
+      setError(toUserMessage(err))
     } finally {
       setBusy(false)
     }
