@@ -7,7 +7,10 @@ import { OwnerBusinessController } from './owner/business.controller';
 import { OwnerCatalogController } from './owner/catalog.controller';
 import { OwnerScheduleController } from './owner/schedule.controller';
 import { OwnerBookingController } from './owner/booking.controller';
+import { OwnerTelegramController } from './owner/telegram.controller';
+import { TelegramController } from './telegram/telegram.controller';
 import { AdminScheduleController } from './admin/schedule.controller';
+import { AdminSubscriptionController } from './admin/subscription.controller';
 
 /**
  * HTTP API & contract layer (Prompt 42/43).
@@ -30,7 +33,10 @@ import { AdminScheduleController } from './admin/schedule.controller';
     OwnerCatalogController,
     OwnerScheduleController,
     OwnerBookingController,
+    OwnerTelegramController,
+    TelegramController,
     AdminScheduleController,
+    AdminSubscriptionController,
   ],
   providers: [AUTH_CONTEXT_RESOLVER_PROVIDER],
 })

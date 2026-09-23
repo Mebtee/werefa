@@ -22,13 +22,30 @@ interface Version {
 interface Overrides {
   business?: { deactivatedAt: Date | null } | null;
   settings?: { isPaused: boolean; bookingIntervalMins: number } | null;
-  subscription?: { status: string } | null;
+  subscription?: {
+    status: string;
+    trialStartedAt: Date | null;
+    trialEndsAt: Date | null;
+    trialGraceEndsAt: Date | null;
+    periodEndsAt: Date | null;
+    paidGraceEndsAt: Date | null;
+  } | null;
   version?: Version | null;
   bookings?: { startAt: Date; endAt: Date }[];
   locks?: { startAt: Date; endAt: Date }[];
 }
 
 const OPEN_WEEK = { workingPeriods: [1, 2, 3, 4, 5, 6, 7].map((weekday) => ({ weekday, startMinutes: 540, endMinutes: 1020 })), blockedPeriods: [], specialDates: [] } as Version;
+
+/** Far-future TRIAL so the time-derived gate (Prompt 52) stays open. */
+const TRIAL_SUBSCRIPTION = {
+  status: 'TRIAL',
+  trialStartedAt: new Date('2026-01-01T00:00:00Z'),
+  trialEndsAt: new Date('2099-01-01T00:00:00Z'),
+  trialGraceEndsAt: new Date('2099-04-01T00:00:00Z'),
+  periodEndsAt: null,
+  paidGraceEndsAt: null,
+};
 
 function makeService(overrides: Overrides = {}) {
   const prisma = {
@@ -39,7 +56,7 @@ function makeService(overrides: Overrides = {}) {
       findUnique: async () => (overrides.settings === undefined ? { isPaused: false, bookingIntervalMins: 30 } : overrides.settings),
     },
     subscription: {
-      findUnique: async () => (overrides.subscription === undefined ? { status: 'TRIAL' } : overrides.subscription),
+      findUnique: async () => (overrides.subscription === undefined ? TRIAL_SUBSCRIPTION : overrides.subscription),
     },
     booking: {
       findMany: async () => overrides.bookings ?? [],
@@ -86,7 +103,16 @@ describe('AvailabilityService gates', () => {
   });
 
   it('returns nothing when the subscription is EXPIRED (R133)', async () => {
-    const service = makeService({ subscription: { status: 'EXPIRED' } });
+    const service = makeService({
+      subscription: {
+        status: 'EXPIRED',
+        trialStartedAt: null,
+        trialEndsAt: null,
+        trialGraceEndsAt: null,
+        periodEndsAt: null,
+        paidGraceEndsAt: null,
+      },
+    });
     expect(await service.getSlotsForDay('b1', { dateKey: '2026-09-14', durationMinutes: 60 })).toEqual([]);
   });
 

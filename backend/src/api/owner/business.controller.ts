@@ -1,27 +1,43 @@
-import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { ApiOperation, ApiOkResponse, ApiCreatedResponse, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, HttpCode, HttpException, HttpStatus, Inject, Param, Patch, Post, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { ApiConsumes, ApiOperation, ApiOkResponse, ApiCreatedResponse, ApiTags } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { BusinessService } from '../../domain/services/business.service';
+import { SubscriptionBillingService } from '../../domain/services/subscription-billing.service';
 import { ActorContext } from '../../domain/authorization/actor-context';
 import { Actor, ApiAuthGuard } from '../auth/api-auth.guard';
-import { OwnerBusinessView, ownerBusinessProjection } from '../dto/projections';
+import { isAllowedProofMimeType, PROOF_MAX_BYTES } from '../../domain/lib/proof-file';
+import {
+  OwnerBusinessView,
+  OwnerSubscriptionProofView,
+  OwnerSubscriptionView,
+  ownerBusinessProjection,
+  ownerProofProjection,
+} from '../dto/projections';
 import {
   BusinessIdParamDto,
   ChangeSlugPayload,
   CreateBusinessPayload,
   PausePayload,
+  SubmitSubscriptionProofPayload,
   UpdateBusinessProfilePayload,
   UpdateBusinessSettingsPayload,
 } from '../dto/payloads';
+import { parseMultipartPayload } from '../dto/multipart-payload';
 
 /**
- * Owner business management (Prompt 42 §6). All routes require an owner
- * ActorContext and every businessId is authorized through the TenantGuard.
+ * Owner business management (Prompt 42 §6; Prompt 52 subscription §17). All
+ * routes require an owner ActorContext and every businessId is authorized
+ * through the TenantGuard.
  */
 @ApiTags('owner · business')
 @Controller('owner/businesses')
 @UseGuards(ApiAuthGuard)
 export class OwnerBusinessController {
-  constructor(@Inject(BusinessService) private readonly businessService: BusinessService) {}
+  constructor(
+    @Inject(BusinessService) private readonly businessService: BusinessService,
+    @Inject(SubscriptionBillingService) private readonly subscriptionBilling: SubscriptionBillingService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'List businesses owned by the caller.' })
@@ -151,4 +167,84 @@ export class OwnerBusinessController {
     await this.businessService.reactivate(actor, params.businessId);
     return ownerBusinessProjection(await this.businessService.getOwnedProfile(actor, params.businessId));
   }
+
+  @Get(':businessId/subscription')
+  @ApiOperation({
+    summary: 'Subscription status + proof history for the owner (REQ-141 banner / REQ-136 upload context).',
+  })
+  @ApiOkResponse({ type: OwnerSubscriptionView })
+  async getSubscription(
+    @Actor() actor: ActorContext,
+    @Param() params: BusinessIdParamDto,
+  ): Promise<OwnerSubscriptionView> {
+    const view = await this.subscriptionBilling.getOwnerSubscriptionView(actor, params.businessId);
+    return {
+      status: view.subscription.status,
+      trialStartedAt: isoOf(view.subscription.trialStartedAt),
+      trialEndsAt: isoOf(view.subscription.trialEndsAt),
+      trialGraceEndsAt: isoOf(view.subscription.trialGraceEndsAt),
+      periodEndsAt: isoOf(view.subscription.periodEndsAt),
+      paidGraceEndsAt: isoOf(view.subscription.paidGraceEndsAt),
+      bookingsEnabled: view.bookingsEnabled,
+      proofs: view.proofs.map(ownerProofProjection),
+    };
+  }
+
+  @Post(':businessId/subscription/proof')
+  @ApiOperation({
+    summary: 'Owner uploads a subscription payment proof (image/PDF; idempotent by submissionKey, REQ-136).',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiCreatedResponse({ type: OwnerSubscriptionProofView })
+  @UseInterceptors(subscriptionProofInterceptor())
+  async submitSubscriptionProof(
+    @Actor() actor: ActorContext,
+    @Param() params: BusinessIdParamDto,
+    @UploadedFile() proof: SubscriptionProofUploadFile | undefined,
+    @Body('payload') payloadRaw: string | undefined,
+  ): Promise<OwnerSubscriptionProofView> {
+    const payload = await parseMultipartPayload(payloadRaw, SubmitSubscriptionProofPayload);
+    const created = await this.subscriptionBilling.submitProof(actor, params.businessId, {
+      submissionKey: payload.submissionKey,
+      file: toSubscriptionProofInput(proof),
+    });
+    return ownerProofProjection(created);
+  }
+}
+
+/** Uploaded `proof` file part (multer memory storage). */
+interface SubscriptionProofUploadFile {
+  buffer: Buffer;
+  mimetype: string;
+  originalname: string;
+}
+
+function toSubscriptionProofInput(file: SubscriptionProofUploadFile | undefined): { bytes: Buffer; mimeType: string } {
+  if (!file) throw new HttpException('A payment proof file is required.', HttpStatus.BAD_REQUEST);
+  return { bytes: file.buffer, mimeType: file.mimetype };
+}
+
+/** Shared multipart setup for the `proof` field: 5 MB cap + cheap MIME pre-screen. */
+function subscriptionProofInterceptor() {
+  return FileInterceptor('proof', {
+    storage: memoryStorage(),
+    limits: { fileSize: PROOF_MAX_BYTES },
+    fileFilter: subscriptionProofFileFilter,
+  });
+}
+
+function subscriptionProofFileFilter(
+  _req: unknown,
+  file: { mimetype: string },
+  callback: (error: Error | null, acceptFile: boolean) => void,
+): void {
+  if (!isAllowedProofMimeType(file.mimetype)) {
+    callback(new HttpException('Unsupported subscription-proof file type.', HttpStatus.UNSUPPORTED_MEDIA_TYPE), false);
+    return;
+  }
+  callback(null, true);
+}
+
+function isoOf(value: Date | null | undefined): string | null {
+  return value ? value.toISOString() : null;
 }

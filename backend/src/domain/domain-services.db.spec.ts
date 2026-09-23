@@ -21,6 +21,7 @@ import { CatalogService } from './services/catalog.service';
 import { ScheduleService } from './services/schedule.service';
 import { AvailabilityService } from './services/availability.service';
 import { BookingService } from './services/booking.service';
+import { SubscriptionService } from './services/subscription.service';
 import { ResubmissionService } from './services/resubmission.service';
 import { CustomerStatusService } from './services/customer-status.service';
 
@@ -38,6 +39,8 @@ const clock = new IntlGlobalClock('UTC', () => FIXED_NOW);
 const DELETE_ORDER = [
   'notification_delivery',
   'notification',
+  'telegram_callback',
+  'telegram_connection_token',
   'telegram_connection',
   'telegram_update',
   'report_job',
@@ -161,6 +164,7 @@ class InMemoryProofStorage implements PaymentProofStorage {
 }
 
 let tenantGuardHolder: TenantGuard;
+let subscriptionService: SubscriptionService;
 let businessService: BusinessService;
 let catalogService: CatalogService;
 let scheduleService: ScheduleService;
@@ -184,7 +188,8 @@ beforeAll(async () => {
     const proofStorage = new InMemoryProofStorage();
 
     tenantGuardHolder = new TenantGuard(bRepo);
-    businessService = new BusinessService(prisma, bRepo, subRepo, sRepo, tenantGuardHolder);
+    subscriptionService = new SubscriptionService(prisma, subRepo, sRepo, clock, tenantGuardHolder);
+    businessService = new BusinessService(prisma, bRepo, subRepo, tenantGuardHolder, subscriptionService);
     catalogService = new CatalogService(prisma, kRepo, tenantGuardHolder);
     scheduleService = new ScheduleService(prisma, sRepo, clock, tenantGuardHolder);
     availabilityService = new AvailabilityService(prisma, sRepo, clock);
@@ -193,7 +198,6 @@ beforeAll(async () => {
       bRepo,
       kRepo,
       pRepo,
-      subRepo,
       fileRepo(),
       proofStorage,
       clock,
@@ -201,9 +205,10 @@ beforeAll(async () => {
       tenantGuardHolder,
       catalogService,
       availabilityService,
+      subscriptionService,
     );
     resubmissionService = new ResubmissionService(prisma, bRepo, kRepo, pRepo, vRepo, fileRepo(), proofStorage, clock, eventBus);
-    customerStatusService = new CustomerStatusService(bRepo, kRepo);
+    customerStatusService = new CustomerStatusService(bRepo, kRepo, prisma);
   }
 });
 
@@ -662,17 +667,196 @@ describe.skipIf(!RUN)('domain application services (live PostgreSQL 16)', () => 
     );
   });
 
+  it('booking-create replay of a used submission key with a different customer phone is a CONFLICT', async () => {
+    const w = await readyBusiness(40);
+    await makeBooking(w, new Date('2026-09-14T10:00:00Z'), 'key-phone-31a');
+    await expectCode(
+      bookingService.createBooking({
+        businessSlug: w.ownerSlug,
+        selections: [{ serviceId: w.serviceId, variationIds: [w.serviceVariationId], addOnIds: [w.addOnId] }],
+        customerName: 'Someone Else',
+        customerPhone: '+251988876543',
+        note: 'different customer',
+        startAt: new Date('2026-09-14T10:00:00Z'),
+        submissionKey: 'key-phone-31a',
+      }),
+      ErrorCode.CONFLICT,
+    );
+    const other = await prisma.booking.count({ where: { customerPhone: '+251988876543' } });
+    expect(other).toBe(0);
+  });
+
+  it('resubmission probe failures are recorded as security events (no active code, wrong state)', async () => {
+    const w = await readyBusiness(41);
+    const a = await makeBooking(w, new Date('2026-09-14T10:00:00Z'), 'key-sec-32a');
+    const b = await makeBooking(w, new Date('2026-09-14T13:00:00Z'), 'key-sec-32b');
+    await bookingService.rejectProof(ownerActor(w.ownerId), w.businessId, a.booking.id, 'blurry');
+    await bookingService.acceptProof(ownerActor(w.ownerId), w.businessId, b.booking.id);
+
+    await expectCode(
+      resubmissionService.resubmit({
+        businessSlug: w.ownerSlug,
+        phone: '+251911112233',
+        bookingId: a.booking.id,
+        code: '999999',
+        submissionKey: 'key-sec-32-verify',
+      }),
+      ErrorCode.VALIDATION_ERROR,
+    );
+    await expectCode(
+      resubmissionService.requestCode({ businessSlug: w.ownerSlug, phone: '+251911112233', bookingId: b.booking.id }),
+      ErrorCode.INVALID_TRANSITION,
+    );
+    const checks = await prisma.securityEvent.findMany({
+      where: { businessId: w.businessId, type: 'RESUBMISSION_CODE_CHECK' },
+    });
+    expect(checks.map((e) => e.result)).toContain('FAILED');
+    const requests = await prisma.securityEvent.findMany({
+      where: { businessId: w.businessId, type: 'RESUBMISSION_CODE_REQUEST' },
+    });
+    expect(requests.map((e) => e.result)).toContain('FAILED');
+  });
+
+  it('replaying a used resubmission key on a DIFFERENT booking is a CONFLICT and the target stays REJECTED', async () => {
+    const w = await readyBusiness(42);
+    const a = await makeBooking(w, new Date('2026-09-14T10:00:00Z'), 'key-replay-33a');
+    const b = await makeBooking(w, new Date('2026-09-14T13:00:00Z'), 'key-replay-33b');
+    await bookingService.rejectProof(ownerActor(w.ownerId), w.businessId, a.booking.id, 'blurry');
+    await bookingService.rejectProof(ownerActor(w.ownerId), w.businessId, b.booking.id, 'blurry');
+
+    await prisma.resubmissionVerification.create({
+      data: {
+        businessId: w.businessId,
+        bookingId: a.booking.id,
+        phone: '+251911112233',
+        purpose: 'RESUBMIT_PROOF',
+        codeHash: createHash('sha256').update('123456').digest('hex'),
+        expiresAt: new Date(FIXED_NOW.getTime() + 10 * 60 * 1000),
+      },
+    });
+    const first = await resubmissionService.resubmit({
+      businessSlug: w.ownerSlug,
+      phone: '+251911112233',
+      bookingId: a.booking.id,
+      code: '123456',
+      submissionKey: 'key-replay-33-verify',
+      proof: { bytes: Buffer.from(PROOF_SAMPLES['image/png']), mimeType: 'image/png' },
+    });
+    expect(first.booking.status).toBe('PAYMENT_PENDING');
+
+    await expectCode(
+      resubmissionService.resubmit({
+        businessSlug: w.ownerSlug,
+        phone: '+251911112233',
+        bookingId: b.booking.id,
+        code: '654321',
+        submissionKey: 'key-replay-33-verify',
+        proof: { bytes: Buffer.from(PROOF_SAMPLES['image/png']), mimeType: 'image/png' },
+      }),
+      ErrorCode.CONFLICT,
+    );
+    const bBook = await prisma.booking.findUnique({ where: { id: b.booking.id } });
+    expect(bBook!.status).toBe('REJECTED');
+    const proof = await prisma.paymentProof.findUnique({
+      where: { submissionKey: 'key-replay-33-verify' },
+      include: { payment: true },
+    });
+    expect(proof!.payment!.bookingId).toBe(a.booking.id);
+    const events = await prisma.securityEvent.findMany({
+      where: { businessId: w.businessId, type: 'RESUBMISSION_PROOF', result: 'FAILED' },
+    });
+    expect(events.length).toBe(1);
+  });
+
+  it('replaying a used resubmission key on the SAME re-rejected booking is an idempotent success (no duplicate proof)', async () => {
+    const w = await readyBusiness(44);
+    const a = await makeBooking(w, new Date('2026-09-14T10:00:00Z'), 'key-rerej-44a');
+    await bookingService.rejectProof(ownerActor(w.ownerId), w.businessId, a.booking.id, 'blurry');
+    await prisma.resubmissionVerification.create({
+      data: {
+        businessId: w.businessId,
+        bookingId: a.booking.id,
+        phone: '+251911112233',
+        purpose: 'RESUBMIT_PROOF',
+        codeHash: createHash('sha256').update('123456').digest('hex'),
+        expiresAt: new Date(FIXED_NOW.getTime() + 10 * 60 * 1000),
+      },
+    });
+    const first = await resubmissionService.resubmit({
+      businessSlug: w.ownerSlug,
+      phone: '+251911112233',
+      bookingId: a.booking.id,
+      code: '123456',
+      submissionKey: 'key-rerej-44-verify',
+      proof: { bytes: Buffer.from(PROOF_SAMPLES['image/png']), mimeType: 'image/png' },
+    });
+    expect(first.booking.status).toBe('PAYMENT_PENDING');
+
+    // The owner re-rejects; the customer retries with the SAME submission key.
+    // The replay is idempotent: it reports the booking's current state without
+    // transitioning anything or consuming another code, and never adds a proof.
+    await bookingService.rejectProof(ownerActor(w.ownerId), w.businessId, a.booking.id, 'still blurry');
+    const replay = await resubmissionService.resubmit({
+      businessSlug: w.ownerSlug,
+      phone: '+251911112233',
+      bookingId: a.booking.id,
+      code: '000000',
+      submissionKey: 'key-rerej-44-verify',
+    });
+    expect(replay.booking.id).toBe(a.booking.id);
+    expect(replay.booking.status).toBe('REJECTED');
+    const count = await prisma.paymentProof.count({ where: { submissionKey: 'key-rerej-44-verify' } });
+    expect(count).toBe(1);
+  });
+
+  it('concurrent same-key resubmissions produce exactly one winning proof (REQ-121)', async () => {
+    const w = await readyBusiness(45);
+    const a = await makeBooking(w, new Date('2026-09-14T10:00:00Z'), 'key-race-45a');
+    await bookingService.rejectProof(ownerActor(w.ownerId), w.businessId, a.booking.id, 'blurry');
+    await prisma.resubmissionVerification.create({
+      data: {
+        businessId: w.businessId,
+        bookingId: a.booking.id,
+        phone: '+251911112233',
+        purpose: 'RESUBMIT_PROOF',
+        codeHash: createHash('sha256').update('123456').digest('hex'),
+        expiresAt: new Date(FIXED_NOW.getTime() + 10 * 60 * 1000),
+      },
+    });
+    const attempt = () =>
+      resubmissionService.resubmit({
+        businessSlug: w.ownerSlug,
+        phone: '+251911112233',
+        bookingId: a.booking.id,
+        code: '123456',
+        submissionKey: 'key-race-45-verify',
+        proof: { bytes: Buffer.from(PROOF_SAMPLES['image/png']), mimeType: 'image/png' },
+      });
+    const results = await Promise.allSettled([attempt(), attempt()]);
+    // The loser of the advisory-lock race either idempotently replays the
+    // committed submission or is refused at the transition — either way it
+    // must settle without crashing, and only ONE proof may ever win.
+    const fulfilled = results.filter((r) => r.status === 'fulfilled').length;
+    const rejected = results.filter((r) => r.status === 'rejected');
+    expect(fulfilled).toBeGreaterThanOrEqual(1);
+    for (const r of rejected) expect(r.reason).toBeInstanceOf(Error);
+    expect((await prisma.booking.findUnique({ where: { id: a.booking.id } }))!.status).toBe('PAYMENT_PENDING');
+    const count = await prisma.paymentProof.count({ where: { submissionKey: 'key-race-45-verify' } });
+    expect(count).toBe(1);
+  });
+
   it('customer status lookup projects safe, ordered entries (no internals, no ids)', async () => {
     const w = await readyBusiness(23);
     await makeBooking(w, new Date('2026-09-14T10:00:00Z'), 'key-cust-23a');
     const b = await makeBooking(w, new Date('2026-09-14T13:00:00Z'), 'key-cust-23b');
     await bookingService.acceptProof(ownerActor(w.ownerId), w.businessId, b.booking.id);
-    const entries = await customerStatusService.getStatus({ businessSlug: w.ownerSlug, phone: '+251911112233' });
-    expect(entries).toHaveLength(2);
-    expect(entries[0].startAt.getTime()).toBeGreaterThanOrEqual(entries[1].startAt.getTime());
-    expect(entries.map((e) => e.status)).toContain('confirmed');
-    expect(entries.map((e) => e.status)).toContain('awaiting-verification');
-    expect(Object.keys(entries[0]).sort()).toEqual(['endAt', 'startAt', 'status']);
+    const status = await customerStatusService.getStatus({ businessSlug: w.ownerSlug, phone: '+251911112233' });
+    expect(status.entries).toHaveLength(2);
+    expect(status.entries[0].startAt.getTime()).toBeGreaterThanOrEqual(status.entries[1].startAt.getTime());
+    expect(status.entries.map((e) => e.status)).toContain('confirmed');
+    expect(status.entries.map((e) => e.status)).toContain('awaiting-verification');
+    expect(Object.keys(status.entries[0]).sort()).toEqual(['endAt', 'startAt', 'status']);
+    expect(status.telegramConnected).toBe(false);
   });
 
   it('a foreign owner cannot mutate another business’s booking lifecycle', async () => {
@@ -686,7 +870,16 @@ describe.skipIf(!RUN)('domain application services (live PostgreSQL 16)', () => 
   it('manual resume is refused when the subscription is expired (R157)', async () => {
     const w = await readyBusiness(25);
     await businessService.pause(ownerActor(w.ownerId), w.businessId, {});
-    await prisma.subscription.update({ where: { businessId: w.businessId }, data: { status: 'EXPIRED' } });
+    // Time-derived model (Prompt 52): EXPIRED means no band covers `now`, so
+    // the persisted status must match a past trial window.
+    await prisma.subscription.update({
+      where: { businessId: w.businessId },
+      data: {
+        status: 'EXPIRED',
+        trialEndsAt: new Date('2026-06-01T00:00:00Z'),
+        trialGraceEndsAt: new Date('2026-06-04T00:00:00Z'),
+      },
+    });
     await expectCode(businessService.resumeManual(ownerActor(w.ownerId), w.businessId), ErrorCode.SUBSCRIPTION_EXPIRED);
   });
 

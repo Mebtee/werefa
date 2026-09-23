@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { createHash } from 'node:crypto';
+import { createHash, randomInt } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { PRISMA_CLIENT } from '../../config/config.constants';
 import { GlobalClock, GLOBAL_CLOCK } from '../time/global-clock';
@@ -58,9 +58,16 @@ export class ResubmissionService {
     const biz = await this.businessRepo.findBySlug(input.businessSlug);
     if (!biz) throw domainErrors.businessNotFound();
     const booking = await this.bookingRepo.findById(biz.id, input.bookingId);
-    if (!booking) throw domainErrors.businessNotFound('Booking not found.');
-    if (booking.customerPhone !== input.phone) throw domainErrors.businessNotFound('Booking not found.');
+    if (!booking) {
+      await this.securityEvent(biz.id, 'RESUBMISSION_CODE_REQUEST', 'FAILED');
+      throw domainErrors.businessNotFound('Booking not found.');
+    }
+    if (booking.customerPhone !== input.phone) {
+      await this.securityEvent(biz.id, 'RESUBMISSION_CODE_REQUEST', 'FAILED');
+      throw domainErrors.businessNotFound('Booking not found.');
+    }
     if (booking.status !== 'REJECTED') {
+      await this.securityEvent(biz.id, 'RESUBMISSION_CODE_REQUEST', 'FAILED');
       throw domainErrors.invalidLifecycleTransition('A verification code can only be requested for a rejected booking.');
     }
 
@@ -68,6 +75,7 @@ export class ResubmissionService {
       where: { businessId: biz.id, bookingId: booking.id, purpose: PURPOSE, usedAt: null, expiresAt: { gt: this.clock.now() } },
     });
     if (activeCount >= MAX_ACTIVE_CODES) {
+      await this.securityEvent(biz.id, 'RESUBMISSION_CODE_REQUEST', 'RATE_LIMITED');
       throw domainErrors.rateLimited('Too many verification codes requested for this booking.');
     }
 
@@ -98,7 +106,7 @@ export class ResubmissionService {
   async requestCodeForCustomer(input: { businessSlug: string; phone: string }): Promise<{ verificationId: string; expiresAt: Date }> {
     const biz = await this.businessRepo.findBySlug(input.businessSlug);
     if (!biz) throw domainErrors.businessNotFound();
-    const booking = await this.latestRejected(biz.id, input.phone);
+    const booking = await this.latestRejected(biz.id, input.phone, 'RESUBMISSION_CODE_REQUEST');
     return this.requestCode({ businessSlug: input.businessSlug, phone: input.phone, bookingId: booking.id });
   }
 
@@ -116,17 +124,20 @@ export class ResubmissionService {
     return this.resubmit({
       businessSlug: input.businessSlug,
       phone: input.phone,
-      bookingId: (await this.latestRejected(biz.id, input.phone)).id,
+      bookingId: (await this.latestRejected(biz.id, input.phone, 'RESUBMISSION_CODE_CHECK')).id,
       code: input.code,
       submissionKey: input.submissionKey,
       proof: input.proof,
     });
   }
 
-  private async latestRejected(businessId: string, phone: string): Promise<BookingWithRelations> {
+  private async latestRejected(businessId: string, phone: string, eventType?: string): Promise<BookingWithRelations> {
     const list = await this.bookingRepo.findByPhone(businessId, phone, { statusIn: ['REJECTED'], limit: 1 });
     const booking = list[0];
-    if (!booking) throw domainErrors.businessNotFound('Booking not found.');
+    if (!booking) {
+      if (eventType) await this.securityEvent(businessId, eventType, 'FAILED');
+      throw domainErrors.businessNotFound('Booking not found.');
+    }
     return booking;
   }
 
@@ -152,7 +163,10 @@ export class ResubmissionService {
     // Idempotent submission keys short-circuit before verification.
     const existing = await this.paymentRepo.findBySubmissionKey(input.submissionKey);
     if (existing) {
-      if (existing.businessId !== biz.id) throw domainErrors.idempotencyConflict();
+      if (existing.businessId !== biz.id || existing.bookingId !== booking.id) {
+        await this.securityEvent(biz.id, 'RESUBMISSION_PROOF', 'FAILED');
+        throw domainErrors.idempotencyConflict('This submission key was already used for a different booking.');
+      }
       const b = await this.bookingRepo.findById(biz.id, existing.bookingId);
       if (!b) throw domainErrors.businessNotFound();
       return { booking: b, events: [] };
@@ -164,7 +178,10 @@ export class ResubmissionService {
       input.phone,
       PURPOSE,
     );
-    if (!verification) throw domainErrors.invalidResubmissionCode();
+    if (!verification) {
+      await this.securityEvent(biz.id, 'RESUBMISSION_CODE_CHECK', 'FAILED');
+      throw domainErrors.invalidResubmissionCode();
+    }
 
     if (verification.attempts >= MAX_ATTEMPTS) {
       await this.securityEvent(biz.id, 'RESUBMISSION_CODE_CHECK', 'RATE_LIMITED');
@@ -202,7 +219,7 @@ export class ResubmissionService {
       mimeType: sniffed.mimeType,
     };
 
-    let consumed = false;
+    let committed = false;
     try {
       await withBusinessAdvisoryLock(this.prisma, biz.id, async (tx) => {
         // T10: REJECTED → PAYMENT_PENDING / PENDING
@@ -244,12 +261,14 @@ export class ResubmissionService {
           proofId: latestProof.id,
           replacedByProofId: newProof.id,
         });
-        await this.verificationRepo.markUsed(tx, { id: verification.id, businessId: biz.id });
-        await this.securityEvent(biz.id, 'RESUBMISSION_PROOF', 'OK');
-        consumed = true;
+        const claimed = await this.verificationRepo.markUsed(tx, { id: verification.id, businessId: biz.id });
+        if (!claimed) throw domainErrors.resubmissionCodeUsed();
       });
+      // The transaction committed; the staged object is now linked to a row.
+      committed = true;
+      await this.securityEvent(biz.id, 'RESUBMISSION_PROOF', 'OK');
     } finally {
-      if (!consumed) {
+      if (!committed) {
         await this.proofStorage.delete(staged.storageKey).catch(() => undefined);
       }
     }
@@ -273,7 +292,7 @@ export class ResubmissionService {
   }
 
   private generateCode(): string {
-    return String(Math.floor(100000 + Math.random() * 900000));
+    return String(randomInt(100000, 1000000));
   }
 
   private async securityEvent(businessId: string, type: string, result: string): Promise<void> {

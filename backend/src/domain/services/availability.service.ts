@@ -4,6 +4,7 @@ import { PRISMA_CLIENT } from '../../config/config.constants';
 import { GlobalClock, GLOBAL_CLOCK } from '../time/global-clock';
 import { ScheduleRepository } from '../repositories/schedule.repository.port';
 import { SCHEDULE_REPOSITORY } from '../repositories/tokens';
+import { deriveCanonicalStatus, isEligible } from '../lib/subscription-lifecycle';
 import { computeAvailableSlotStarts, SlotStart } from './availability';
 
 /**
@@ -51,8 +52,11 @@ export class AvailabilityService {
     if (!settings || (includeGates && settings.isPaused)) return [];
 
     if (includeGates) {
-      const sub = await this.prisma.subscription.findUnique({ where: { businessId }, select: { status: true } });
-      if (!sub || !['TRIAL', 'TRIAL_GRACE', 'ACTIVE', 'PAID_GRACE'].includes(sub.status)) return [];
+      const sub = await this.prisma.subscription.findUnique({
+        where: { businessId },
+        select: { status: true, trialEndsAt: true, trialGraceEndsAt: true, periodEndsAt: true, paidGraceEndsAt: true },
+      });
+      if (!sub || !isEligible(deriveCanonicalStatus(sub, this.clock.now()))) return [];
     }
 
     const version = await this.scheduleRepo.getActiveVersion(businessId);

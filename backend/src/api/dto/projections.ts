@@ -12,7 +12,7 @@ import {
 } from '../../domain/repositories/business.repository.port';
 import { BookingWithHistory, BookingWithRelations } from '../../domain/repositories/booking.repository.port';
 import { ScheduleWithDetails } from '../../domain/repositories/schedule.repository.port';
-import { CustomerStatusEntry } from '../../domain/services/customer-status.service';
+import { CustomerStatusResult } from '../../domain/services/customer-status.service';
 
 // ---------------------------------------------------------------------------
 // Helpers: BigInt → JSON-safe number (minor currency units).
@@ -184,16 +184,46 @@ export class CustomerStatusEntryView {
 
 export class CustomerStatusView {
   @ApiProperty({ type: [CustomerStatusEntryView] }) bookings: CustomerStatusEntryView[];
+  /** Live customer Telegram connection for this business + phone (REQ-056). */
+  @ApiProperty({ example: false }) telegramConnected: boolean;
 }
 
-export function customerStatusProjection(entries: CustomerStatusEntry[]): CustomerStatusView {
+export function customerStatusProjection(result: CustomerStatusResult): CustomerStatusView {
   return {
-    bookings: entries.map((e) => ({
+    bookings: result.entries.map((e) => ({
       startAt: e.startAt.toISOString(),
       endAt: e.endAt.toISOString(),
       status: e.status,
     })),
+    telegramConnected: result.telegramConnected,
   };
+}
+
+// ---------------------------------------------------------------------------
+// TELEGRAM CONNECTION (spec §23.3; REQ-056). Connect results never carry the
+// plain code by itself — it is returned embedded in the deep link only.
+// ---------------------------------------------------------------------------
+export class TelegramConnectionView {
+  @ApiProperty({ example: 'ready', enum: ['ready', 'connected'] })
+  status: 'ready' | 'connected';
+  @ApiPropertyOptional({ example: 'https://t.me/werefademo?start=…' })
+  deepLink: string | null;
+  @ApiPropertyOptional({ example: 600000 })
+  expiresInMs: number | null;
+}
+
+export function telegramConnectProjection(
+  result: { status: 'connected' } | { status: 'ready'; deepLink: string; expiresInMs: number },
+): TelegramConnectionView {
+  if (result.status === 'connected') {
+    return { status: 'connected', deepLink: null, expiresInMs: null };
+  }
+  return { status: 'ready', deepLink: result.deepLink, expiresInMs: result.expiresInMs };
+}
+
+export class OwnerTelegramStatusView {
+  @ApiProperty({ example: false })
+  connected: boolean;
 }
 
 export class CustomerResubmissionResultView {
@@ -620,5 +650,87 @@ export function ownerScheduleConflictProjection(
     reason: conflict.reason,
     reasonDetail: conflict.reasonDetail,
     services: conflict.services,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// SUBSCRIPTION + PROOF (Prompt 52; spec §17, §27.2/§27.3, REQ-136/137/138/141).
+// The owner sees timeline + bookability + proof history. The admin sees the
+// review queue + the owning business/owner (REQ-137). No price value is ever
+// served (unresolved §46 item 1) and no storage keys/file ids are exposed.
+// ---------------------------------------------------------------------------
+
+export class OwnerSubscriptionProofView {
+  @ApiProperty({ example: 'uuid' }) id: string;
+  @ApiProperty({ example: 'PENDING', enum: ['PENDING', 'APPROVED', 'REJECTED'] }) reviewState: string;
+  @ApiProperty() requestedAt: string;
+  @ApiPropertyOptional() reviewedBy: string | null;
+  @ApiPropertyOptional({ example: 'The transfer amount does not match.' }) rejectionReason: string | null;
+  @ApiPropertyOptional() approvedUntil: string | null;
+  @ApiProperty() createdAt: string;
+}
+
+export class OwnerSubscriptionView {
+  @ApiProperty({ example: 'TRIAL', enum: ['TRIAL', 'TRIAL_GRACE', 'ACTIVE', 'PAID_GRACE', 'EXPIRED', 'NONE'] })
+  status: string;
+  @ApiPropertyOptional() trialStartedAt: string | null;
+  @ApiPropertyOptional() trialEndsAt: string | null;
+  @ApiPropertyOptional() trialGraceEndsAt: string | null;
+  @ApiPropertyOptional() periodEndsAt: string | null;
+  @ApiPropertyOptional() paidGraceEndsAt: string | null;
+  @ApiProperty({
+    description: 'Whether the public page accepts new bookings right now (REQ-132/133/134).',
+  })
+  bookingsEnabled: boolean;
+  @ApiProperty({ type: [OwnerSubscriptionProofView] }) proofs: OwnerSubscriptionProofView[];
+}
+
+export function ownerProofProjection(
+  proof: {
+    id: string;
+    reviewState: import('@prisma/client').SubscriptionReviewState;
+    requestedAt: Date;
+    reviewedBy: string | null;
+    rejectionReason: string | null;
+    approvedUntil: Date | null;
+    createdAt: Date;
+  },
+): OwnerSubscriptionProofView {
+  return {
+    id: proof.id,
+    reviewState: proof.reviewState,
+    requestedAt: proof.requestedAt.toISOString(),
+    reviewedBy: proof.reviewedBy,
+    rejectionReason: proof.rejectionReason,
+    approvedUntil: iso(proof.approvedUntil),
+    createdAt: proof.createdAt.toISOString(),
+  };
+}
+
+export class AdminSubscriptionProofView extends OwnerSubscriptionProofView {
+  @ApiProperty({ example: 'uuid' }) businessId: string;
+  @ApiProperty({ example: 'My Salon' }) businessName: string;
+  @ApiProperty({ example: 'owner@example.com' }) ownerEmail: string;
+}
+
+export function adminProofProjection(row: {
+  proof: {
+    id: string;
+    businessId: string;
+    reviewState: import('@prisma/client').SubscriptionReviewState;
+    requestedAt: Date;
+    reviewedBy: string | null;
+    rejectionReason: string | null;
+    approvedUntil: Date | null;
+    createdAt: Date;
+  };
+  businessName: string;
+  ownerEmail: string;
+}): AdminSubscriptionProofView {
+  return {
+    ...ownerProofProjection(row.proof),
+    businessId: row.proof.businessId,
+    businessName: row.businessName,
+    ownerEmail: row.ownerEmail,
   };
 }

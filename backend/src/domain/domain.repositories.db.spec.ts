@@ -898,7 +898,7 @@ describe.skipIf(!RUN)('domain repositories + schema invariants (live PostgreSQL 
       data: { businessId: biz.id, status: 'TRIAL', trialStartedAt: new Date(), trialEndsAt: new Date() },
     });
     const proof = await prisma.subscriptionProof.create({
-      data: { subscriptionId: subscription.id, businessId: biz.id },
+      data: { subscriptionId: subscription.id, businessId: biz.id, submissionKey: 'subproof-check-001' },
     });
     await expect(
       prisma.subscriptionProof.update({

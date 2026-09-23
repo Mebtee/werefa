@@ -42,6 +42,8 @@ describe.skipIf(!RUN)('AUTH/Authorization HTTP end-to-end (real DB)', () => {
   const DELETE_ORDER = [
     'notification_delivery',
     'notification',
+    'telegram_callback',
+    'telegram_connection_token',
     'telegram_connection',
     'telegram_update',
     'report_job',

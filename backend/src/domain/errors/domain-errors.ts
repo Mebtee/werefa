@@ -124,4 +124,38 @@ export const domainErrors = {
   proofRequired(detail = 'A payment proof is required when a deposit is due.'): AppError {
     return AppError.validation({ proof: 'A proof file is required.' }, detail);
   },
+
+  telegramUnavailable(detail = 'Telegram notifications are not available on this platform.'): AppError {
+    return new AppError({
+      code: ErrorCode.VALIDATION_ERROR,
+      title: 'Unavailable',
+      detail,
+      status: 400,
+    });
+  },
+
+  telegramTokenInvalid(detail = 'The Telegram connection code is invalid.'): AppError {
+    return new AppError({
+      code: ErrorCode.VALIDATION_ERROR,
+      title: 'Invalid request',
+      detail,
+      status: 400,
+    });
+  },
+
+  telegramTokenExpired(detail = 'The Telegram connection code has expired. Request a new one.'): AppError {
+    return new AppError({ code: ErrorCode.TOKEN_EXPIRED, title: 'Token expired', detail });
+  },
+
+  telegramTokenUsed(detail = 'The Telegram connection code has already been used.'): AppError {
+    return new AppError({ code: ErrorCode.TOKEN_USED, title: 'Token already used', detail });
+  },
+
+  telegramConnectionConflict(detail = 'This Telegram chat is already bound to another connection.'): AppError {
+    return new AppError({ code: ErrorCode.CONFLICT, title: 'Conflict', detail });
+  },
+
+  telegramCallbackInvalid(detail = 'The Telegram action is no longer available.'): AppError {
+    return new AppError({ code: ErrorCode.TOKEN_EXPIRED, title: 'Action unavailable', detail });
+  },
 };

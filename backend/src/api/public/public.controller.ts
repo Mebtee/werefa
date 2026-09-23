@@ -4,16 +4,19 @@ import { BusinessService } from '../../domain/services/business.service';
 import { CatalogService } from '../../domain/services/catalog.service';
 import { AvailabilityService } from '../../domain/services/availability.service';
 import { ScheduleService } from '../../domain/services/schedule.service';
+import { TelegramConnectionService } from '../../domain/notifications/telegram-connection.service';
 import {
   PublicAvailabilityView,
   PublicBusinessView,
   PublicScheduleView,
   PublicServiceView,
+  TelegramConnectionView,
   publicBusinessProjection,
   publicScheduleProjection,
   publicServicesProjection,
+  telegramConnectProjection,
 } from '../dto/projections';
-import { AvailabilityQuery, AvailabilityQueryBody, SlugParamsDto } from '../dto/payloads';
+import { AvailabilityQuery, AvailabilityQueryBody, SlugParamsDto, TelegramCustomerConnectPayload } from '../dto/payloads';
 
 /**
  * Public, unauthenticated business page contract (spec §13, §25.3; Prompt 42 §6).
@@ -28,6 +31,7 @@ export class PublicController {
     @Inject(CatalogService) private readonly catalogService: CatalogService,
     @Inject(AvailabilityService) private readonly availabilityService: AvailabilityService,
     @Inject(ScheduleService) private readonly scheduleService: ScheduleService,
+    @Inject(TelegramConnectionService) private readonly telegramConnections: TelegramConnectionService,
   ) {}
 
   private async requireBusiness(slug: string) {
@@ -95,6 +99,22 @@ export class PublicController {
         addOnIds: s.addOnIds,
       })),
     );
+  }
+
+  @Post(':slug/telegram/connect')
+  @ApiOperation({
+    summary:
+      'Connect this business + phone to Telegram. Already-connected customers get `{status:"connected"}`; otherwise a one-time 10-minute deep link is returned (REQ-056).',
+  })
+  @ApiOkResponse({ type: TelegramConnectionView })
+  @HttpCode(200)
+  async telegramConnect(
+    @Param() params: SlugParamsDto,
+    @Body() payload: TelegramCustomerConnectPayload,
+  ): Promise<TelegramConnectionView> {
+    await this.requireBusiness(params.slug);
+    const result = await this.telegramConnections.connectCustomer(params.slug, payload.phone);
+    return telegramConnectProjection(result);
   }
 
   private async buildAvailability(

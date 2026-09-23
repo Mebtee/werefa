@@ -129,6 +129,17 @@ enum TelegramConnectionState {
   REVOKED
 }
 
+enum TelegramTokenState {
+  ISSUED
+  REDEEMED
+  EXPIRED
+}
+
+enum TelegramCallbackState {
+  OPEN
+  USED
+}
+
 enum NotificationChannel {
   EMAIL
   TELEGRAM
@@ -261,6 +272,8 @@ model Business {
   scheduleExceptions        ScheduleException[]
   resubmissionVerifications ResubmissionVerification[]
   telegramConnections       TelegramConnection[]
+  telegramConnectionTokens  TelegramConnectionToken[]
+  telegramCallbacks         TelegramCallback[]
   notifications             Notification[]
   subscription              Subscription?
   subscriptionProofs        SubscriptionProof[]
@@ -494,6 +507,7 @@ model Booking {
   slotLocks                 SlotLock[]
   scheduleExceptions        ScheduleException[]
   resubmissionVerifications ResubmissionVerification[]
+  telegramCallbacks         TelegramCallback[]
 
   @@index([businessId, startAt])
   @@index([businessId, status])
@@ -647,20 +661,64 @@ model PaymentStatusHistory {
 // ---------------------------------------------------------------------------
 
 model TelegramConnection {
-  id          String                  @id @default(uuid()) @db.Uuid
-  businessId  String?                 @map("business_id") @db.Uuid
-  userId      String?                 @map("user_id") @db.Uuid
-  chatId      BigInt                  @unique @map("chat_id")
-  kind        TelegramConnectionKind
-  state       TelegramConnectionState @default(PENDING_VERIFICATION)
-  createdAt   DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
-  connectedAt DateTime?               @map("connected_at") @db.Timestamptz(6)
-  revokedAt   DateTime?               @map("revoked_at") @db.Timestamptz(6)
+  id            String                  @id @default(uuid()) @db.Uuid
+  businessId    String?                 @map("business_id") @db.Uuid
+  userId        String?                 @map("user_id") @db.Uuid
+  customerPhone String?                 @map("customer_phone") @db.VarChar(32)
+  chatId        BigInt                  @map("chat_id")
+  kind          TelegramConnectionKind
+  state         TelegramConnectionState @default(PENDING_VERIFICATION)
+  createdAt     DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  connectedAt   DateTime?               @map("connected_at") @db.Timestamptz(6)
+  revokedAt     DateTime?               @map("revoked_at") @db.Timestamptz(6)
 
-  business Business? @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  business  Business?          @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  callbacks TelegramCallback[]
 
-  @@index([businessId, state])
+  @@index([businessId, kind, state])
+  @@index([businessId, customerPhone, kind, state])
+  @@unique([chatId, businessId])
   @@map("telegram_connection")
+}
+
+model TelegramConnectionToken {
+  id            String                  @id @default(uuid()) @db.Uuid
+  businessId    String                  @map("business_id") @db.Uuid
+  kind          TelegramConnectionKind
+  customerPhone String?                 @map("customer_phone") @db.VarChar(32)
+  userId        String?                 @map("user_id") @db.Uuid
+  // Unique so redemption can look the code up by digest (findUnique) while
+  // keeping the collision probability of the CSPRNG-issued plain codes at zero.
+  codeHash      String                  @unique @map("code_hash") @db.VarChar(64)
+  state         TelegramTokenState      @default(ISSUED)
+  attempts      Int                     @default(0)
+  expiresAt     DateTime                @map("expires_at") @db.Timestamptz(6)
+  usedAt        DateTime?               @map("used_at") @db.Timestamptz(6)
+  createdAt     DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Restrict)
+
+  @@index([businessId, kind, state])
+  @@map("telegram_connection_token")
+}
+
+model TelegramCallback {
+  id           String                 @id @default(uuid()) @db.Uuid
+  businessId   String                 @map("business_id") @db.Uuid
+  connectionId String                 @map("connection_id") @db.Uuid
+  bookingId    Int                    @map("booking_id")
+  kind         String                 @db.VarChar(32)
+  state        TelegramCallbackState  @default(OPEN)
+  usedAt       DateTime?              @map("used_at") @db.Timestamptz(6)
+  createdAt    DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  business   Business           @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  connection TelegramConnection @relation(fields: [connectionId], references: [id], onDelete: Restrict)
+  booking    Booking            @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId])
+  @@index([connectionId, state])
+  @@map("telegram_callback")
 }
 
 model TelegramUpdate {
@@ -734,6 +792,7 @@ model SubscriptionProof {
   id              String                  @id @default(uuid()) @db.Uuid
   subscriptionId  String                  @map("subscription_id") @db.Uuid
   businessId      String                  @map("business_id") @db.Uuid
+  submissionKey   String                  @unique @map("submission_key") @db.VarChar(128)
   requestedAt     DateTime                @default(now()) @map("requested_at") @db.Timestamptz(6)
   reviewedBy      String?                 @map("reviewed_by") @db.Uuid
   reviewState     SubscriptionReviewState @default(PENDING) @map("review_state")

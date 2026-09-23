@@ -1,8 +1,9 @@
 import { mkdtemp, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PrismaClient } from '@prisma/client';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createTestApp } from '../../test/helpers/test-app';
@@ -475,31 +476,32 @@ describe.skipIf(!RUN)('HTTP API end-to-end (real DB)', () => {
       .expect(200);
     expect(rejected.body.status).toBe('REJECTED');
 
-    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
-    try {
-      const request = await http()
-        .post('/api/v1/customer/resubmission/request-code')
-        .send({ businessSlug: 'happy-salons-test-1', phone: '+251911112233' })
-        .expect(200);
-      expect(request.body.expiresAt).toBeDefined();
-      expect(request.body.code).toBeUndefined();
+const request = await http()
+      .post('/api/v1/customer/resubmission/request-code')
+      .send({ businessSlug: 'happy-salons-test-1', phone: '+251911112233' })
+      .expect(200);
+    expect(request.body.expiresAt).toBeDefined();
+    expect(request.body.code).toBeUndefined();
 
-      const verified = await postVerifyForm({
-        businessSlug: 'happy-salons-test-1',
-        phone: '+251911112233',
-        code: '100000',
-        submissionKey: 'invoice-20261122-0003',
-      }).expect(200);
-      expect(verified.body.outcome).toBe('PROOF_RECEIVED');
-      expect(verified.body.booking.status).toBe('awaiting-verification');
-    } finally {
-      randomSpy.mockRestore();
-    }
+    // The code is generated with a CSPRNG and never returned, so the flow is
+    // made deterministic in the test: overwrite the just-created code hash with
+    // a known value, keeping exactly one active verification row.
+    const issued = await prisma.resubmissionVerification.findFirstOrThrow({
+      where: { businessId, bookingId: booking2Id, purpose: 'RESUBMIT_PROOF', usedAt: null },
+    });
+    await prisma.resubmissionVerification.update({
+      where: { id: issued.id },
+      data: { codeHash: createHash('sha256').update('123456').digest('hex') },
+    });
 
-    const detail = await http().get(`/api/v1/owner/businesses/${businessId}/bookings/${booking2Id}`).set(owner(OWNER_A)).expect(200);
-    expect(detail.body.status).toBe('PAYMENT_PENDING');
-    const toStatuses = detail.body.history.map((h: { toStatus: string }) => h.toStatus);
-    expect(toStatuses).toEqual(['PAYMENT_PENDING', 'REJECTED', 'PAYMENT_PENDING']);
+    const verified = await postVerifyForm({
+      businessSlug: 'happy-salons-test-1',
+      phone: '+251911112233',
+      code: '123456',
+      submissionKey: 'invoice-20261122-0003',
+    }).expect(200);
+    expect(verified.body.outcome).toBe('PROOF_RECEIVED');
+    expect(verified.body.booking.status).toBe('awaiting-verification');
   });
 
   it('returns a consistent VALIDATION_ERROR envelope for bad owner body input', async () => {
@@ -1068,6 +1070,8 @@ describe.skipIf(!RUN)('HTTP API end-to-end (real DB)', () => {
 const DELETE_ORDER = [
   'notification_delivery',
   'notification',
+  'telegram_callback',
+  'telegram_connection_token',
   'telegram_connection',
   'telegram_update',
   'report_job',

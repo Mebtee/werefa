@@ -8,8 +8,7 @@ import { BusinessRepository, BusinessWithOwner } from '../repositories/business.
 import { SubscriptionRepository } from '../repositories/subscription.repository.port';
 import { BUSINESS_REPOSITORY, SUBSCRIPTION_REPOSITORY } from '../repositories/tokens';
 import { withBusinessAdvisoryLock } from '../transactions/business-advisory-lock';
-import { ScheduleRepository } from '../repositories/schedule.repository.port';
-import { SCHEDULE_REPOSITORY } from '../repositories/tokens';
+import { SubscriptionService } from './subscription.service';
 
 const RESERVED_SLUGS = new Set([
   'admin', 'api', 'www', 'public', 'telegram', 'auth', 'health', 'ready', 'meta', 'null', 'undefined',
@@ -32,8 +31,8 @@ export class BusinessService {
     @Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient,
     @Inject(BUSINESS_REPOSITORY) private readonly businessRepo: BusinessRepository,
     @Inject(SUBSCRIPTION_REPOSITORY) private readonly subscriptionRepo: SubscriptionRepository,
-    @Inject(SCHEDULE_REPOSITORY) private readonly scheduleRepo: ScheduleRepository,
     private readonly tenantGuard: TenantGuard,
+    private readonly subscriptionService: SubscriptionService,
   ) {}
 
   async createBusiness(
@@ -162,15 +161,9 @@ export class BusinessService {
   }
 
   async resumeManual(ctx: ActorContext, businessId: string): Promise<void> {
-    await this.tenantGuard.requireOwnedBusiness(ctx, businessId);
-    const sub = await this.subscriptionRepo.getByBusiness(businessId);
-    if (!sub || sub.status === 'EXPIRED') {
-      throw domainErrors.subscriptionDisabled('Cannot resume: the subscription is expired.');
-    }
-    await withBusinessAdvisoryLock(this.prisma, businessId, async (tx) => {
-      await this.businessRepo.setPaused(tx, { businessId, isPaused: false, pauseMessage: null, reopenAt: null });
-      await this.promoteLatestPending(tx as never as import('@prisma/client').Prisma.TransactionClient, businessId, ctx.actorUserId ?? 'system', 'Resumed by owner');
-    });
+    // Time-aware: the status is reconciled before the resume is allowed, so a
+    // business whose trial/paid grace lapsed cannot be reopened (REQ-157).
+    await this.subscriptionService.manualResume(ctx, businessId);
   }
 
   async deactivate(ctx: ActorContext, businessId: string) {
@@ -225,25 +218,6 @@ export class BusinessService {
       })),
     );
     return withSettings;
-  }
-
-  private async promoteLatestPending(
-    tx: import('@prisma/client').Prisma.TransactionClient,
-    businessId: string,
-    actorId: string,
-    reason: string,
-  ): Promise<void> {
-    const pending = await this.scheduleRepo.listPendingVersions(businessId);
-    if (pending.length === 0) return;
-    const latest = pending[pending.length - 1];
-    await this.scheduleRepo.demoteActiveVersions(tx, { businessId, replacedAt: new Date() });
-    await this.scheduleRepo.promotePendingVersion(tx, {
-      versionId: latest.id,
-      businessId,
-      appliedBy: actorId,
-      reason,
-    });
-    await this.scheduleRepo.setBusinessActiveVersion(tx, { businessId, versionId: latest.id });
   }
 }
 

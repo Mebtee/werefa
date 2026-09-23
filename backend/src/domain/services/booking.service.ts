@@ -8,7 +8,6 @@ import { DomainEventBus, DOMAIN_EVENT_BUS, BookingNotificationEvent } from '../e
 import { BusinessRepository } from '../repositories/business.repository.port';
 import { BookingRepository, BookingWithHistory, BookingWithRelations } from '../repositories/booking.repository.port';
 import { PaymentRepository } from '../repositories/payment.repository.port';
-import { SubscriptionRepository } from '../repositories/subscription.repository.port';
 import { FileRepository } from '../repositories/file.repository.port';
 import { PaymentProofStorage } from '../repositories/proof-storage.port';
 import { isAllowedProofMimeType, PROOF_MAX_BYTES, sniffProof } from '../lib/proof-file';
@@ -16,7 +15,6 @@ import {
   BUSINESS_REPOSITORY,
   BOOKING_REPOSITORY,
   PAYMENT_REPOSITORY,
-  SUBSCRIPTION_REPOSITORY,
   FILE_REPOSITORY,
   PROOF_STORAGE,
 } from '../repositories/tokens';
@@ -24,6 +22,7 @@ import { PRISMA_CLIENT } from '../../config/config.constants';
 import { withBusinessAdvisoryLock } from '../transactions/business-advisory-lock';
 import { CatalogService } from './catalog.service';
 import { AvailabilityService } from './availability.service';
+import { SubscriptionService } from './subscription.service';
 
 /**
  * Booking creation service (Prompt 41 §9; REQ-050/051/054/055/100/101/109/121).
@@ -45,7 +44,6 @@ export class BookingService {
     @Inject(BUSINESS_REPOSITORY) private readonly businessRepo: BusinessRepository,
     @Inject(BOOKING_REPOSITORY) private readonly bookingRepo: BookingRepository,
     @Inject(PAYMENT_REPOSITORY) private readonly paymentRepo: PaymentRepository,
-    @Inject(SUBSCRIPTION_REPOSITORY) private readonly subscriptionRepo: SubscriptionRepository,
     @Inject(FILE_REPOSITORY) private readonly fileRepo: FileRepository,
     @Inject(PROOF_STORAGE) private readonly proofStorage: PaymentProofStorage,
     @Inject(GLOBAL_CLOCK) private readonly clock: GlobalClock,
@@ -53,6 +51,7 @@ export class BookingService {
     private readonly tenantGuard: TenantGuard,
     private readonly catalogService: CatalogService,
     private readonly availabilityService: AvailabilityService,
+    private readonly subscriptionService: SubscriptionService,
   ) {}
 
   async createBooking(
@@ -76,8 +75,10 @@ export class BookingService {
     if (biz.deactivatedAt) throw domainErrors.businessPaused('This business is not accepting bookings.');
     const settings = await this.businessRepo.getSettings(businessId);
     if (!settings || settings.isPaused) throw domainErrors.businessPaused();
-    const eligible = await this.subscriptionRepo.isBookingEligible(businessId);
-    if (!eligible) throw domainErrors.subscriptionDisabled();
+    // Time-aware subscription gate (Prompt 52): the persisted status is first
+    // advanced to the timestamp-derived canonical status, so a business whose
+    // trial/paid grace has lapsed stops new bookings (REQ-133).
+    await this.subscriptionService.bookingGate(businessId);
 
     // The backend — never the client — resolves every selected service against
     // the business catalog and snapshots price/duration/name (REQ-074/076).
@@ -93,7 +94,7 @@ export class BookingService {
     // same appointment (same start, same resolved component set). Reusing the
     // key for a different business or a different request is a conflict.
     const existing = await this.paymentRepo.findBySubmissionKey(input.submissionKey);
-    if (existing) return this.resolveIdempotent(existing, businessId, startAt, components);
+    if (existing) return this.resolveIdempotent(existing, businessId, startAt, components, input.customerPhone);
 
     // Proof validation happens BEFORE any availability claim is processed: a
     // missing (deposit) or invalid proof must not lock the slot (spec §31).
@@ -119,18 +120,26 @@ export class BookingService {
       durationMinutes: totalDurationMinutes,
     });
     if (!slots.some((s) => Math.abs(s.startAt.getTime() - startAt.getTime()) < 60_000)) {
+      // The slot may have been claimed by a CONCURRENT request carrying the same
+      // submission key. Such a replay is an idempotent success (REQ-121), never a
+      // slot conflict, so re-check the key before answering SLOT_UNAVAILABLE.
+      const raced = await this.paymentRepo.findBySubmissionKey(input.submissionKey);
+      if (raced) {
+        await this.discardStaged(staged);
+        return this.resolveIdempotent(raced, businessId, startAt, components, input.customerPhone);
+      }
       await this.discardStaged(staged);
       throw domainErrors.unavailableAppointment('The requested time is not currently available.');
     }
 
-    let consumed = false;
+    let committed = false;
     try {
-      return await withBusinessAdvisoryLock(this.prisma, businessId, async (tx) => {
+      const created = await withBusinessAdvisoryLock(this.prisma, businessId, async (tx) => {
         // Re-check the key INSIDE the lock: a concurrently committed request with
         // the same key is the same appointment, so it is an idempotent success
         // here — not a slot conflict.
         const raced = await this.paymentRepo.findBySubmissionKey(input.submissionKey, tx);
-        if (raced) return this.idempotentRef(raced, businessId, startAt, components);
+        if (raced) return this.idempotentRef(raced, businessId, startAt, components, input.customerPhone);
 
         const occupied = await this.bookingRepo.hasActiveOverlap(tx, { businessId, startAt, endAt });
         if (occupied) throw domainErrors.unavailableAppointment();
@@ -160,7 +169,6 @@ export class BookingService {
             proofFileObjectId: fileObject?.id ?? null,
             components,
           });
-          consumed = true;
           // Read back + publish only AFTER commit: the row is not visible to the
           // outer client while the transaction is still open.
           return { businessId, bookingId: booking.id, customerPhone: input.customerPhone };
@@ -172,7 +180,7 @@ export class BookingService {
               // the winner and verify idempotency before answering.
               const winner = await this.paymentRepo.findBySubmissionKey(input.submissionKey, tx);
               if (winner && winner.businessId === businessId) {
-                return this.idempotentRef(winner, businessId, startAt, components);
+                return this.idempotentRef(winner, businessId, startAt, components, input.customerPhone);
               }
               throw domainErrors.idempotencyConflict();
             }
@@ -180,11 +188,16 @@ export class BookingService {
           }
           throw err;
         }
-      }).then((created) => this.afterCommit(businessId, created.bookingId, created.customerPhone, []));
+      });
+      // The transaction committed; the staged proof object is now linked to a
+      // committed PaymentProof row.
+      committed = true;
+      return await this.afterCommit(businessId, created.bookingId, created.customerPhone, ['PAYMENT_PROOF_RECEIVED']);
     } finally {
       // If the staged proof was never linked to a committed PaymentProof row
-      // (idempotent replay or any aborted claim), remove the orphaned object.
-      if (staged && !consumed) {
+      // (idempotent replay or any aborted claim, including a failed commit),
+      // remove the orphaned object.
+      if (staged && !committed) {
         await this.proofStorage.delete(staged.storageKey).catch(() => undefined);
       }
     }
@@ -532,8 +545,9 @@ export class BookingService {
     businessId: string,
     startAt: Date,
     components: ComponentSnapshot[],
+    customerPhone: string,
   ): Promise<{ booking: BookingWithRelations; events: NotificationResult }> {
-    const ref = await this.idempotentRef(row, businessId, startAt, components);
+    const ref = await this.idempotentRef(row, businessId, startAt, components, customerPhone);
     const booking = await this.bookingRepo.findById(businessId, ref.bookingId);
     if (!booking) throw domainErrors.businessNotFound();
     return { booking, events: [] };
@@ -549,12 +563,16 @@ export class BookingService {
     businessId: string,
     startAt: Date,
     components: ComponentSnapshot[],
+    customerPhone: string,
   ): Promise<{ businessId: string; bookingId: number; customerPhone: string }> {
     if (row.businessId !== businessId) {
       throw domainErrors.idempotencyConflict('This submission key is already used by a different business.');
     }
     const booking = await this.bookingRepo.findById(businessId, row.bookingId);
     if (!booking) throw domainErrors.businessNotFound();
+    if (booking.customerPhone !== customerPhone) {
+      throw domainErrors.idempotencyConflict('This submission key was already used by a different customer.');
+    }
     if (this.bookingDiffers(booking, startAt, components)) {
       throw domainErrors.idempotencyConflict('This submission key was already used for a different booking request.');
     }
@@ -584,7 +602,9 @@ export class BookingService {
     businessId: string,
     bookingId: number,
     customerPhone: string,
-    eventTypes: Array<'BOOKING_CONFIRMED' | 'PAYMENT_REJECTED' | 'BOOKING_CANCELLED' | 'NO_SHOW' | 'BOOKING_RESCHEDULED'>,
+    eventTypes: Array<
+    'PAYMENT_PROOF_RECEIVED' | 'BOOKING_CONFIRMED' | 'PAYMENT_REJECTED' | 'BOOKING_CANCELLED' | 'NO_SHOW' | 'BOOKING_RESCHEDULED'
+  >,
   ): Promise<{ booking: BookingWithRelations; events: NotificationResult }> {
     const booking = await this.bookingRepo.findById(businessId, bookingId);
     if (!booking) throw domainErrors.businessNotFound();

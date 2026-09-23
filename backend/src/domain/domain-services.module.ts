@@ -6,7 +6,6 @@ import { TenantGuard } from './authorization/tenant-guard';
 import { GLOBAL_CLOCK } from './time/global-clock';
 import { IntlGlobalClock } from './time/global-clock';
 import { DOMAIN_EVENT_BUS } from './events/domain-events';
-import { InMemoryEventBus } from './events/domain-events';
 import { BusinessService } from './services/business.service';
 import { CatalogService } from './services/catalog.service';
 import { ScheduleService } from './services/schedule.service';
@@ -14,10 +13,21 @@ import { AvailabilityService } from './services/availability.service';
 import { BookingService } from './services/booking.service';
 import { ResubmissionService } from './services/resubmission.service';
 import { SubscriptionService } from './services/subscription.service';
+import { SubscriptionBillingService } from './services/subscription-billing.service';
 import { CustomerStatusService } from './services/customer-status.service';
 import { AuthService } from './services/auth.service';
 import { RecoveryService } from './services/recovery.service';
 import { AdminManagementService } from './services/admin-management.service';
+import { TELEGRAM_PROVIDER } from './notifications/telegram-provider.port';
+import { HttpTelegramProvider } from './notifications/http-telegram-provider';
+import { DisabledTelegramProvider } from './notifications/disabled-telegram-provider';
+import { NotificationMessageRenderer } from './notifications/notification-message-renderer';
+import { NotificationOutboxEventBus } from './notifications/notification-outbox-event-bus';
+import { TelegramConnectionService } from './notifications/telegram-connection.service';
+import { TelegramCallbackService } from './notifications/telegram-callback.service';
+import { NotificationDeliveryService } from './notifications/notification-delivery.service';
+import { NotificationBackgroundWorker } from './notifications/notification-background.worker';
+import { TelegramWebhookService } from './notifications/telegram-webhook.service';
 
 /**
  * Domain/application services module (Prompt 41). Services implement the
@@ -34,7 +44,22 @@ import { AdminManagementService } from './services/admin-management.service';
     },
     {
       provide: DOMAIN_EVENT_BUS,
-      useClass: InMemoryEventBus,
+      useClass: NotificationOutboxEventBus,
+    },
+    {
+      // Fail-safe transport: HTTP Bot API adapter when enabled, otherwise a
+      // no-op adapter so any accidental sweep is harmless (never a silent
+      // success — write-time gating marks deliveries SUPPRESSED).
+      provide: TELEGRAM_PROVIDER,
+      inject: [CONFIG],
+      useFactory: (config: AppConfig) =>
+        config.telegramEnabled
+          ? new HttpTelegramProvider(
+              config.telegramBotToken ?? '',
+              config.telegramBotWebhookSecret ?? '',
+              config.telegramBotWebhookUrl,
+            )
+          : new DisabledTelegramProvider(),
     },
     TenantGuard,
     BusinessService,
@@ -44,14 +69,23 @@ import { AdminManagementService } from './services/admin-management.service';
     BookingService,
     ResubmissionService,
     SubscriptionService,
+    SubscriptionBillingService,
     CustomerStatusService,
     AuthService,
     RecoveryService,
     AdminManagementService,
+    NotificationMessageRenderer,
+    NotificationOutboxEventBus,
+    TelegramConnectionService,
+    TelegramCallbackService,
+    NotificationDeliveryService,
+    NotificationBackgroundWorker,
+    TelegramWebhookService,
   ],
   exports: [
     GLOBAL_CLOCK,
     DOMAIN_EVENT_BUS,
+    TELEGRAM_PROVIDER,
     TenantGuard,
     BusinessService,
     CatalogService,
@@ -60,10 +94,17 @@ import { AdminManagementService } from './services/admin-management.service';
     BookingService,
     ResubmissionService,
     SubscriptionService,
+    SubscriptionBillingService,
     CustomerStatusService,
     AuthService,
     RecoveryService,
     AdminManagementService,
+    NotificationMessageRenderer,
+    NotificationOutboxEventBus,
+    TelegramConnectionService,
+    TelegramCallbackService,
+    NotificationDeliveryService,
+    TelegramWebhookService,
   ],
 })
 export class DomainServicesModule {}

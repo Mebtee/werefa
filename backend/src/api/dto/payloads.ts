@@ -620,3 +620,46 @@ export class ProofIdParamDto extends BookingIdParamDto {
 }
 
 export class ResubmissionResultDto extends PickType(ResubmissionVerifyPayload, ['businessSlug', 'phone'] as const) {}
+
+export class TelegramCustomerConnectPayload {
+  @ApiProperty({ example: '+251911000000' })
+  @IsString()
+  @IsPhoneNumber('ET')
+  phone: string;
+}
+
+// ---------------------------------------------------------------------------
+// SUBSCRIPTION (Prompt 52, spec §17 / §30 / REQ-135…140)
+// ---------------------------------------------------------------------------
+
+export class SubscriptionProofIdParamDto {
+  @ApiProperty({ example: 'uuid' })
+  @IsUUID('4')
+  proofId: string;
+}
+
+/** Multipart JSON field for the owner subscription proof upload (REQ-136). */
+export class SubmitSubscriptionProofPayload {
+  @ApiProperty({
+    example: 'submission-key-20260923-0001',
+    description: 'Idempotency key (REQ-121 architecture). Replay returns the original proof.',
+  })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(128)
+  submissionKey: string;
+}
+
+export class RejectSubscriptionProofPayload {
+  @ApiProperty({ example: 'The transfer amount does not match the invoice.', description: 'Sent to the owner (REQ-138).' })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(800)
+  reason: string;
+}
+
+export class SubscriptionProofQueueQuery {
+  @ApiProperty({ example: 'PENDING', enum: ['PENDING', 'APPROVED', 'REJECTED'] })
+  @IsIn(['PENDING', 'APPROVED', 'REJECTED'])
+  state: 'PENDING' | 'APPROVED' | 'REJECTED' = 'PENDING';
+}

@@ -4,6 +4,7 @@ import { PRISMA_CLIENT } from '../../config/config.constants';
 import { ActorContext } from '../authorization/actor-context';
 import { TenantGuard } from '../authorization/tenant-guard';
 import { domainErrors } from '../errors/domain-errors';
+import { deriveCanonicalStatus, isEligible } from '../lib/subscription-lifecycle';
 import { SubscriptionRepository } from '../repositories/subscription.repository.port';
 import { ScheduleRepository } from '../repositories/schedule.repository.port';
 import {
@@ -17,9 +18,13 @@ import { withBusinessAdvisoryLock } from '../transactions/business-advisory-lock
  * Subscription eligibility gate + pause/resume lifecycle (Prompt 41 §22;
  * doc 15; REQ-125 … REQ-158).
  *
- * Only eligibility checks are implemented — no price (unchanged §46 item 1), no
- * reminder timing (§46 item 3), no billing/approval workflow. Resume promotes
- * the latest PENDING schedule version (R151) like any other resume path.
+ * Prompt 52: the gate is now TIME-AWARE — the persisted status is advanced to
+ * the timestamp-derived canonical status (REQ-128…133) before eligibility is
+ * decided, so a business whose trial/paid grace has lapsed stops taking
+ * bookings (REQ-133) without waiting for a background job. Only eligibility +
+ * lifecycle live here; the manual payment/approval workflow is in
+ * SubscriptionBillingService. No price (unchanged §46 item 1) and no reminder
+ * timing (§46 item 3) are implemented.
  */
 @Injectable()
 export class SubscriptionService {
@@ -31,16 +36,46 @@ export class SubscriptionService {
     private readonly tenantGuard: TenantGuard,
   ) {}
 
+  /**
+   * Advance the persisted status to the time-derived canonical status and
+   * return the effective subscription. Idempotent and guarded: when no band
+   * boundary was crossed no write happens; a concurrent advance can never
+   * double-write history.
+   */
+  async reconcileStatus(businessId: string): Promise<import('@prisma/client').Subscription | null> {
+    const sub = await this.subscriptionRepo.getByBusiness(businessId);
+    if (!sub) return null;
+    const desired = deriveCanonicalStatus(sub, this.clock.now());
+    if (desired !== sub.status) {
+      await this.subscriptionRepo.advanceToCanonicalStatus(
+        businessId,
+        desired,
+        desired === 'EXPIRED'
+          ? 'Time-based advancement: subscription expired'
+          : `Time-based advancement: canonical status ${desired}`,
+      );
+      return this.subscriptionRepo.getByBusiness(businessId);
+    }
+    return sub;
+  }
+
   /** Gate: throws SUBSCRIPTION_EXPIRED when the business cannot take bookings. */
   async bookingGate(businessId: string): Promise<void> {
-    const eligible = await this.subscriptionRepo.isBookingEligible(businessId);
-    if (!eligible) throw domainErrors.subscriptionDisabled();
+    const sub = await this.reconcileStatus(businessId);
+    if (!sub || !isEligible(sub.status)) throw domainErrors.subscriptionDisabled();
+  }
+
+  /** Time-aware eligibility check used by read paths that must NOT write. */
+  async isEligibleNow(businessId: string): Promise<boolean> {
+    const sub = await this.subscriptionRepo.getByBusiness(businessId);
+    if (!sub) return false;
+    return isEligible(deriveCanonicalStatus(sub, this.clock.now()));
   }
 
   async manualResume(ctx: ActorContext, businessId: string): Promise<void> {
     await this.tenantGuard.requireOwnedBusiness(ctx, businessId);
-    const sub = await this.subscriptionRepo.getByBusiness(businessId);
-    if (!sub || sub.status === 'EXPIRED') {
+    const sub = await this.reconcileStatus(businessId);
+    if (!sub || !isEligible(sub.status)) {
       throw domainErrors.subscriptionDisabled('Cannot resume: the subscription is expired.');
     }
     await withBusinessAdvisoryLock(this.prisma, businessId, async (tx) => {
@@ -55,15 +90,15 @@ export class SubscriptionService {
     if (!settings?.isPaused || !settings.reopenAt) return { resumed: false, reason: 'Not in scheduled pause.' };
     if (this.clock.now() < settings.reopenAt) return { resumed: false, reason: 'Not yet time.' };
 
-    const sub = await this.subscriptionRepo.getByBusiness(businessId);
+    const sub = await this.reconcileStatus(businessId);
     if (!sub) return { resumed: false, reason: 'No subscription.' };
-    if (sub.status === 'EXPIRED') {
+    if (!isEligible(sub.status)) {
       await withBusinessAdvisoryLock(this.prisma, businessId, async (tx) => {
         await this.subscriptionRepo.appendHistory(tx, {
           subscriptionId: sub.id,
           businessId,
-          fromStatus: 'EXPIRED',
-          toStatus: 'EXPIRED',
+          fromStatus: sub.status,
+          toStatus: sub.status,
           actorType: 'SYSTEM',
           reason: 'Auto-resume refused: subscription expired',
         });

@@ -1,13 +1,14 @@
 /**
- * Notification/domain event boundary (Prompt 41 §20; Prompt 43 auth events).
+ * Notification/domain event boundary (Prompt 41 §20; Prompt 43 auth events;
+ * Prompt 51 Telegram delivery).
  *
- * Telegram itself is NOT implemented in this prompt (spec §17, architecture
- * doc 12). Services publish typed domain events AFTER the owning transaction
- * commits; a later phase plugs a real outbox/Telegram sender in behind the same
- * port. Events exist for the canonical notification set only; booking validity
- * never depends on delivery (REQ-056). Auth events (lockout, recovery code,
- * force logout) are emitted as typed events for a future email outbox; no real
- * email is ever sent by this phase.
+ * Services publish typed domain events AFTER the owning transaction commits.
+ * Production wires the outbox adapter (NotificationOutboxEventBus), which
+ * persists customer/owner notifications as Telegram deliveries (spec §18/§19)
+ * and auth email events as suppressed email deliveries; a background worker
+ * delivers them through the Telegram provider. Events exist for the canonical
+ * notification set only; booking validity never depends on delivery (REQ-056).
+ * No real email is ever sent by this phase.
  */
 export type BookingNotificationEventType =
   | 'PAYMENT_PROOF_RECEIVED'
@@ -38,7 +39,33 @@ export interface AuthEmailEvent {
   occurredAt: Date;
 }
 
-export type DomainEvent = BookingNotificationEvent | AuthEmailEvent;
+/**
+ * Subscription notifications (Prompt 52; spec §19 N15/N17).
+ *
+ *  - SUBSCRIPTION_PROOF_SUBMITTED  → N17: exactly the two Admin accounts are
+ *    notified by email when the owner uploads a subscription payment proof
+ *    (REQ-140). No owner/customer Telegram delivery is defined for submission.
+ *  - SUBSCRIPTION_PROOF_REJECTED   → N15: the rejection reason is sent to the
+ *    owner by email AND to the business Telegram (REQ-138). An approval
+ *    notification to the owner is NOT part of the approved catalog.
+ *
+ * N16 reminders are time-driven by a lead-time that is still unresolved
+ * (§46 item 3); the scheduling seam is preserved but nothing is scheduled yet.
+ */
+export type SubscriptionNotificationEventType =
+  | 'SUBSCRIPTION_PROOF_SUBMITTED'
+  | 'SUBSCRIPTION_PROOF_REJECTED';
+
+export interface SubscriptionNotificationEvent {
+  type: SubscriptionNotificationEventType;
+  businessId: string;
+  /** SubscriptionProof id — rendered/emailed context for the delivery worker. */
+  proofId: string;
+  occurredAt: Date;
+  payload?: Record<string, unknown>;
+}
+
+export type DomainEvent = BookingNotificationEvent | AuthEmailEvent | SubscriptionNotificationEvent;
 
 export interface DomainEventBus {
   publish(events: DomainEvent[]): Promise<void>;

@@ -108,6 +108,21 @@ export const appConfigSchema = z.object({
   authCookieName: z.string().min(1).max(64).default('werefa_session'),
   /** Local directory for staged/proof object storage (Prompt 50, REQ-118). */
   proofStorageDir: z.string().min(1).default('./storage/proofs'),
+  // ---- Telegram integration (Prompt 51; spec §18, REQ-056 … REQ-068) --------
+  // Optional and fail-safe: when telegramEnabled is false the channel is
+  // disabled and TELEGRAM deliveries are recorded as SUPPRESSED in the outbox —
+  // booking validity never depends on delivery (REQ-056). No secrets are ever
+  // echoed by the config validator (only field names).
+  telegramEnabled: boolish(false),
+  telegramBotToken: z.string().min(1).nullable().default(null),
+  telegramBotHandle: z.string().min(1).nullable().default(null),
+  telegramBotWebhookSecret: z.string().min(1).nullable().default(null),
+  /** Public URL Telegram posts bot updates to (only needed when enabling webhook registration). */
+  telegramBotWebhookUrl: z.string().min(1).nullable().default(null),
+  /** In-process outbox sweep cadence (ms). */
+  telegramDeliveryIntervalMs: z.coerce.number().int().positive().default(5000),
+  /** Bounded delivery attempts before a delivery is DEAD_LETTERED. */
+  telegramDeliveryMaxAttempts: z.coerce.number().int().min(1).max(20).default(5),
   productParameters: z.object({
     subscriptionMonthlyPriceMinor: z.number().int().positive().nullable().default(null),
     appTimezone: z.string().min(1).default(APP_TIMEZONE_DESIGN_DEFAULT),
@@ -189,6 +204,13 @@ function rawToParsed(env: Record<string, string | undefined>): z.infer<typeof ap
     authRecoveryCodeLength: env.AUTH_RECOVERY_CODE_LENGTH || undefined,
     authCookieName: env.AUTH_COOKIE_NAME || undefined,
     proofStorageDir: env.PROOF_STORAGE_DIR || undefined,
+    telegramEnabled: env.TELEGRAM_ENABLED || undefined,
+    telegramBotToken: env.TELEGRAM_BOT_TOKEN || undefined,
+    telegramBotHandle: env.TELEGRAM_BOT_HANDLE || undefined,
+    telegramBotWebhookSecret: env.TELEGRAM_BOT_WEBHOOK_SECRET || undefined,
+    telegramBotWebhookUrl: env.TELEGRAM_BOT_WEBHOOK_URL || undefined,
+    telegramDeliveryIntervalMs: env.TELEGRAM_DELIVERY_INTERVAL_MS || undefined,
+    telegramDeliveryMaxAttempts: env.TELEGRAM_DELIVERY_MAX_ATTEMPTS || undefined,
     productParameters: {
       subscriptionMonthlyPriceMinor: productRaw.PRODUCT_SUBSCRIPTION_MONTHLY_PRICE_MINOR as number | null,
       appTimezone: productRaw.PRODUCT_APP_TIMEZONE as string,
@@ -237,6 +259,14 @@ export function assertConfigInvariants(config: AppConfig): void {
   }
   if (config.productParameters.subscriptionMonthlyPriceMinor !== null && config.productParameters.subscriptionMonthlyPriceMinor < 0) {
     issues.push('PRODUCT_SUBSCRIPTION_MONTHLY_PRICE_MINOR must be a positive integer when set');
+  }
+
+  // Telegram: fail-safe without credentials. Enabling the channel without a
+  // token/handle/secret is a configuration error (never a silent no-op sender).
+  if (config.telegramEnabled) {
+    if (!config.telegramBotToken) issues.push('TELEGRAM_BOT_TOKEN is required when TELEGRAM_ENABLED=true');
+    if (!config.telegramBotHandle) issues.push('TELEGRAM_BOT_HANDLE is required when TELEGRAM_ENABLED=true');
+    if (!config.telegramBotWebhookSecret) issues.push('TELEGRAM_BOT_WEBHOOK_SECRET is required when TELEGRAM_ENABLED=true');
   }
 
   if (issues.length > 0) {
