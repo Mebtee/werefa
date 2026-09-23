@@ -175,7 +175,9 @@ export type PauseState =
   | { kind: 'until'; reopenDate: DateString; message?: string }
   | null
 
-export type SubscriptionStatus = 'active' | 'suspended' | 'deactivated'
+// NOTE: the mock `subscriptionStatus` field ('active'|'suspended'|'deactivated')
+// was removed in Prompt 52. Subscription state is now real and lives in
+// `src/api/subscription.ts` (`OwnerSubscriptionView`), never on BusinessDetails.
 
 /** Owner-controlled prepayment configuration (REQ-110 / REQ-111). */
 export type PrepaymentMode = 'none' | 'percentage' | 'fixed'
@@ -218,7 +220,6 @@ export interface BusinessDetails {
   blockedPeriods: readonly BlockedPeriod[]
   specialDays: Readonly<Record<DateString, SpecialDay>>
   pause: PauseState
-  subscriptionStatus: SubscriptionStatus
   prepayment: PrepaymentConfig
   paymentInstructions: BusinessPaymentInstructions
   currency: string
@@ -228,8 +229,13 @@ export interface BusinessDetails {
    * Whether the owner has provisioned Telegram for this business (owner-side
    * side-channel). This does NOT gate customer notifications — those gate on
    * the per-customer connection (per business + phone).
+   *
+   * MOCK-SEAM ONLY (Prompt 51): the real backend never carries this on the
+   * business projection — the owner connection state now comes from
+   * `GET /owner/businesses/:id/telegram/status`. Production hybridized pages
+   * therefore do NOT set it; only the mock seam pages do.
    */
-  telegramConnected: boolean
+  telegramConnected?: boolean
   /**
    * Owner-configurable public logo (REQ-209). Rendered on the public page;
    * initials are used as the fallback when null.

@@ -383,6 +383,40 @@ export interface CustomerStatusEntryView {
 /** `GET /api/v1/customer/status?slug=…&phone=…` response (no internal ids). */
 export interface CustomerStatusView {
   bookings: CustomerStatusEntryView[]
+  /**
+   * Whether this phone is live-connected to Telegram for the business
+   * (per business + phone, REQ-056). Projected with the status lookup so the
+   * customer status page can reflect it without a separate request.
+   */
+  telegramConnected: boolean
+}
+
+// ---------------------------------------------------------------------------
+// TELEGRAM wire types (Prompt 51). Mirror the backend `TelegramConnectionView`
+// / `OwnerTelegramStatusView` projections (§23.3, REQ-056/065/066). The
+// deep link is the ONLY way a code is conveyed — the plain 10-minute code is
+// never exposed to the client. `status: 'ready'` means a link was issued;
+// `status: 'connected'` means this phone/owner is already linked.
+// ---------------------------------------------------------------------------
+
+/** `POST /api/v1/public/businesses/:slug/telegram/connect` body. */
+export interface TelegramCustomerConnectInput {
+  phone: string
+}
+
+/**
+ * `POST …/telegram/connect` response (customer and owner). `deepLink` /
+ * `expiresInMs` are non-null exactly when `status === 'ready'`.
+ */
+export interface TelegramConnectionView {
+  status: 'ready' | 'connected'
+  deepLink: string | null
+  expiresInMs: number | null
+}
+
+/** `GET /api/v1/owner/businesses/:id/telegram/status` response. */
+export interface OwnerTelegramStatusView {
+  connected: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -521,4 +555,50 @@ export interface OwnerRescheduleAvailabilityView {
   date: string
   durationMinutes: number
   slots: OwnerRescheduleAvailabilitySlotView[]
+}
+
+// ---------------------------------------------------------------------------
+// SUBSCRIPTION wire types (Prompt 52; spec §17, §27.2/§27.3, REQ-125…141).
+// Mirror the Prompt 43 backend views; the backend remains authoritative.
+// ---------------------------------------------------------------------------
+
+/** Canonical subscription status (REQ-128…131; derives from band timestamps). */
+export type SubscriptionStatusCode =
+  | 'TRIAL'
+  | 'TRIAL_GRACE'
+  | 'ACTIVE'
+  | 'PAID_GRACE'
+  | 'EXPIRED'
+  | 'NONE'
+
+export type SubscriptionReviewState = 'PENDING' | 'APPROVED' | 'REJECTED'
+
+/** One owner payment-proof submission (upload date + review outcome). */
+export interface SubscriptionProofView {
+  id: string
+  reviewState: SubscriptionReviewState
+  requestedAt: string
+  reviewedBy: string | null
+  rejectionReason: string | null
+  approvedUntil: string | null
+  createdAt: string
+}
+
+/** `GET /api/v1/owner/businesses/:id/subscription` response (no price — §46). */
+export interface OwnerSubscriptionView {
+  status: SubscriptionStatusCode
+  trialStartedAt: string | null
+  trialEndsAt: string | null
+  trialGraceEndsAt: string | null
+  periodEndsAt: string | null
+  paidGraceEndsAt: string | null
+  bookingsEnabled: boolean
+  proofs: SubscriptionProofView[]
+}
+
+/** Admin review-queue item (REQ-137): pending proof + owning business owner. */
+export interface AdminSubscriptionProofView extends SubscriptionProofView {
+  businessId: string
+  businessName: string
+  ownerEmail: string
 }

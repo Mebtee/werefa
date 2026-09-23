@@ -2713,3 +2713,101 @@ fieldset.option-group legend {
     padding: var(--space-5);
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * Subscription (Prompt 52): owner dashboard card + admin review queue.
+ * Uses the existing design tokens; the backend response carries status chips
+ * (TRIAL/TRIAL_GRACE/ACTIVE/PAID_GRACE/EXPIRED/NONE) and proof history.
+ * ------------------------------------------------------------------------- */
+
+.subscription-status {
+  display: flex;
+  align-items: center;
+  margin: 0;
+}
+
+.subscription-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.subscription-panel__note {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.subscription-upload {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.subscription-upload input[type="file"] {
+  font-size: var(--text-sm);
+}
+
+.subscription-history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.subscription-history__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.subscription-history__date {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.subscription-history__reason {
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}
+
+.proof-queue {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.proof-queue__row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.proof-queue__meta {
+  min-width: 0;
+}
+
+.proof-queue__actions {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.proof-queue__reject {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+}

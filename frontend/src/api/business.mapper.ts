@@ -11,10 +11,11 @@ import type {
  * model (Prompt 45).
  *
  * The UI model still carries mock-only fields (working hours, accent colour,
- * map provider, currency, prepayment/payment instructions, Telegram and
- * subscription state) that belong to later slices. This mapper overlays the
- * REAL authoritative profile fields on top of those mock-only values, so pages
- * keep working without a second copy of the data.
+ * map provider, currency, prepayment/payment instructions, Telegram) that
+ * belong to later slices. Subscription state is real (Prompt 52) and never
+ * rides on BusinessDetails — it comes from `src/api/subscription.ts`. This
+ * mapper overlays the REAL authoritative profile fields on top of those
+ * mock-only values, so pages keep working without a second copy of the data.
  */
 
 export function categoryFromCode(code: BusinessCategoryCode): BusinessCategory {
@@ -59,12 +60,10 @@ export const DEFAULT_PUBLIC_BUSINESS_FIELDS: BusinessDetails = {
   blockedPeriods: [],
   specialDays: {},
   pause: null,
-  subscriptionStatus: 'active',
   prepayment: { mode: 'none' },
   paymentInstructions: { methods: [] },
   currency: 'ETB',
   bookingWindowDays: 14,
-  telegramConnected: false,
   logo: null,
   coverPhoto: null,
 }

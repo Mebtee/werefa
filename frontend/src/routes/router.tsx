@@ -6,6 +6,8 @@ import { BookingStatusPage } from '@/pages/BookingStatusPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { LoginPage } from '@/features/auth/LoginPage'
 import { RequireOwner } from '@/features/auth/RequireOwner'
+import { RequireAdmin } from '@/features/auth/RequireAdmin'
+import { SubscriptionReviewPage } from '@/features/admin/SubscriptionReviewPage'
 import { OwnerLayoutApp } from '@/features/owner-portal/components/OwnerLayout'
 import { DashboardPage } from '@/features/owner-portal/pages/DashboardPage'
 import { BusinessProfilePage } from '@/features/owner-portal/pages/BusinessProfilePage'
@@ -21,9 +23,10 @@ import { BookingDetailPage } from '@/features/owner-portal/pages/BookingDetailPa
  * Public surface (this phase): the business page lives at /p/:slug. Customers
  * remain unauthenticated (REQ-040).
  * The owner surface (/owner/*) requires a real backend Owner session (Prompt
- * 44): unauthenticated visitors are redirected to /owner/login. Admin
- * (/admin/*) and super-admin (/super-admin/*) surfaces remain reserved for
- * later phases.
+ * 44): unauthenticated visitors are redirected to /owner/login. The admin
+ * subscription review workbench (/admin/subscriptions, Prompt 52) requires a
+ * real Admin/Super Admin session (REQ-137). Super-admin management surfaces
+ * remain reserved for later phases.
  */
 export const appRoutes: RouteObject[] = [
   {
@@ -59,6 +62,14 @@ export const appRoutes: RouteObject[] = [
       { path: 'bookings', element: <BookingsPage /> },
       { path: 'bookings/:bookingId', element: <BookingDetailPage /> },
     ],
+  },
+  {
+    path: '/admin/subscriptions',
+    element: (
+      <RequireAdmin>
+        <SubscriptionReviewPage />
+      </RequireAdmin>
+    ),
   },
   {
     path: '*',

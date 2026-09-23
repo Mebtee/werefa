@@ -19,6 +19,7 @@ import {
   cancelBooking,
   markNoShowBooking,
   completeDueBookings,
+  setCustomerTelegramConnected,
 } from '@/mock/store'
 import { PRIMARY_BUSINESS_SLUG } from '@/mock/data'
 import {
@@ -183,14 +184,36 @@ describe('BookingStatusPage', () => {
     const title = bookingCards()[0].querySelector('.status-card__title')?.textContent
     expect(title).toMatch(/^Booking on /)
     // The honest card shows date/time + status — never the customer name,
-    // services, payment internals or Telegram state (REQ-109 projection).
+    // services, payment internals (REQ-109 projection). Telegram state is a
+    // SEPARATE page-level line, never part of a booking card.
     expect(screen.queryByText('Martha Bekele')).not.toBeInTheDocument()
     expect(screen.queryByText(/Women’s Haircut/)).not.toBeInTheDocument()
     expect(screen.queryByText(/Payment Accepted|Payment Rejected/)).not.toBeInTheDocument()
-    expect(screen.queryByText(/Telegram/i)).not.toBeInTheDocument()
     expect(
       screen.getAllByText(BOOKING_STATE_LABEL['payment-pending']).length,
     ).toBeGreaterThan(0)
+  })
+
+  it('shows the missing Telegram link as a page-level line (REQ-056)', async () => {
+    await renderStatusPage()
+    await lookup('+251911223344')
+    await waitFor(() => {
+      expect(bookingCards()).toHaveLength(1)
+    })
+    // Not in any card — the connection state is projected alongside results.
+    expect(screen.getByText('Not connected to Telegram')).toBeInTheDocument()
+    expect(screen.queryByText('Telegram connected')).not.toBeInTheDocument()
+  })
+
+  it('shows "Telegram connected" when the phone is linked to the business', async () => {
+    setCustomerTelegramConnected(PRIMARY_BUSINESS_SLUG, '+251911223344', true)
+    await renderStatusPage()
+    await lookup('+251911223344')
+    await waitFor(() => {
+      expect(bookingCards()).toHaveLength(1)
+    })
+    expect(screen.getByText('Telegram connected')).toBeInTheDocument()
+    expect(screen.queryByText('Not connected to Telegram')).not.toBeInTheDocument()
   })
 
   it('shows a clear message when no booking matches', async () => {

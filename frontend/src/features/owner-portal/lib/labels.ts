@@ -4,6 +4,7 @@ import type {
   CustomerNotificationType,
   PaymentState,
 } from '@/types/models'
+import type { SubscriptionStatusCode } from '@/api/types'
 
 export const CATEGORY_LABEL: Record<BusinessCategory, string> = {
   'salon-barber': 'Salon & Barber',
@@ -64,4 +65,23 @@ export const TELEGRAM_NOTICE_LABEL: Record<CustomerNotificationType, string> = {
   'no-show': 'No Show',
   cancelled: 'Cancelled',
   reschedule: 'Reschedule',
+}
+/** User-facing subscription status labels (Prompt 52; REQ-128…131). */
+export const SUBSCRIPTION_STATUS_LABEL: Record<SubscriptionStatusCode, string> = {
+  TRIAL: 'Free trial',
+  TRIAL_GRACE: 'Trial grace',
+  ACTIVE: 'Active',
+  PAID_GRACE: 'Paid grace',
+  EXPIRED: 'Expired',
+  NONE: 'None',
+}
+
+/** Chip tone per subscription status. */
+export const SUBSCRIPTION_STATUS_CHIP: Record<SubscriptionStatusCode, string> = {
+  TRIAL: 'booking-chip--active',
+  TRIAL_GRACE: 'booking-chip--active',
+  ACTIVE: 'booking-chip--confirmed',
+  PAID_GRACE: 'booking-chip--active',
+  EXPIRED: 'booking-chip--rejected',
+  NONE: 'booking-chip--rejected',
 }

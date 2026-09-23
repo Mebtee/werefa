@@ -2,6 +2,8 @@ import { Link } from 'react-router-dom'
 import { useOwnedBusiness } from '@/features/owner-portal/state/useOwnedBusiness'
 import { LoadState } from '@/features/owner-portal/components/LoadState'
 import { PauseCard } from '@/features/owner-portal/components/PauseCard'
+import { TelegramOwnerCard } from '@/features/owner-portal/components/TelegramOwnerCard'
+import { SubscriptionCard } from '@/features/owner-portal/components/SubscriptionCard'
 import { CATEGORY_LABEL } from '@/features/owner-portal/lib/labels'
 
 export function DashboardPage() {
@@ -24,10 +26,7 @@ export function DashboardPage() {
                 Your business
               </h2>
               <p className="card__subtitle">
-                <span className="badge">{CATEGORY_LABEL[business.category]}</span>{' '}
-                <span className="badge" aria-label="Subscription active">
-                  Subscription active
-                </span>
+                <span className="badge">{CATEGORY_LABEL[business.category]}</span>
               </p>
               <p className="dashboard-name">{business.name}</p>
               {business.pause ? (
@@ -102,6 +101,9 @@ export function DashboardPage() {
                 </Link>
               </div>
             </section>
+
+            <SubscriptionCard businessId={businessId} />
+            <TelegramOwnerCard businessId={businessId} />
           </div>
 
           <h2 className="page-subtitle">Quick actions</h2>

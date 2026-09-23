@@ -169,6 +169,73 @@ describe('public booking flow', () => {
     expect(posted?.paymentMethod).toBe('BANK_TRANSFER')
   })
 
+  it(
+    'lets the customer link Telegram on the done step via a one-time deep link (REQ-056)',
+    { timeout: 20_000 },
+    async () => {
+      const { container } = renderPage()
+
+      await screen.findByRole('heading', { name: 'Addis Beauty Lounge' })
+      await reachCustomerStep(container)
+
+      await user.type(screen.getByLabelText('Your name'), 'Selam Tesfaye')
+      await user.type(screen.getByLabelText('Phone number'), '+251911123456')
+      await user.click(screen.getByRole('button', { name: /continue to review/i }))
+      await screen.findByRole('heading', { name: 'Review your booking' })
+      await user.click(screen.getByRole('button', { name: /continue to payment/i }))
+      await screen.findByRole('heading', { name: 'Payment & confirmation' })
+
+      await user.click(screen.getByRole('radio', { name: /bank transfer/i }))
+      const proofInput = container.querySelector<HTMLInputElement>('#proof-upload')
+      if (!proofInput) throw new Error('proof upload input missing')
+      await user.upload(
+        proofInput,
+        new File(['proof'], 'proof.png', { type: 'image/png' }),
+      )
+      await user.click(
+        screen.getByRole('button', { name: /confirm & send booking request/i }),
+      )
+      expect(await screen.findByText('Booking request received')).toBeInTheDocument()
+
+      const card = screen
+        .getByRole('heading', { name: /do you use telegram/i })
+        .closest('.card') as HTMLElement | null
+      expect(card).not.toBeNull()
+
+      // The phone is prefilled from the booking details (telegram-optional stays
+      // optional — no automatic call).
+      expect(within(card!).getByLabelText('Phone number to link')).toHaveValue(
+        '+251911123456',
+      )
+
+      await user.click(within(card!).getByRole('button', { name: 'Connect Telegram' }))
+
+      const link = await within(card!).findByRole('link', { name: 'Open Telegram' })
+      expect(link).toHaveAttribute(
+        'href',
+        'https://t.me/werefademo?start=customer-connect-test',
+      )
+      expect(
+        within(card!).getByText(/Link expires in \d+:\d+ — then you can ask/),
+      ).toBeInTheDocument()
+
+      // Boundary proof (Prompt 51): the link came from the REAL customer
+      // telegram client posting to the public connect route with the phone.
+      const connect = stub?.calls.find(
+        (call) =>
+          call.method === 'POST' &&
+          call.url.includes('/api/v1/public/businesses/') &&
+          call.url.endsWith('/telegram/connect'),
+      )
+      expect(connect?.url).toContain(
+        '/api/v1/public/businesses/addis-beauty-lounge/telegram/connect',
+      )
+      expect((connect?.body as { phone?: unknown } | undefined)?.phone).toBe(
+        '+251911123456',
+      )
+    },
+  )
+
   it('keeps the customer on the details step when validation fails', async () => {
     const { container } = renderPage()
 

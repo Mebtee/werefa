@@ -211,8 +211,7 @@ export function buildPages(): readonly BusinessPage[] {
           [addDays(today, 6)]: { kind: 'closed' },
           [addDays(today, 7)]: { kind: 'hours', periods: [{ start: '10:00', end: '14:00' }] },
         },
-        pause: null,
-        subscriptionStatus: 'active',
+        pause: null,
         prepayment: { mode: 'percentage', value: 20 },
         paymentInstructions: {
           methods: [
@@ -264,8 +263,7 @@ export function buildPages(): readonly BusinessPage[] {
         blockedDays: [],
         blockedPeriods: [],
         specialDays: {},
-        pause: null,
-        subscriptionStatus: 'active',
+        pause: null,
         prepayment: { mode: 'none' },
         paymentInstructions: {
           methods: [
@@ -320,8 +318,7 @@ export function buildPages(): readonly BusinessPage[] {
           reopenDate: addDays(today, 21),
           message:
             'We are closed for end-of-season cleaning. New bookings open on the listed date.',
-        },
-        subscriptionStatus: 'active',
+        },
         prepayment: { mode: 'percentage', value: 20 },
         paymentInstructions: {
           methods: [

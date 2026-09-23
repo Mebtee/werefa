@@ -52,6 +52,7 @@ const STATUS_VIEW: CustomerStatusView = {
       status: 'awaiting-verification',
     },
   ],
+  telegramConnected: false,
 }
 
 interface RecordedCall {

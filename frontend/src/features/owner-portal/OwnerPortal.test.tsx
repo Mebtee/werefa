@@ -6,7 +6,7 @@ import {
   within,
 } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { OWNER_PRINCIPAL, renderAppAt } from '@/test/auth'
+import { OWNER_PRINCIPAL, renderAppAt, type RenderAppOptions } from '@/test/auth'
 import { resetStore, getBusiness, setPause, listScheduleHistory, getOpenConflicts, createBookingEntry, acceptBooking, getBooking, cancelBooking, cancelPaymentPendingBooking } from '@/mock/store'
 import { computeAvailableTimes } from '@/mock/availability'
 import { isoWeekdayOf, nextDateStrings } from '@/lib/time'
@@ -57,8 +57,8 @@ function seedConfirmedBooking(
   return { id: accepted.value.id }
 }
 
-function renderAt(path: string) {
-  return renderAppAt(path)
+function renderAt(path: string, options?: RenderAppOptions) {
+  return renderAppAt(path, options)
 }
 
 beforeEach(() => {
@@ -90,6 +90,49 @@ describe('owner dashboard', () => {
       'aria-current',
       'page',
     )
+  })
+
+  it('connects Telegram through a one-time deep link — no plain code is shown (REQ-065)', async () => {
+    renderAt('/owner')
+    await screen.findByRole('heading', { name: 'Dashboard' })
+
+    const card = screen
+      .getByRole('heading', { name: 'Telegram' })
+      .closest('.card') as HTMLElement | null
+    expect(card).not.toBeNull()
+    // The connection lookup is async (owner status route) — wait for it to land.
+    expect(
+      await within(card!).findByText('Not connected'),
+    ).toBeInTheDocument()
+
+    await user.click(within(card!).getByRole('button', { name: 'Connect Telegram' }))
+
+    const link = await within(card!).findByRole('link', { name: 'Open Telegram' })
+    expect(link).toHaveAttribute(
+      'href',
+      'https://t.me/werefademo?start=owner-connect-test',
+    )
+    // The card keeps the countdown while the link is live; the code itself
+    // travels only inside the deep link (never a bare field/string).
+    expect(
+      within(card!).getByText(/Link expires in \d+:\d+\./),
+    ).toBeInTheDocument()
+    expect(within(card!).queryByText('owner-connect-test')).not.toBeInTheDocument()
+  })
+
+  it('shows the connected state on the dashboard once Telegram is linked (REQ-066)', async () => {
+    renderAt('/owner', { businessApi: { ownerTelegramConnected: true } })
+    await screen.findByRole('heading', { name: 'Dashboard' })
+
+    const card = screen
+      .getByRole('heading', { name: 'Telegram' })
+      .closest('.card') as HTMLElement | null
+    expect(card).not.toBeNull()
+    expect(await within(card!).findByText('Telegram connected')).toBeInTheDocument()
+    // Connection actions are hidden — the backend has no disconnect endpoint.
+    expect(
+      within(card!).queryByRole('button', { name: 'Connect Telegram' }),
+    ).not.toBeInTheDocument()
   })
 })
 

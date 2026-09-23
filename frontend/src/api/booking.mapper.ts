@@ -44,3 +44,12 @@ export function statusEntriesFromView(
     bookingState: bookingStateFromWire(entry.status),
   }))
 }
+
+/**
+ * Live Telegram connection for this phone on the status view (REQ-056). The
+ * backend projects the per-business + phone connection state; the status page
+ * renders it as a separate line that is NOT part of any booking card.
+ */
+export function telegramConnectedFromView(view: CustomerStatusView): boolean {
+  return view.telegramConnected === true
+}

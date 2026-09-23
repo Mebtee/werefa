@@ -27,6 +27,7 @@ import {
   getOpenConflicts,
   getServices,
   applyScheduleException,
+  isCustomerTelegramConnected,
   listBookings,
   listScheduleHistory,
   markNoShowBooking,
@@ -97,6 +98,13 @@ export interface BusinessApiStubOptions {
    * double handle it. Used to exercise 403/404/409/5xx on the review surface.
    */
   failOwnerBookingRequest?: (request: { method: string; path: string }) => Response | null
+  /**
+   * Seeded owner Telegram connection state (Prompt 51, §23.3 REQ-065/066). The
+   * double starts disconnected; the first connect answers with a one-time link
+   * and marks itself connected afterwards. Seed `true` to exercise the
+   * already-connected dashboard state.
+   */
+  ownerTelegramConnected?: boolean
 }
 
 const OWNER_ID = '00000000-0000-4000-8000-0000000000a'
@@ -763,6 +771,10 @@ export function installBusinessApiStub(
   // slug (the store is not renamed when the API slug changes); the API-side
   // `state.slug` is the live public slug.
   const storeSlug = initialOwnedSlug
+  // Prompt 51 Telegram: the double models the real connection life-cycle — a
+  // connect issues a one-time deep link and the connection is considered linked
+  // afterwards, and an already-linked connect answers `{ status: 'connected' }`.
+  let ownerTelegramConnected = options.ownerTelegramConnected ?? false
   const originalFetch = globalThis.fetch
 
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -971,6 +983,24 @@ export function installBusinessApiStub(
           }
           state.slug = publicSlug
           return json({ ...state })
+        }
+        if (action === 'telegram') {
+          const sub = rest[4]
+          if (sub === 'status' && method === 'GET') {
+            return json({ connected: ownerTelegramConnected })
+          }
+          if (sub === 'connect' && method === 'POST') {
+            if (ownerTelegramConnected) {
+              return json({ status: 'connected', deepLink: null, expiresInMs: null })
+            }
+            ownerTelegramConnected = true
+            return json({
+              status: 'ready',
+              deepLink: 'https://t.me/werefademo?start=owner-connect-test',
+              expiresInMs: 600000,
+            })
+          }
+          return envelope(404, 'NOT_FOUND', 'Not found', 'No fetch stub for this telegram route.')
         }
         if (action === 'pause' && method === 'POST') {
           const pause = (body ?? {}) as { pauseMessage?: unknown; reopenAt?: unknown }
@@ -1335,6 +1365,7 @@ export function installBusinessApiStub(
                     : booking.state,
               }
             }),
+            telegramConnected: isCustomerTelegramConnected(slugParam, phoneParam),
           })
         }
 
@@ -1444,6 +1475,28 @@ export function installBusinessApiStub(
             rest[2] === initialOwnedSlug ? undefined : publicViewFromStore(rest[2])
           if (other) return json(other)
           return envelope(404, 'NOT_FOUND', 'Not found', 'Business not found.')
+        }
+
+        if (rest[3] === 'telegram' && rest[4] === 'connect' && method === 'POST') {
+          if (
+            rest[2] === initialOwnedSlug &&
+            !getBusiness(rest[2]) &&
+            state.slug !== rest[2]
+          ) {
+            return envelope(404, 'NOT_FOUND', 'Not found', 'Business not found.')
+          }
+          const phone = String((body as { phone?: unknown } | undefined)?.phone ?? '')
+          if (!phone.trim()) {
+            return validationEnvelope({ phone: 'Phone number is required.' })
+          }
+          if (isCustomerTelegramConnected(rest[2], phone)) {
+            return json({ status: 'connected', deepLink: null, expiresInMs: null })
+          }
+          return json({
+            status: 'ready',
+            deepLink: 'https://t.me/werefademo?start=customer-connect-test',
+            expiresInMs: 600000,
+          })
         }
 
         if (rest[3] === 'availability' && method === 'POST') {

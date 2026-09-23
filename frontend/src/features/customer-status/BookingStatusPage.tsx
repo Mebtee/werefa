@@ -7,7 +7,10 @@ import type {
 } from '@/types/models'
 import { getPublicBusiness, isNotFoundError } from '@/api/business'
 import { getCustomerBookingStatus } from '@/api/booking'
-import { statusEntriesFromView } from '@/api/booking.mapper'
+import {
+  statusEntriesFromView,
+  telegramConnectedFromView,
+} from '@/api/booking.mapper'
 import { hybridizePublicBusiness } from '@/api/business.mapper'
 import { mockApi } from '@/mock/api'
 import { PRIMARY_BUSINESS_SLUG } from '@/mock/data'
@@ -28,7 +31,12 @@ type LoadState =
 type LookupState =
   | { phase: 'idle' }
   | { phase: 'loading' }
-  | { phase: 'results'; bookings: readonly CustomerBookingStatusEntry[] }
+  | {
+      phase: 'results'
+      bookings: readonly CustomerBookingStatusEntry[]
+      /** Live Telegram connection for this phone + business (REQ-056). */
+      telegramConnected: boolean
+    }
   | { phase: 'error' }
 
 export function BookingStatusPage() {
@@ -95,7 +103,11 @@ export function BookingStatusPage() {
       setLookup({ phase: 'loading' })
       try {
         const view = await getCustomerBookingStatus(slug ?? '', value)
-        setLookup({ phase: 'results', bookings: statusEntriesFromView(view) })
+        setLookup({
+          phase: 'results',
+          bookings: statusEntriesFromView(view),
+          telegramConnected: telegramConnectedFromView(view),
+        })
       } catch {
         setLookup({ phase: 'error' })
       }
@@ -244,6 +256,15 @@ export function BookingStatusPage() {
                 <div className="sr-only" aria-live="polite">
                   {lookup.bookings.length} booking{lookup.bookings.length === 1 ? '' : 's'} found.
                 </div>
+
+                <p className="telegram-status" data-connected={lookup.telegramConnected ? 'true' : 'false'}>
+                  {lookup.telegramConnected ? 'Telegram connected' : 'Not connected to Telegram'}
+                </p>
+                <p className="telegram-panel__note" style={{ marginTop: 'var(--space-2)' }}>
+                  {lookup.telegramConnected
+                    ? 'Updates about your bookings go to your Telegram for this business.'
+                    : 'Link Telegram when you book so updates and reminders reach you there (REQ-056).'}
+                </p>
 
                 {resubmitNotice && (
                   <div style={{ marginBottom: 'var(--space-4)' }}>

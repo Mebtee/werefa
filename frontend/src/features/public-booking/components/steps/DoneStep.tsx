@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
+import { TelegramConnectCard } from '@/features/public-booking/components/steps/TelegramConnectCard'
 
 interface DoneStepProps {
   result: SubmitResult | null
@@ -59,11 +60,7 @@ export function DoneStep({
           </p>
         </Alert>
 
-        <Alert tone="info">
-          Do you use Telegram? Werefa can send you updates about this booking
-          there once it is confirmed — the business may invite you to link your
-          Telegram account to the booking.
-        </Alert>
+        <TelegramConnectCard businessSlug={businessSlug} phone={customer.phone} />
 
         <nav className="wizard__nav" aria-label="Booking sent actions">
           <Button variant="outline" onClick={onRestart}>

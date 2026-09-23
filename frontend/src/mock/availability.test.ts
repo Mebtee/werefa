@@ -35,7 +35,6 @@ function makeBusiness(overrides: Partial<BusinessDetails> = {}): BusinessDetails
       '2030-04-02': { kind: 'hours', periods: [{ start: '10:00', end: '14:00' }] },
     },
     pause: null,
-    subscriptionStatus: 'active',
     prepayment: { mode: 'none' },
     paymentInstructions: { methods: [] },
     currency: 'ETB',
