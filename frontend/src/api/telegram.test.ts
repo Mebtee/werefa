@@ -154,7 +154,6 @@ describe('telegramLinkFromView', () => {
   })
 
   it('carries the one-time deep link and expiry for a ready view', () => {
-    const before = Date.now()
     // Inject a deterministic clock so the expiry wall-clock is exact.
     const now = new Date('2026-09-23T12:00:00.000Z').getTime()
     const link = telegramLinkFromView(READY_VIEW, now)
@@ -166,7 +165,7 @@ describe('telegramLinkFromView', () => {
     const duration = READY_VIEW.expiresInMs
     expect(duration).not.toBeNull()
     expect(link.expiresAtMs).toBe(now + (duration as number))
-    expect(link.expiresAtMs).toBeGreaterThan(before)
+    expect(link.expiresAtMs).toBeGreaterThan(now)
   })
 
   it('never leaks a plain auth code — the deep link query holds it, not a field', () => {
