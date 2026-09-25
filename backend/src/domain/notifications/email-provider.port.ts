@@ -22,5 +22,6 @@ export interface EmailSendResult {
 export const EMAIL_PROVIDER = Symbol('EMAIL_PROVIDER');
 
 export interface EmailProvider {
+  isConfigured(): boolean;
   send(message: EmailMessage): Promise<EmailSendResult>;
 }
