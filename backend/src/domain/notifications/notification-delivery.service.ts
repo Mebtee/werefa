@@ -18,7 +18,7 @@
  * never thrown, and never held against the booking.
  */
 
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { PRISMA_CLIENT, CONFIG } from '../../config/config.constants';
 import { AppConfig } from '../../config/app-config';
@@ -27,6 +27,8 @@ import { TelegramProvider, TELEGRAM_PROVIDER } from './telegram-provider.port';
 import { NotificationMessageRenderer } from './notification-message-renderer';
 import { acceptCallbackData, rejectCallbackData, parsePayloadRef } from './notification-catalog';
 import { NotificationOutboxEventBus } from './notification-outbox-event-bus';
+import { EMAIL_PROVIDER, EmailProvider } from './email-provider.port';
+import { DisabledEmailProvider } from './disabled-email-provider';
 
 const REMINDER_GRACE_MS = 60 * 60 * 1000; // reminder due window after its threshold
 const STALE_SENDING_MS = 10 * 60 * 1000; // reclaim a SENDING delivery stuck for 10min
@@ -50,6 +52,7 @@ export class NotificationDeliveryService {
     @Inject(TELEGRAM_PROVIDER) private readonly provider: TelegramProvider,
     private readonly renderer: NotificationMessageRenderer,
     private readonly outbox: NotificationOutboxEventBus,
+    @Optional() @Inject(EMAIL_PROVIDER) private readonly emailProvider: EmailProvider = new DisabledEmailProvider(),
   ) {}
 
   /** One sweep cycle: reminders -> delivery. Returns counts for observability. */
@@ -92,13 +95,13 @@ export class NotificationDeliveryService {
     return written;
   }
 
-  /** Claim and deliver PENDING Telegram deliveries (bounded retries). */
+  /** Claim and deliver PENDING notification deliveries (bounded retries). */
   async deliverPending(now = new Date()): Promise<Omit<SweepResult, 'remindersWritten'>> {
     await this.reclaimStale(now);
 
     const rows = await this.prisma.notificationDelivery.findMany({
       where: {
-        channel: 'TELEGRAM',
+        channel: { in: ['TELEGRAM', 'EMAIL'] },
         state: 'PENDING',
         OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }],
       },
@@ -124,7 +127,7 @@ export class NotificationDeliveryService {
       result.attempted++;
 
       try {
-        const outcome = await this.deliverOne(row, now);
+        const outcome = row.channel === 'EMAIL' ? await this.deliverEmail(row, now) : await this.deliverOne(row, now);
         result[outcome] = (result[outcome] as number) + 1;
       } catch {
         // safety: a renderer/provider bug must never crash the sweep
@@ -245,6 +248,41 @@ export class NotificationDeliveryService {
     return this.recordFailure(row, now, sent.error);
   }
 
+  private async deliverEmail(
+    row: {
+      id: string;
+      recipientRef: string;
+      idempotencyKey: string;
+      payloadRef: string | null;
+      attempts: number;
+      notification: { type: string };
+    },
+    now: Date,
+  ): Promise<'sent' | 'failed' | 'deadLettered' | 'suppressed'> {
+    if (!this.emailProvider.isConfigured()) return this.markSuppressed(row.id, 'email provider is not configured');
+
+    const user = await this.prisma.user.findUnique({ where: { id: row.recipientRef }, select: { email: true } });
+    if (!user) return this.markSuppressed(row.id, 'email recipient no longer exists');
+
+    const template = emailTemplate(row.notification.type);
+    if (!template) return this.markSuppressed(row.id, 'email template is unavailable');
+    const result = await this.emailProvider.send({
+      to: user.email,
+      subject: template.subject,
+      template: template.id,
+      data: parseSafeEmailData(row.payloadRef),
+      idempotencyKey: row.idempotencyKey,
+    });
+    if (result.ok && result.accepted) {
+      await this.prisma.notificationDelivery.update({
+        where: { id: row.id },
+        data: { state: 'SENT', sentAt: now, lastError: null },
+      });
+      return 'sent';
+    }
+    return this.recordFailure(row, now, result.error);
+  }
+
   /** Bounded-retry bookkeeping shared by every Telegram delivery path. */
   private async recordFailure(
     row: { id: string; attempts: number },
@@ -305,12 +343,40 @@ export class NotificationDeliveryService {
     }
   }
 
-  private async markSuppressed(id: string): Promise<'suppressed'> {
+  private async markSuppressed(id: string, reason = 'no connected Telegram chat'): Promise<'suppressed'> {
     await this.prisma.notificationDelivery.update({
       where: { id },
-      data: { state: 'SUPPRESSED', lastError: 'no connected Telegram chat' },
+      data: { state: 'SUPPRESSED', lastError: reason },
     });
     return 'suppressed';
+  }
+}
+
+function emailTemplate(type: string): { id: string; subject: string } | null {
+  switch (type) {
+    case 'LOCKOUT_EMAIL':
+      return { id: 'security.lockout', subject: 'Werefa account locked' };
+    case 'FORCED_LOGOUT_EMAIL':
+      return { id: 'security.forced-logout', subject: 'Werefa sessions signed out' };
+    case 'SUBSCRIPTION_PROOF_SUBMITTED':
+      return { id: 'subscription.proof-submitted', subject: 'Werefa subscription payment proof received' };
+    case 'SUBSCRIPTION_PROOF_REJECTED':
+      return { id: 'subscription.proof-rejected', subject: 'Werefa subscription payment proof rejected' };
+    default:
+      return null;
+  }
+}
+
+function parseSafeEmailData(raw: string | null): Record<string, string> {
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+    );
+  } catch {
+    return {};
   }
 }
 

@@ -19,11 +19,13 @@
  * repeated publishes / reminder sweeps are exactly-once.
  */
 
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { PRISMA_CLIENT } from '../../config/config.constants';
 import { AppConfig } from '../../config/app-config';
 import { CONFIG } from '../../config/config.constants';
+import { EMAIL_PROVIDER, EmailProvider } from './email-provider.port';
+import { DisabledEmailProvider } from './disabled-email-provider';
 import {
   AuthEmailEvent,
   BookingNotificationEvent,
@@ -47,6 +49,7 @@ export class NotificationOutboxEventBus implements DomainEventBus {
   constructor(
     @Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient,
     @Inject(CONFIG) private readonly config: AppConfig,
+    @Optional() @Inject(EMAIL_PROVIDER) private readonly emailProvider: EmailProvider = new DisabledEmailProvider(),
   ) {}
 
   async publish(events: DomainEvent[]): Promise<void> {
@@ -91,7 +94,7 @@ export class NotificationOutboxEventBus implements DomainEventBus {
           recipientType: 'SYSTEM',
           recipientRef: admin.id,
           channel: 'EMAIL',
-          state: 'SUPPRESSED',
+          state: this.emailProvider.isConfigured() ? 'PENDING' : 'SUPPRESSED',
           idempotencyKey: adminSubscriptionDeliveryIdempotencyKey(event.type, event.businessId, admin.id),
           payloadRef: subscriptionPayloadRef(event.proofId),
         });
@@ -112,7 +115,7 @@ export class NotificationOutboxEventBus implements DomainEventBus {
           recipientType: 'SYSTEM',
           recipientRef: owner.id,
           channel: 'EMAIL',
-          state: 'SUPPRESSED',
+          state: this.emailProvider.isConfigured() ? 'PENDING' : 'SUPPRESSED',
           idempotencyKey: ownerSubscriptionDeliveryIdempotencyKey(event.type, event.businessId, event.proofId),
           payloadRef: subscriptionPayloadRef(event.proofId),
         });
@@ -233,7 +236,7 @@ export class NotificationOutboxEventBus implements DomainEventBus {
       recipientType: 'SYSTEM',
       recipientRef: event.userId,
       channel: 'EMAIL',
-      state: 'SUPPRESSED',
+      state: event.type !== 'RECOVERY_CODE_EMAIL' && this.emailProvider.isConfigured() ? 'PENDING' : 'SUPPRESSED',
       idempotencyKey: authDeliveryIdempotencyKey(event.type, event.userId),
       payloadRef: null,
     });
