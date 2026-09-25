@@ -255,7 +255,7 @@ export class NotificationDeliveryService {
       idempotencyKey: string;
       payloadRef: string | null;
       attempts: number;
-      notification: { type: string };
+      notification: { type: string; businessId: string | null };
     },
     now: Date,
   ): Promise<'sent' | 'failed' | 'deadLettered' | 'suppressed'> {
@@ -266,11 +266,12 @@ export class NotificationDeliveryService {
 
     const template = emailTemplate(row.notification.type);
     if (!template) return this.markSuppressed(row.id, 'email template is unavailable');
+    const data = await this.emailData(row);
     const result = await this.emailProvider.send({
       to: user.email,
       subject: template.subject,
       template: template.id,
-      data: parseSafeEmailData(row.payloadRef),
+      data,
       idempotencyKey: row.idempotencyKey,
     });
     if (result.ok && result.accepted) {
@@ -281,6 +282,25 @@ export class NotificationDeliveryService {
       return 'sent';
     }
     return this.recordFailure(row, now, result.error);
+  }
+
+  private async emailData(row: {
+    recipientRef: string;
+    payloadRef: string | null;
+    notification: { type: string; businessId: string | null };
+  }): Promise<Record<string, string>> {
+    const data = parseSafeEmailData(row.payloadRef);
+    if (row.notification.type !== 'LOCKOUT_EMAIL') return data;
+
+    const event = await this.prisma.securityEvent.findFirst({
+      where: { userId: row.recipientRef, type: 'ACCOUNT_LOCKED' },
+      orderBy: { createdAt: 'desc' },
+      select: { ip: true, device: true, browser: true },
+    });
+    for (const [key, value] of Object.entries({ ip: event?.ip, device: event?.device, browser: event?.browser })) {
+      if (value) data[key] = value;
+    }
+    return data;
   }
 
   /** Bounded-retry bookkeeping shared by every Telegram delivery path. */
