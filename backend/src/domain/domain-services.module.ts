@@ -14,6 +14,7 @@ import { BookingService } from './services/booking.service';
 import { ResubmissionService } from './services/resubmission.service';
 import { SubscriptionService } from './services/subscription.service';
 import { SubscriptionBillingService } from './services/subscription-billing.service';
+import { BusinessLifecycleWorker } from './services/business-lifecycle.worker';
 import { CustomerStatusService } from './services/customer-status.service';
 import { AuthService } from './services/auth.service';
 import { RecoveryService } from './services/recovery.service';
@@ -21,6 +22,8 @@ import { AdminManagementService } from './services/admin-management.service';
 import { TELEGRAM_PROVIDER } from './notifications/telegram-provider.port';
 import { HttpTelegramProvider } from './notifications/http-telegram-provider';
 import { DisabledTelegramProvider } from './notifications/disabled-telegram-provider';
+import { EMAIL_PROVIDER } from './notifications/email-provider.port';
+import { DisabledEmailProvider } from './notifications/disabled-email-provider';
 import { NotificationMessageRenderer } from './notifications/notification-message-renderer';
 import { NotificationOutboxEventBus } from './notifications/notification-outbox-event-bus';
 import { TelegramConnectionService } from './notifications/telegram-connection.service';
@@ -61,6 +64,12 @@ import { TelegramWebhookService } from './notifications/telegram-webhook.service
             )
           : new DisabledTelegramProvider(),
     },
+    {
+      // No provider is selected until deployment approves and configures one.
+      // This binding is deliberately unable to report email acceptance.
+      provide: EMAIL_PROVIDER,
+      useClass: DisabledEmailProvider,
+    },
     TenantGuard,
     BusinessService,
     CatalogService,
@@ -80,12 +89,14 @@ import { TelegramWebhookService } from './notifications/telegram-webhook.service
     TelegramCallbackService,
     NotificationDeliveryService,
     NotificationBackgroundWorker,
+    BusinessLifecycleWorker,
     TelegramWebhookService,
   ],
   exports: [
     GLOBAL_CLOCK,
     DOMAIN_EVENT_BUS,
     TELEGRAM_PROVIDER,
+    EMAIL_PROVIDER,
     TenantGuard,
     BusinessService,
     CatalogService,
