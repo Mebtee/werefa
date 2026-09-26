@@ -1,0 +1,15 @@
+{
+  "name": "werefa",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Werefa — multi-tenant SaaS scheduling/queue platform. Repository-root orchestration only; the applications live in backend/ and frontend/ and are installed independently.",
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20 <25"
+  },
+  "scripts": {
+    "acceptance": "node scripts/acceptance.mjs",
+    "acceptance:static": "node scripts/acceptance.mjs --static-only"
+  }
+}
