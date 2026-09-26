@@ -13,6 +13,10 @@ node_modules/
 /src/generated/
 prisma/generated/
 
+# Runtime payment-proof storage (PROOF_STORAGE_DIR). Holds customer uploads —
+# NEVER commit real proof bytes.
+/storage/
+
 # Compiled / generated
 *.tsbuildinfo
 
