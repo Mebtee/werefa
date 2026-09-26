@@ -91,4 +91,26 @@ describe('loadAndValidateConfig (invariants)', () => {
     });
     expect(config.productParameters.subscriptionMonthlyPriceMinor).toBeNull();
   });
+
+  it("rejects a wildcard CORS origin unconditionally", () => {
+    // The guard must not depend on an unrelated product clarification flag.
+    expect(() =>
+      loadAndValidateConfig({
+        NODE_ENV: 'test',
+        DATABASE_URL: 'postgresql://x:y@localhost:5432/werefa',
+        CORS_ORIGINS: '*',
+        PRODUCT_OWNER_BOOKING_REPORT_PDF_ENABLED: 'true',
+      }),
+    ).toThrow(ConfigValidationError);
+  });
+
+  it('rejects AUTH_TEST_ENABLED in production (test bridge must be unusable)', () => {
+    expect(() =>
+      loadAndValidateConfig({
+        NODE_ENV: 'production',
+        DATABASE_URL: 'postgresql://app:pass@db:5432/werefa',
+        AUTH_TEST_ENABLED: 'true',
+      }),
+    ).toThrow(ConfigValidationError);
+  });
 });

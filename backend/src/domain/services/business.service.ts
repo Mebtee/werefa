@@ -7,6 +7,7 @@ import { domainErrors } from '../errors/domain-errors';
 import { BusinessRepository, BusinessWithOwner } from '../repositories/business.repository.port';
 import { SubscriptionRepository } from '../repositories/subscription.repository.port';
 import { BUSINESS_REPOSITORY, SUBSCRIPTION_REPOSITORY } from '../repositories/tokens';
+import { GlobalClock, GLOBAL_CLOCK } from '../time/global-clock';
 import { withBusinessAdvisoryLock } from '../transactions/business-advisory-lock';
 import { SubscriptionService } from './subscription.service';
 
@@ -33,6 +34,7 @@ export class BusinessService {
     @Inject(SUBSCRIPTION_REPOSITORY) private readonly subscriptionRepo: SubscriptionRepository,
     private readonly tenantGuard: TenantGuard,
     private readonly subscriptionService: SubscriptionService,
+    @Inject(GLOBAL_CLOCK) private readonly clock: GlobalClock,
   ) {}
 
   async createBusiness(
@@ -72,7 +74,7 @@ export class BusinessService {
           ownerId: ctx.actorUserId!,
           bookingIntervalMinutes: interval,
         });
-        await this.subscriptionRepo.ensureTrialAtCreation(tx, { businessId: business.id, now: new Date() });
+        await this.subscriptionRepo.ensureTrialAtCreation(tx, { businessId: business.id, now: this.clock.now() });
         return business.id;
       });
       const full = await this.businessRepo.findById(businessId);

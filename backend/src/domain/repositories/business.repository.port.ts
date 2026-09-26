@@ -32,6 +32,12 @@ export interface BusinessRepository {
   findById(id: string): Promise<BusinessWithOwner | null>;
   listByOwner(userId: string): Promise<BusinessWithOwner[]>;
   getSettings(businessId: string): Promise<BusinessSettings | null>;
+  /**
+   * Businesses whose scheduled pause has ended (`isPaused` + `reopenAt <= now`)
+   * and are awaiting an automatic-resume attempt (REQ-153/154/155/231). Indefinite
+   * pauses (`reopenAt = null`) are never returned (REQ-156).
+   */
+  listDueForResume(now: Date): Promise<string[]>;
   updateProfile(
     tx: Prisma.TransactionClient,
     args: {

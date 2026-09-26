@@ -13,7 +13,8 @@
  *    connection with Accept/Reject callback tokens bound to that connection
  *    (T-09): a structured callback can never route across businesses/chats.
  *  - Auth email events (Prompt 43) are recorded as SUPPRESSED email deliveries
- *    (email delivery is out of scope; no real email is ever sent).
+ *    (delivery is provider-dependent; no real email is sent until an external
+ *    `EmailProvider` is configured — never a false "delivered").
  *
  * Every delivery carries a stable idempotency key (unique constraint) so
  * repeated publishes / reminder sweeps are exactly-once.
@@ -75,8 +76,8 @@ export class NotificationOutboxEventBus implements DomainEventBus {
    * Write one subscription notification (Prompt 52).
    *
    *  - SUBSCRIPTION_PROOF_SUBMITTED (N17, REQ-140): exactly the two Admin
-   *    accounts, email only, suppressed (email delivery is out of scope — the
-   *    outbox row is the durable record).
+   *    accounts, email only, delivery-suppressed (no external `EmailProvider` is
+   *    configured — the outbox row is the durable record).
    *  - SUBSCRIPTION_PROOF_REJECTED (N15, REQ-138): owner email (suppressed) AND
    *    the business owner Telegram connection (PENDING when connected+enabled).
    */

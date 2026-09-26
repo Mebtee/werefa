@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { createHash, randomInt } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { PRISMA_CLIENT } from '../../config/config.constants';
@@ -21,6 +21,11 @@ import {
   PROOF_STORAGE,
 } from '../repositories/tokens';
 import { withBusinessAdvisoryLock } from '../transactions/business-advisory-lock';
+import {
+  NoopVerificationCodeChannel,
+  VERIFICATION_CODE_CHANNEL,
+  VerificationCodeChannel,
+} from '../notifications/verification-code-channel.port';
 
 const PURPOSE = 'RESUBMIT_PROOF';
 const CODE_TTL_MS = 10 * 60 * 1000;
@@ -50,6 +55,12 @@ export class ResubmissionService {
     @Inject(PROOF_STORAGE) private readonly proofStorage: PaymentProofStorage,
     @Inject(GLOBAL_CLOCK) private readonly clock: GlobalClock,
     @Inject(DOMAIN_EVENT_BUS) private readonly eventBus: DomainEventBus,
+    // Approved code delivery channel (REQ-230; Section 23.3). Optional so a unit
+    // test can construct the service directly; the real application always
+    // binds the Telegram-backed adapter.
+    @Optional()
+    @Inject(VERIFICATION_CODE_CHANNEL)
+    private readonly codeChannel: VerificationCodeChannel = new NoopVerificationCodeChannel(),
   ) {}
 
   async requestCode(
@@ -91,8 +102,26 @@ export class ResubmissionService {
     });
     await this.securityEvent(biz.id, 'RESUBMISSION_CODE_REQUEST', 'OK');
 
-    // NOTE (Prompt 41 §16): code delivery (Telegram/email) is out of scope.
-    // The code itself is never returned or logged; a delivery adapter plugs in here.
+    // REQ-230 / Section 23.3: the one-time code is delivered over the approved
+    // channel (the customer's connected Telegram chat). When the channel is
+    // available but this customer has no chat, the code is voided so it can
+    // never be consumed — the plaintext is never returned or logged either way.
+    const delivery = await this.codeChannel.deliver({
+      businessId: biz.id,
+      bookingId: booking.id,
+      customerPhone: input.phone,
+      code,
+    });
+    if (delivery === 'NO_CHANNEL') {
+      await this.verificationRepo
+        .markUsed(this.prisma as never as import('@prisma/client').Prisma.TransactionClient, {
+          id: verification.id,
+          businessId: biz.id,
+        })
+        .catch(() => undefined);
+      await this.securityEvent(biz.id, 'BOOKING_VERIFICATION_CODE_NO_CHANNEL', 'OK');
+    }
+
     return { verificationId: verification.id, expiresAt };
   }
 

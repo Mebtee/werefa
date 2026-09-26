@@ -11,6 +11,7 @@ import { OwnerTelegramController } from './owner/telegram.controller';
 import { TelegramController } from './telegram/telegram.controller';
 import { AdminScheduleController } from './admin/schedule.controller';
 import { AdminSubscriptionController } from './admin/subscription.controller';
+import { AdminReportController } from './admin/report.controller';
 
 /**
  * HTTP API & contract layer (Prompt 42/43).
@@ -37,6 +38,7 @@ import { AdminSubscriptionController } from './admin/subscription.controller';
     TelegramController,
     AdminScheduleController,
     AdminSubscriptionController,
+    AdminReportController,
   ],
   providers: [AUTH_CONTEXT_RESOLVER_PROVIDER],
 })

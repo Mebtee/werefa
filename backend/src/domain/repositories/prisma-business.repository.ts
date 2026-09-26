@@ -65,6 +65,15 @@ export class PrismaBusinessRepository implements BusinessRepository {
     return this.prisma.businessSettings.findUnique({ where: { businessId } });
   }
 
+  async listDueForResume(now: Date): Promise<string[]> {
+    const rows = await this.prisma.businessSettings.findMany({
+      where: { isPaused: true, reopenAt: { not: null, lte: now } },
+      select: { businessId: true },
+      orderBy: { reopenAt: 'asc' },
+    });
+    return rows.map((r) => r.businessId);
+  }
+
   async updateProfile(
     tx: Prisma.TransactionClient,
     args: {

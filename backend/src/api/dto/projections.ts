@@ -144,6 +144,12 @@ export class PublicAvailabilityView {
   @ApiProperty({ type: [PublicSlotView] }) slots: PublicSlotView[];
   @ApiProperty({ example: 30 }) computedDurationMinutes: number;
   @ApiProperty({ example: 10000 }) computedTotalPriceMinor: number;
+  @ApiProperty({
+    example: 0,
+    description:
+      'Deposit due for this selection, from the business prepayment settings (REQ-110/111). 0 when no prepayment is required.',
+  })
+  requiredPrepaidMinor: number;
 }
 
 // ---------------------------------------------------------------------------

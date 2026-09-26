@@ -351,6 +351,33 @@ describe.skipIf(!RUN)('Subscription & billing workflow (real DB)', () => {
     await setTimeline({ status: 'PAID_GRACE', trialStartedAt: new Date(Date.now() - 60 * DAY), trialEndsAt: null, trialGraceEndsAt: null, periodEndsAt: new Date(Date.now() - 3 * DAY), paidGraceEndsAt: new Date(Date.now() + 2 * DAY) });
     await expectCustomerBookingGate(201, 12);
   });
+
+  it('REQ-155: an approved renewal reopens a business whose scheduled pause window already ended', async () => {
+    const renewBiz = await createBusiness('subscription-renew');
+    await http()
+      .post(`/api/v1/owner/businesses/${renewBiz}/pause`)
+      .set(owner(OWNER_A))
+      .send({ reopenAt: new Date(Date.now() - 60_000).toISOString() })
+      .expect(200);
+
+    const created = await http()
+      .post(`/api/v1/owner/businesses/${renewBiz}/subscription/proof`)
+      .set(owner(OWNER_A))
+      .field('payload', JSON.stringify({ submissionKey: 'sub-renew-001' }))
+      .attach('proof', PROOF_PNG, { filename: 'r.png', contentType: 'image/png' })
+      .expect(201);
+
+    await http()
+      .post(`/api/v1/admin/subscription/proofs/${created.body.id}/approve`)
+      .set(admin(ADMIN_1))
+      .expect(200);
+
+    const settings = await prisma.businessSettings.findUnique({ where: { businessId: renewBiz } });
+    expect(settings!.isPaused).toBe(false);
+    expect(settings!.reopenAt).toBeNull();
+    const sub = await prisma.subscription.findUnique({ where: { businessId: renewBiz } });
+    expect(sub!.status).toBe('ACTIVE');
+  });
 });
 
 const DELETE_ORDER = [

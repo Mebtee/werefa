@@ -34,3 +34,16 @@ export function adminLimitReached(): AppError {
     detail: 'The maximum of two active admins has been reached.',
   });
 }
+/**
+ * Generic registration/duplicate conflict (Prompt 54; REQ-005/014/030). The
+ * 409 detail never reveals WHICH input (email) collided, so callers may
+ * unconditionally return the same message — account existence is never
+ * enumerateable through registration or authentication.
+ */
+export function genericConflict(): AppError {
+  return new AppError({
+    code: ErrorCode.CONFLICT,
+    title: 'Conflict',
+    detail: 'Could not complete registration with these details.',
+  });
+}

@@ -5,6 +5,7 @@ import { GlobalClock, GLOBAL_CLOCK } from '../time/global-clock';
 import { ScheduleRepository } from '../repositories/schedule.repository.port';
 import { SCHEDULE_REPOSITORY } from '../repositories/tokens';
 import { deriveCanonicalStatus, isEligible } from '../lib/subscription-lifecycle';
+import { computePrepaidAmount } from '../lib/prepayment';
 import { computeAvailableSlotStarts, SlotStart } from './availability';
 
 /**
@@ -116,5 +117,30 @@ export class AvailabilityService {
       startMinutes: r.startMinute,
       endMinutes: r.endMinute,
     }));
+  }
+
+  /**
+   * Deposit due for a given appointment total, from the business's real
+   * prepayment settings (REQ-110/111). Shared with the booking service so the
+   * customer-facing availability view discloses the exact amount the booking
+   * step will enforce (spec §31). Business settings always exist for a bookable
+   * business (getSlotsForDay already requires them); missing → no deposit.
+   */
+  async requiredPrepaidMinor(businessId: string, totalPriceMinor: bigint): Promise<number> {
+    const settings = await this.prisma.businessSettings.findUnique({
+      where: { businessId },
+      select: { prepaymentMode: true, prepaymentPercent: true, prepaymentFixedMinor: true },
+    });
+    if (!settings) return 0;
+    return Number(
+      computePrepaidAmount(
+        {
+          prepaymentMode: settings.prepaymentMode,
+          prepaymentPercent: settings.prepaymentPercent,
+          prepaymentFixedMinor: settings.prepaymentFixedMinor,
+        },
+        totalPriceMinor,
+      ),
+    );
   }
 }

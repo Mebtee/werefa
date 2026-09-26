@@ -14,6 +14,20 @@ export class LoginDto {
   password: string;
 }
 
+/** Owner self-service registration (Prompt 54; REQ-005/009/032). */
+export class RegisterOwnerDto {
+  @ApiProperty({ example: 'new-owner@werefa.app' })
+  @IsEmail()
+  @MaxLength(320)
+  email: string;
+
+  @ApiProperty({ example: '••••••••' })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(128)
+  password: string;
+}
+
 export class ChangePasswordDto {
   @ApiProperty()
   @IsString()

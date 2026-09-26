@@ -9,7 +9,7 @@ import { AdminManagementService } from '../../domain/services/admin-management.s
 import { sessionCookieOptions } from '../cookie-utils';
 import { clientInfoFrom } from '../client-info';
 import { Actor, ApiAuthGuard } from '../../api/auth/api-auth.guard';
-import { ChangePasswordDto, LoginDto } from './auth.dto';
+import { ChangePasswordDto, LoginDto, RegisterOwnerDto } from './auth.dto';
 
 /**
  * Authentication endpoints (Prompt 43; REQ-035, REQ-191–193, REQ-218).
@@ -44,6 +44,30 @@ export class AuthController {
       sessionCookieOptions(this.config.nodeEnv, this.config.authSessionTtlHours),
     );
     return {
+      expiresAt: outcome.expiresAt,
+      user: { id: outcome.userId, role: outcome.role },
+    };
+  }
+
+  @Post('register')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Owner self-service registration (REQ-005/009/032). Creates an unverified OWNER account and signs the owner in via the same auto-login session flow as login.',
+  })
+  async register(@Body() dto: RegisterOwnerDto, @Req() req: ExpressRequest, @Res({ passthrough: true }) res: Response) {
+    const client: ClientInfo = clientInfoFrom(req);
+    const outcome: LoginOutcome = await this.authService.registerOwner({
+      email: dto.email,
+      password: dto.password,
+      client,
+    });
+    res.cookie(
+      this.config.authCookieName,
+      outcome.sessionToken,
+      sessionCookieOptions(this.config.nodeEnv, this.config.authSessionTtlHours),
+    );
+    return {
+      status: HttpStatus.CREATED,
       expiresAt: outcome.expiresAt,
       user: { id: outcome.userId, role: outcome.role },
     };

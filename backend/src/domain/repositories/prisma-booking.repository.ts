@@ -218,6 +218,17 @@ export class PrismaBookingRepository implements BookingRepository {
     });
   }
 
+  async listBusinessIdsDueForCompletion(upTo: Date, limit = 100): Promise<string[]> {
+    const rows = await this.prisma.booking.findMany({
+      where: { status: 'CONFIRMED', endAt: { lte: upTo } },
+      distinct: ['businessId'],
+      select: { businessId: true },
+      orderBy: { endAt: 'asc' },
+      take: limit,
+    });
+    return rows.map((r) => r.businessId);
+  }
+
   async hasServiceFutureBookings(businessId: string, serviceId: string): Promise<boolean> {
     const count = await this.prisma.bookingComponent.count({
       where: {

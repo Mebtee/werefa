@@ -41,6 +41,14 @@ export interface UserAuthRepository {
    * null when the cap is already reached — no second admin can win concurrently.
    */
   createAdmin(args: { id: string; email: string; passwordHash: string; recoveryEmail?: string }): Promise<User | null>;
+  /**
+   * Create an OWNER user for self-service registration (Prompt 54; REQ-005).
+   * The owner is created unverified (isEmailVerified = false); email
+   * verification dispatch and verification-gated login remain deferred. Returns
+   * the created user, or null when the email is already taken — the backend
+   * never leaks whether the attempt collided via an existence-specific detail.
+   */
+  createOwner(args: { id: string; email: string; passwordHash: string }): Promise<User | null>;
   /** Deactivate a user (set isDeactivated = true). */
   deactivateUser(userId: string): Promise<void>;
   /** Set the Super Admin recovery email. */

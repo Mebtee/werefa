@@ -19,8 +19,11 @@ import { CustomerStatusService } from './services/customer-status.service';
 import { AuthService } from './services/auth.service';
 import { RecoveryService } from './services/recovery.service';
 import { AdminManagementService } from './services/admin-management.service';
+import { ReportingService } from './services/reporting.service';
 import { TELEGRAM_PROVIDER } from './notifications/telegram-provider.port';
 import { HttpTelegramProvider } from './notifications/http-telegram-provider';
+import { VERIFICATION_CODE_CHANNEL } from './notifications/verification-code-channel.port';
+import { TelegramVerificationCodeChannel } from './notifications/telegram-verification-code-channel';
 import { DisabledTelegramProvider } from './notifications/disabled-telegram-provider';
 import { EMAIL_PROVIDER } from './notifications/email-provider.port';
 import { DisabledEmailProvider } from './notifications/disabled-email-provider';
@@ -70,6 +73,13 @@ import { TelegramWebhookService } from './notifications/telegram-webhook.service
       provide: EMAIL_PROVIDER,
       useClass: DisabledEmailProvider,
     },
+    {
+      // Approved rejected-booking resubmission code channel (REQ-230; Section
+      // 23.3): the customer's connected Telegram chat, else void. Fail-safe when
+      // TELEGRAM_ENABLED=false (reports CHANNEL_DISABLED, never a fake send).
+      provide: VERIFICATION_CODE_CHANNEL,
+      useClass: TelegramVerificationCodeChannel,
+    },
     TenantGuard,
     BusinessService,
     CatalogService,
@@ -83,6 +93,7 @@ import { TelegramWebhookService } from './notifications/telegram-webhook.service
     AuthService,
     RecoveryService,
     AdminManagementService,
+    ReportingService,
     NotificationMessageRenderer,
     NotificationOutboxEventBus,
     TelegramConnectionService,
@@ -110,6 +121,7 @@ import { TelegramWebhookService } from './notifications/telegram-webhook.service
     AuthService,
     RecoveryService,
     AdminManagementService,
+    ReportingService,
     NotificationMessageRenderer,
     NotificationOutboxEventBus,
     TelegramConnectionService,

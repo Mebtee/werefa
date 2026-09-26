@@ -171,6 +171,12 @@ export class SubscriptionBillingService {
         reason: `Subscription proof approved; period until ${newPeriodEnd.toISOString()}`,
       });
     });
+
+    // REQ-155: a renewal after a scheduled pause window has already ended
+    // permits automatic reopening. Idempotent, and a no-op for indefinite
+    // pauses (REQ-156) or when no scheduled resume is due.
+    await this.subscriptionService.attemptAutoResume(proof.businessId);
+
     const row = await this.subscriptionRepo.getProofWithBusiness(proofId);
     if (!row) throw domainErrors.invalidLifecycleTransition('This subscription proof was not found after review.');
     return row;

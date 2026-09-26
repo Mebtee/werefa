@@ -80,7 +80,7 @@ export class SubscriptionService {
     }
     await withBusinessAdvisoryLock(this.prisma, businessId, async (tx) => {
       await tx.businessSettings.update({ where: { businessId }, data: { isPaused: false, reopenAt: null } });
-      await this.promoteLatestPending(tx, businessId, ctx.actorUserId ?? 'system', 'Resumed by owner');
+      await this.promoteLatestPending(tx, businessId, ctx.actorUserId ?? 'system', 'Resumed by owner', this.clock.now());
     });
   }
 
@@ -108,7 +108,17 @@ export class SubscriptionService {
 
     await withBusinessAdvisoryLock(this.prisma, businessId, async (tx) => {
       await tx.businessSettings.update({ where: { businessId }, data: { isPaused: false, reopenAt: null } });
-      await this.promoteLatestPending(tx, businessId, 'system', 'Auto-resume');
+      // REQ-231: the resume event AND its outcome are recorded in history; the
+      // recorded event is never itself evidence that bookings are available.
+      await this.subscriptionRepo.appendHistory(tx, {
+        subscriptionId: sub.id,
+        businessId,
+        fromStatus: sub.status,
+        toStatus: sub.status,
+        actorType: 'SYSTEM',
+        reason: 'Auto-resume applied: bookings reopened',
+      });
+      await this.promoteLatestPending(tx, businessId, 'system', 'Auto-resume', this.clock.now());
     });
     return { resumed: true };
   }
@@ -122,11 +132,12 @@ export class SubscriptionService {
     businessId: string,
     actorId: string,
     reason: string,
+    now: Date,
   ): Promise<void> {
     const pending = await this.scheduleRepo.listPendingVersions(businessId);
     if (pending.length === 0) return;
     const latest = pending[pending.length - 1];
-    await this.scheduleRepo.demoteActiveVersions(tx, { businessId, replacedAt: new Date() });
+    await this.scheduleRepo.demoteActiveVersions(tx, { businessId, replacedAt: now });
     await this.scheduleRepo.promotePendingVersion(tx, { versionId: latest.id, businessId, appliedBy: actorId, reason });
     await this.scheduleRepo.setBusinessActiveVersion(tx, { businessId, versionId: latest.id });
   }

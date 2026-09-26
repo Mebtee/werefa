@@ -20,6 +20,7 @@ import {
 } from '../repositories/tokens';
 import { PRISMA_CLIENT } from '../../config/config.constants';
 import { withBusinessAdvisoryLock } from '../transactions/business-advisory-lock';
+import { computePrepaidAmount } from '../lib/prepayment';
 import { CatalogService } from './catalog.service';
 import { AvailabilityService } from './availability.service';
 import { SubscriptionService } from './subscription.service';
@@ -87,7 +88,7 @@ export class BookingService {
 
     const startAt = this.stripSeconds(input.startAt);
     const endAt = new Date(startAt.getTime() + totalDurationMinutes * 60_000);
-    const prepaid = this.computePrepaid(settings, totalPriceMinor);
+    const prepaid = computePrepaidAmount(settings, totalPriceMinor);
 
     // Idempotent fast path (REQ-121): a repeated submission key returns the
     // original booking — but ONLY when the repeated request is materially the
@@ -631,20 +632,7 @@ export class BookingService {
     }
   }
 
-  private computePrepaid(
-    settings: { prepaymentMode: string; prepaymentPercent: number | null; prepaymentFixedMinor: bigint | null },
-    totalMinor: bigint,
-  ): bigint {
-    switch (settings.prepaymentMode) {
-      case 'PERCENTAGE':
-        return (totalMinor * BigInt(settings.prepaymentPercent ?? 0)) / 100n;
-      case 'FIXED':
-        return settings.prepaymentFixedMinor ?? 0n;
-      default:
-        return 0n;
-    }
   }
-}
 
 type NotificationResult = BookingNotificationEvent[];
 

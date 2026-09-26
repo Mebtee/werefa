@@ -3,6 +3,10 @@ import { PrismaClient, User } from '@prisma/client';
 import { PRISMA_CLIENT } from '../../config/config.constants';
 import { UserAuthRepository, UserWithOwners } from './user-auth.repository.port';
 
+function isP2002(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { code?: string }).code === 'P2002';
+}
+
 @Injectable()
 export class PrismaUserAuthRepository implements UserAuthRepository {
   constructor(@Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient) {}
@@ -62,6 +66,24 @@ export class PrismaUserAuthRepository implements UserAuthRepository {
       where: { role: 'ADMIN' },
       orderBy: { createdAt: 'asc' },
     });
+  }
+
+  async createOwner(args: { id: string; email: string; passwordHash: string }): Promise<User | null> {
+    try {
+      return await this.prisma.user.create({
+        data: {
+          id: args.id,
+          email: args.email.toLowerCase(),
+          passwordHash: args.passwordHash,
+          role: 'OWNER',
+          isEmailVerified: false,
+        },
+      });
+    } catch (error) {
+      // Unique email → null, which the caller maps to a GENERIC 409 that never
+      // leaks whether the email already existed (REQ-005/014/030; Prompt 54).
+      return isP2002(error) ? null : null;
+    }
   }
 
   async createAdmin(args: { id: string; email: string; passwordHash: string; recoveryEmail?: string }): Promise<User | null> {

@@ -24,6 +24,8 @@ import { BookingService } from './services/booking.service';
 import { SubscriptionService } from './services/subscription.service';
 import { ResubmissionService } from './services/resubmission.service';
 import { CustomerStatusService } from './services/customer-status.service';
+import { BusinessLifecycleWorker } from './services/business-lifecycle.worker';
+import type { AppConfig } from '../config/app-config';
 
 const TEST_URL = process.env.TEST_DATABASE_URL;
 const RUN = process.env.RUN_DB_TESTS === 'true' && Boolean(TEST_URL);
@@ -189,7 +191,7 @@ beforeAll(async () => {
 
     tenantGuardHolder = new TenantGuard(bRepo);
     subscriptionService = new SubscriptionService(prisma, subRepo, sRepo, clock, tenantGuardHolder);
-    businessService = new BusinessService(prisma, bRepo, subRepo, tenantGuardHolder, subscriptionService);
+    businessService = new BusinessService(prisma, bRepo, subRepo, tenantGuardHolder, subscriptionService, clock);
     catalogService = new CatalogService(prisma, kRepo, tenantGuardHolder);
     scheduleService = new ScheduleService(prisma, sRepo, clock, tenantGuardHolder);
     availabilityService = new AvailabilityService(prisma, sRepo, clock);
@@ -422,6 +424,47 @@ describe.skipIf(!RUN)('domain application services (live PostgreSQL 16)', () => 
     expect(blocked).toHaveLength(1);
     expect(blocked[0].reason).toBe('BLOCKED');
     expect(blocked[0].reasonDetail).toContain('Blocked period');
+  });
+
+  // REQ-096/097: the affected-booking projection must surface EVERY affected
+  // booking of the changed business, carrying only the approved per-booking
+  // fields, and must never cross tenant boundaries. The REQ-094 email producer
+  // itself remains unimplemented (no canonical deep-link/action contract); this
+  // test strengthens the already-defined conflict-projection behavior only.
+  it('lists every affected booking of the changed business with only the approved fields (REQ-096/097, tenant-scoped)', async () => {
+    const a = await readyBusiness(37);
+    const b = await readyBusiness(38);
+    const a1 = (await makeBooking(a, new Date('2026-09-14T10:00:00Z'), 'key-multi-a1')).booking;
+    const a2 = (await makeBooking(a, new Date('2026-09-14T14:00:00Z'), 'key-multi-a2')).booking;
+    const b1 = (await makeBooking(b, new Date('2026-09-14T10:00:00Z'), 'key-multi-b1')).booking;
+
+    await scheduleService.saveTemplate(ownerActor(a.ownerId), a.businessId, {
+      template: {
+        // Monday (weekday 1) removed from business A only.
+        workingPeriods: Array.from({ length: 6 }, (_, i) => ({ weekday: i + 2, startMinutes: 540, endMinutes: 1020 })),
+        blockedPeriods: [],
+        specialDates: [],
+      },
+    });
+
+    const conflicts = await scheduleService.listOpenConflicts(a.businessId);
+    expect(conflicts.map((c) => c.bookingId).sort()).toEqual([a1.id, a2.id].sort());
+    expect(conflicts.some((c) => c.bookingId === b1.id)).toBe(false);
+
+    for (const c of conflicts) {
+      // Exactly the approved REQ-097 fields (+ REQ-093 reason), nothing sensitive.
+      expect(Object.keys(c).sort()).toEqual(
+        ['bookingId', 'createdAt', 'customerName', 'customerPhone', 'endAt', 'note', 'reason', 'reasonDetail', 'services', 'startAt', 'status'].sort(),
+      );
+      expect(c.customerName).toBe('Liya Tesfaye');
+      expect(c.customerPhone).toBe('+251911112233');
+      expect(c.startAt).toBeInstanceOf(Date);
+      expect(c.services.map((s) => s.name)).toEqual(['Haircut', 'Styling', 'Wash']);
+      expect(c.reason).toBe('OUTSIDE_HOURS');
+    }
+
+    // Tenant isolation: business B's unchanged schedule lists no conflicts.
+    expect(await scheduleService.listOpenConflicts(b.businessId)).toHaveLength(0);
   });
 
   it('booking creation persists the full aggregate: booking, payment, proof, lock, components, history', async () => {
@@ -883,6 +926,76 @@ describe.skipIf(!RUN)('domain application services (live PostgreSQL 16)', () => 
     await expectCode(businessService.resumeManual(ownerActor(w.ownerId), w.businessId), ErrorCode.SUBSCRIPTION_EXPIRED);
   });
 
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  it('auto-resume: an ended scheduled pause reopens an eligible business and records the outcome (REQ-153/231)', async () => {
+    const w = await readyBusiness(26);
+    await businessService.pause(ownerActor(w.ownerId), w.businessId, {
+      reopenAt: new Date(FIXED_NOW.getTime() - 60 * 60 * 1000),
+    });
+    await prisma.subscription.update({
+      where: { businessId: w.businessId },
+      data: {
+        status: 'ACTIVE',
+        periodEndsAt: new Date(FIXED_NOW.getTime() + 10 * DAY_MS),
+        paidGraceEndsAt: new Date(FIXED_NOW.getTime() + 15 * DAY_MS),
+      },
+    });
+
+    expect(await businessRepo().listDueForResume(FIXED_NOW)).toContain(w.businessId);
+
+    const outcome = await subscriptionService.attemptAutoResume(w.businessId);
+    expect(outcome.resumed).toBe(true);
+    const settings = await prisma.businessSettings.findUnique({ where: { businessId: w.businessId } });
+    expect(settings!.isPaused).toBe(false);
+    expect(settings!.reopenAt).toBeNull();
+    const history = await prisma.subscriptionStatusHistory.findMany({ where: { businessId: w.businessId } });
+    expect(history.some((h) => h.reason === 'Auto-resume applied: bookings reopened')).toBe(true);
+  });
+
+  it('auto-resume: an expired subscription keeps bookings closed and records the refused attempt (REQ-154/231)', async () => {
+    const w = await readyBusiness(27);
+    await businessService.pause(ownerActor(w.ownerId), w.businessId, {
+      reopenAt: new Date(FIXED_NOW.getTime() - 60 * 60 * 1000),
+    });
+    await prisma.subscription.update({
+      where: { businessId: w.businessId },
+      data: {
+        status: 'EXPIRED',
+        trialEndsAt: new Date('2026-06-01T00:00:00Z'),
+        trialGraceEndsAt: new Date('2026-06-04T00:00:00Z'),
+        periodEndsAt: null,
+        paidGraceEndsAt: null,
+      },
+    });
+
+    const outcome = await subscriptionService.attemptAutoResume(w.businessId);
+    expect(outcome.resumed).toBe(false);
+    const settings = await prisma.businessSettings.findUnique({ where: { businessId: w.businessId } });
+    expect(settings!.isPaused).toBe(true);
+    const history = await prisma.subscriptionStatusHistory.findMany({ where: { businessId: w.businessId } });
+    expect(history.some((h) => h.reason === 'Auto-resume refused: subscription expired')).toBe(true);
+  });
+
+  it('auto-resume: an indefinite pause is never due and an active subscription alone does not reopen it (REQ-156)', async () => {
+    const w = await readyBusiness(28);
+    await businessService.pause(ownerActor(w.ownerId), w.businessId, {});
+    await prisma.subscription.update({
+      where: { businessId: w.businessId },
+      data: {
+        status: 'ACTIVE',
+        periodEndsAt: new Date(FIXED_NOW.getTime() + 10 * DAY_MS),
+        paidGraceEndsAt: new Date(FIXED_NOW.getTime() + 15 * DAY_MS),
+      },
+    });
+
+    expect(await businessRepo().listDueForResume(FIXED_NOW)).not.toContain(w.businessId);
+    const outcome = await subscriptionService.attemptAutoResume(w.businessId);
+    expect(outcome.resumed).toBe(false);
+    const settings = await prisma.businessSettings.findUnique({ where: { businessId: w.businessId } });
+    expect(settings!.isPaused).toBe(true);
+  });
+
   it('REQ-077: hard deletion of a service is refused while it still has future bookings', async () => {
     const w = await readyBusiness(30);
     await makeBooking(w, new Date('2026-09-20T10:00:00Z'), 'key-del-30');
@@ -924,5 +1037,71 @@ describe.skipIf(!RUN)('domain application services (live PostgreSQL 16)', () => 
     const components = await prisma.bookingComponent.findMany({ where: { businessId: w.businessId } });
     expect(components).toHaveLength(3);
     expect(components.map((c) => c.nameSnapshot)).toContain('Haircut');
+  });
+
+  // REQ-102 / Section 15.3 T4: a CONFIRMED booking automatically becomes
+  // Completed after its scheduled end time, the slot is released and the
+  // transition is attributed to the System actor. The platform sweep discovers
+  // candidate businesses, then delegates each to the authoritative, guarded —
+  // and therefore idempotent — BookingService transition.
+  it('REQ-102: the completion sweep completes due CONFIRMED bookings across businesses exactly once', async () => {
+    const a = await readyBusiness(60);
+    const b = await readyBusiness(61);
+    const idle = await readyBusiness(62);
+
+    const dueA = await makeBooking(a, new Date('2026-09-14T09:00:00Z'), 'key-auto-60a');
+    const dueB = await makeBooking(b, new Date('2026-09-14T09:00:00Z'), 'key-auto-61a');
+    await bookingService.acceptProof(ownerActor(a.ownerId), a.businessId, dueA.booking.id);
+    await bookingService.acceptProof(ownerActor(b.ownerId), b.businessId, dueB.booking.id);
+
+    // A future CONFIRMED booking (next day, inside working hours) is not due.
+    const future = await makeBooking(a, new Date('2026-09-15T10:00:00Z'), 'key-auto-60b');
+    await bookingService.acceptProof(ownerActor(a.ownerId), a.businessId, future.booking.id);
+    // A past-but-PAYMENT_PENDING booking is not CONFIRMED and must never complete.
+    const pending = await makeBooking(idle, new Date('2026-09-14T09:00:00Z'), 'key-auto-62a');
+
+    const candidates = await bookingRepo().listBusinessIdsDueForCompletion(FIXED_NOW);
+    expect(candidates).toEqual(expect.arrayContaining([a.businessId, b.businessId]));
+    expect(candidates).not.toContain(idle.businessId);
+
+    const worker = new BusinessLifecycleWorker(
+      { nodeEnv: 'test' } as unknown as AppConfig,
+      businessRepo(),
+      bookingRepo(),
+      clock,
+      subscriptionService,
+      bookingService,
+    );
+
+    const first = await worker.sweepCompletions(FIXED_NOW);
+    expect(first.completed).toBeGreaterThanOrEqual(2);
+
+    // Idempotent: a second sweep finds no remaining due bookings for these businesses.
+    const second = await worker.sweepCompletions(FIXED_NOW);
+    expect(second.completed).toBe(0);
+
+    const doneA = await prisma.booking.findUnique({ where: { id: dueA.booking.id } });
+    const doneB = await prisma.booking.findUnique({ where: { id: dueB.booking.id } });
+    expect(doneA!.status).toBe('COMPLETED');
+    expect(doneB!.status).toBe('COMPLETED');
+    expect((await prisma.booking.findUnique({ where: { id: future.booking.id } }))!.status).toBe('CONFIRMED');
+    expect((await prisma.booking.findUnique({ where: { id: pending.booking.id } }))!.status).toBe('PAYMENT_PENDING');
+
+    // The slot is released and the transition is attributed to the System actor.
+    expect((await prisma.slotLock.findMany({ where: { bookingId: dueA.booking.id } }))[0].state).toBe('RELEASED');
+    const history = await prisma.bookingStatusHistory.findMany({
+      where: { bookingId: dueA.booking.id },
+      orderBy: { id: 'asc' },
+    });
+    const completion = history.at(-1);
+    expect(completion!.fromStatus).toBe('CONFIRMED');
+    expect(completion!.toStatus).toBe('COMPLETED');
+    expect(completion!.actorType).toBe('SYSTEM');
+
+    // Tenant isolation: business B's completion never touched business A's rows.
+    const bHistory = await prisma.bookingStatusHistory.findFirst({
+      where: { bookingId: dueB.booking.id, toStatus: 'COMPLETED' },
+    });
+    expect(bHistory!.businessId).toBe(b.businessId);
   });
 });

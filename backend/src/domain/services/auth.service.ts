@@ -19,7 +19,7 @@ import { SessionRepository } from '../repositories/session.repository.port';
 import { Argon2PasswordHasher } from '../../auth/password-hash';
 import { generateOpaqueToken, sha256hex } from '../../auth/token-utils';
 import { LOCKOUT_DURATION_MINUTES, MAX_FAILED_LOGIN_ATTEMPTS } from './auth-constants';
-import { accountLocked, invalidCredentials } from './auth-errors';
+import { accountLocked, genericConflict, invalidCredentials } from './auth-errors';
 
 export interface ClientInfo {
   ip?: string;
@@ -138,6 +138,37 @@ export class AuthService {
 
     const outcome = await this.issueSession(user.id, user.role, input.client);
     return outcome;
+  }
+
+  /**
+   * Owner self-service registration (Prompt 54; REQ-005/009/032). Creates an
+   * unverified OWNER (isEmailVerified = false; verification and email-sender
+   * remain deferred per REQ-026–031, so nothing gates the new account) and
+   * signs the owner straight in via the same auto-login session flow as login.
+   * A unique-email collision maps to a GENERIC 409 that never leaks account
+   * existence (REQ-014/030) — the client cannot enumerate emails this way.
+   */
+  async registerOwner(input: { email: string; password: string; client: ClientInfo }): Promise<LoginOutcome> {
+    const email = input.email.toLowerCase().trim();
+    const passwordHash = await Argon2PasswordHasher.hash(input.password);
+
+    const created = await this.userRepo.createOwner({
+      id: crypto.randomUUID(),
+      email,
+      passwordHash,
+    });
+    if (!created) throw genericConflict();
+
+    await this.securityRepo.create({
+      userId: created.id,
+      type: 'OWNER_REGISTERED',
+      ip: input.client.ip,
+      device: input.client.device,
+      browser: input.client.browser,
+      result: 'SUCCESS',
+    });
+
+    return this.issueSession(created.id, 'OWNER', input.client);
   }
 
   /** Create a server-side session row and return the opaque token. */

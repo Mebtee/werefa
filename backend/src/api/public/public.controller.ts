@@ -131,11 +131,16 @@ export class PublicController {
       dateKey: date,
       durationMinutes: totalDurationMinutes,
     });
+    const requiredPrepaidMinor = await this.availabilityService.requiredPrepaidMinor(
+      profile.business.id,
+      totalPriceMinor,
+    );
     return {
       date,
       slots: slots.map((s) => ({ startAt: s.startAt.toISOString(), endAt: s.endAt.toISOString() })),
       computedDurationMinutes: totalDurationMinutes,
       computedTotalPriceMinor: Number(totalPriceMinor),
+      requiredPrepaidMinor,
     };
   }
 }

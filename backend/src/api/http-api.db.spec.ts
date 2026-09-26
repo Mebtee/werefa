@@ -920,6 +920,27 @@ const request = await http()
         .expect(200);
     }
 
+    it('public availability discloses the exact deposit the booking step enforces (REQ-110/111)', async () => {
+      await setupWorld();
+      const post = () =>
+        http()
+          .post('/api/v1/public/businesses/happy-salons-test-1/availability')
+          .send({ date: DATE, selections: [{ serviceId, variationId }] })
+          .expect(200);
+
+      const none = await post();
+      expect(none.body.requiredPrepaidMinor).toBe(0);
+      expect(none.body.computedTotalPriceMinor).toBeGreaterThan(0);
+
+      await setPrepaidFixed(true);
+      try {
+        const fixed = await post();
+        expect(fixed.body.requiredPrepaidMinor).toBe(5000);
+      } finally {
+        await setPrepaidFixed(false);
+      }
+    });
+
     it('owner downloads the proof file with attachment headers; other tenants and unknown ids get 404 (REQ-114/115/118)', async () => {
       await setupWorld();
       // booking2 (after reject + resubmission) holds the original (replaced) proof and the latest one.

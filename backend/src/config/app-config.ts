@@ -123,6 +123,8 @@ export const appConfigSchema = z.object({
   telegramDeliveryIntervalMs: z.coerce.number().int().positive().default(5000),
   /** Bounded delivery attempts before a delivery is DEAD_LETTERED. */
   telegramDeliveryMaxAttempts: z.coerce.number().int().min(1).max(20).default(5),
+  /** In-process business-lifecycle sweep cadence (ms): scheduled auto-resume (REQ-153/231). */
+  businessLifecycleIntervalMs: z.coerce.number().int().positive().default(60_000),
   productParameters: z.object({
     subscriptionMonthlyPriceMinor: z.number().int().positive().nullable().default(null),
     appTimezone: z.string().min(1).default(APP_TIMEZONE_DESIGN_DEFAULT),
@@ -211,6 +213,7 @@ function rawToParsed(env: Record<string, string | undefined>): z.infer<typeof ap
     telegramBotWebhookUrl: env.TELEGRAM_BOT_WEBHOOK_URL || undefined,
     telegramDeliveryIntervalMs: env.TELEGRAM_DELIVERY_INTERVAL_MS || undefined,
     telegramDeliveryMaxAttempts: env.TELEGRAM_DELIVERY_MAX_ATTEMPTS || undefined,
+    businessLifecycleIntervalMs: env.BUSINESS_LIFECYCLE_INTERVAL_MS || undefined,
     productParameters: {
       subscriptionMonthlyPriceMinor: productRaw.PRODUCT_SUBSCRIPTION_MONTHLY_PRICE_MINOR as number | null,
       appTimezone: productRaw.PRODUCT_APP_TIMEZONE as string,
@@ -253,9 +256,19 @@ export function assertConfigInvariants(config: AppConfig): void {
   if (config.nodeEnv === 'production' && !config.databaseUrl) {
     issues.push('DATABASE_URL is required when NODE_ENV=production');
   }
-  if (config.corsOrigins.includes('*') && config.productParameters.ownerBookingReportPdfEnabled === null) {
-    // Note: '*' + credentials is not currently used; listed purely as guard.
-    issues.push("CORS_ORIGINS must not contain '*' when credentialed traffic is expected");
+  // Browsers reject '*' together with credentialed (cookie) requests; a wildcard
+  // would silently break session auth or, worse, invite a lax CORS posture. The
+  // guard is unconditional (it must never depend on an unrelated feature flag).
+  if (config.corsOrigins.includes('*')) {
+    issues.push("CORS_ORIGINS must not contain '*'");
+  }
+
+  // Defense-in-depth: the test-header actor bridge must never be selectable in
+  // production. The resolver factory already refuses it, but a production boot
+  // with the flag set is a misconfiguration and must fail fast rather than run
+  // with a latent auth bypass.
+  if (config.nodeEnv === 'production' && config.authTestEnabled) {
+    issues.push('AUTH_TEST_ENABLED must not be enabled in production');
   }
   if (config.productParameters.subscriptionMonthlyPriceMinor !== null && config.productParameters.subscriptionMonthlyPriceMinor < 0) {
     issues.push('PRODUCT_SUBSCRIPTION_MONTHLY_PRICE_MINOR must be a positive integer when set');

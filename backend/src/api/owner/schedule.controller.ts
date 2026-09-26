@@ -1,8 +1,14 @@
-import { Body, Controller, Get, Inject, NotFoundException, Param, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Inject, NotFoundException, Param, Post, Put, Query, Res, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiOkResponse, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { ScheduleService } from '../../domain/services/schedule.service';
+import { ReportingService } from '../../domain/services/reporting.service';
 import { TenantGuard } from '../../domain/authorization/tenant-guard';
 import { ActorContext } from '../../domain/authorization/actor-context';
+import { GLOBAL_CLOCK, GlobalClock } from '../../domain/time/global-clock';
+import { renderScheduleHistoryPdf } from '../../domain/reports/report-pdf';
+import { parseBound, sendPdf } from '../report-http';
+import { ScheduleHistoryQuery, scheduleHistoryFileName } from '../dto/reports';
 import { Actor, ApiAuthGuard } from '../auth/api-auth.guard';
 import {
   OwnerScheduleConflictView,
@@ -25,7 +31,9 @@ import { BusinessIdParamDto, RecordExceptionPayload, SaveSchedulePayload } from 
 export class OwnerScheduleController {
   constructor(
     @Inject(ScheduleService) private readonly scheduleService: ScheduleService,
+    @Inject(ReportingService) private readonly reporting: ReportingService,
     @Inject(TenantGuard) private readonly tenantGuard: TenantGuard,
+    @Inject(GLOBAL_CLOCK) private readonly clock: GlobalClock,
   ) {}
 
   @Get(':businessId/schedule/current')
@@ -54,6 +62,28 @@ export class OwnerScheduleController {
     await this.tenantGuard.requireOwnedBusiness(actor, params.businessId);
     const conflicts = await this.scheduleService.listOpenConflicts(params.businessId);
     return conflicts.map(ownerScheduleConflictProjection);
+  }
+
+  @Get(':businessId/schedule-history.pdf')
+  @ApiOperation({ summary: 'Export own-business schedule history as PDF (REQ-166/170…172).' })
+  @ApiOkResponse({ description: 'application/pdf attachment (versions + dates/times only).' })
+  async scheduleHistoryPdf(
+    @Actor() actor: ActorContext,
+    @Param() params: BusinessIdParamDto,
+    @Query() query: ScheduleHistoryQuery,
+    @Res() res: Response,
+  ): Promise<void> {
+    await this.tenantGuard.requireOwnedBusiness(actor, params.businessId);
+    const result = await this.reporting.scheduleHistory(params.businessId, {
+      from: parseBound(query.from, this.clock, 'start'),
+      to: parseBound(query.to, this.clock, 'end'),
+    });
+    const pdf = renderScheduleHistoryPdf(result.rows, this.clock, {
+      scopeLabel: 'Own business',
+      from: result.from,
+      to: result.to,
+    });
+    sendPdf(res, pdf, scheduleHistoryFileName(this.clock.dateKey(this.clock.now())));
   }
 
   @Put(':businessId/schedule')

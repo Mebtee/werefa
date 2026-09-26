@@ -17,6 +17,7 @@ export type AuthSecurityEventType =
   | 'RECOVERY_CODE_FAILED'
   | 'ADMIN_CREATED'
   | 'ADMIN_DEACTIVATED'
+  | 'OWNER_REGISTERED'
   | 'SECURITY_HISTORY_DELETED';
 
 export interface SecurityEventAuthRepository {

@@ -132,6 +132,13 @@ export interface BookingRepository {
   /** Booking + components + payment + statusHistory + proof submission timestamps (owner detail). */
   findByIdWithHistory(businessId: string, id: number): Promise<BookingWithHistory | null>;
   listDueForCompletion(businessId: string, upTo: Date, limit?: number): Promise<Booking[]>;
+  /**
+   * Distinct businesses that own at least one CONFIRMED booking whose scheduled
+   * end time has passed and therefore must transition to Completed (REQ-102 /
+   * Section 15.3 T4). The platform-wide completion sweep uses this to find work
+   * without scanning every business.
+   */
+  listBusinessIdsDueForCompletion(upTo: Date, limit?: number): Promise<string[]>;
   hasServiceFutureBookings(businessId: string, serviceId: string): Promise<boolean>;
   hasActiveOverlap(tx: Prisma.TransactionClient, check: OverlapCheck): Promise<boolean>;
   /** Guarded status transition; false when the row is not in `from` state. */
