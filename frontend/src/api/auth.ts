@@ -3,6 +3,8 @@ import type {
   ChangePasswordRequest,
   LoginRequest,
   LoginResponse,
+  RegisterRequest,
+  SecurityEventView,
   SessionResponse,
 } from './types'
 
@@ -14,6 +16,15 @@ import type {
 export const authApi = {
   login(input: LoginRequest) {
     return apiRequest<LoginResponse>('/auth/login', {
+      method: 'POST',
+      body: input,
+      handleUnauthorized: false,
+    })
+  },
+
+  /** Owner self-service registration (Prompt 54; REQ-005/009/032); auto-login. */
+  register(input: RegisterRequest) {
+    return apiRequest<LoginResponse>('/auth/register', {
       method: 'POST',
       body: input,
       handleUnauthorized: false,
@@ -41,5 +52,13 @@ export const authApi = {
       method: 'POST',
       body: input,
     })
+  },
+
+  /** The caller's own security/activity history (REQ-201 Owner, REQ-202 Admin). */
+  securityHistory(signal?: AbortSignal) {
+    return apiRequest<{ events: SecurityEventView[] }>('/auth/security', {
+      method: 'GET',
+      signal,
+    }).then(({ data }) => data.events)
   },
 }

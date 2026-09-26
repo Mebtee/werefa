@@ -1,6 +1,7 @@
 import type { ScheduleVersionHistoryEntry } from '@/types/models'
 import { describeVersionChange } from '@/lib/scheduleHistory'
 import { formatTimestamp } from '@/lib/time'
+import { Button } from '@/components/ui/Button'
 
 const STATUS_LABEL: Record<ScheduleVersionHistoryEntry['status'], string> = {
   active: 'Active',
@@ -22,8 +23,13 @@ const STATUS_CHIP: Record<ScheduleVersionHistoryEntry['status'], string> = {
  */
 export function ScheduleHistory({
   versions,
+  onExportPdf,
+  exportingPdf,
 }: {
   versions: readonly ScheduleVersionHistoryEntry[]
+  /** When provided, renders the schedule-history PDF export (REQ-170). */
+  onExportPdf?: () => void
+  exportingPdf?: boolean
 }) {
   return (
     <section
@@ -36,6 +42,13 @@ export function ScheduleHistory({
       <p className="card__subtitle">
         Every saved schedule state is kept as a version. This view is read-only.
       </p>
+      {onExportPdf && (
+        <div className="proof-queue__actions">
+          <Button type="button" variant="outline" loading={exportingPdf} disabled={exportingPdf} onClick={onExportPdf}>
+            Export PDF
+          </Button>
+        </div>
+      )}
 
       {versions.length === 0 ? (
         <p className="subsection__empty">

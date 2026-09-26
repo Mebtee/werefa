@@ -34,6 +34,13 @@ export interface AuthCredentials {
 
 export interface AuthContextValue extends AuthState {
   login(credentials: AuthCredentials): Promise<boolean>
+  /**
+   * Owner self-service registration (Prompt 54; REQ-005/009/032). The backend
+   * creates an unverified account and signs the owner straight in (auto-login),
+   * so this returns true only when the new session is active. Never attempts to
+   * present or store any credential client-side.
+   */
+  register(credentials: AuthCredentials): Promise<boolean>
   logout(): Promise<void>
   refresh(): Promise<void>
 }

@@ -52,7 +52,7 @@ export const DEFAULT_PUBLIC_BUSINESS_FIELDS: BusinessDetails = {
   address: '',
   lat: null,
   lng: null,
-  mapProvider: 'google',
+  mapProvider: 'osm',
   phone: '',
   workingHours: [[], [], [], [], [], [], []] as BusinessDetails['workingHours'],
   bookingIntervalMinutes: 60,
@@ -80,7 +80,7 @@ export function hybridizeOwnedBusiness(view: OwnerBusinessView, mock: BusinessDe
     address: view.address ?? '',
     lat,
     lng,
-phone: view.phonePublic ?? '',
+    phone: view.phonePublic ?? '',
     pause: pauseFromBusiness(view.isPaused, view.pauseMessage, view.reopenAt),
     bookingIntervalMinutes: view.bookingIntervalMinutes,
   }
@@ -94,7 +94,7 @@ phone: view.phonePublic ?? '',
  */
 export function hybridizePublicBusiness(
   view: PublicBusinessView,
-  mock: BusinessDetails | undefined,
+  mock?: BusinessDetails,
 ): BusinessDetails {
   const { lat, lng } = coordinatesOf(view.coordinates)
   return {
@@ -109,5 +109,11 @@ export function hybridizePublicBusiness(
     lng,
     phone: view.phonePublic ?? '',
     pause: pauseFromBusiness(view.isPaused, view.pauseMessage, view.reopenAt),
+    logo: view.branding.logoUrl
+      ? { dataUrl: view.branding.logoUrl, alt: `${view.name} logo` }
+      : (mock?.logo ?? null),
+    coverPhoto: view.branding.coverUrl
+      ? { dataUrl: view.branding.coverUrl, alt: `${view.name} cover photo` }
+      : (mock?.coverPhoto ?? null),
   }
 }

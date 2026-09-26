@@ -6,6 +6,7 @@ import type {
   OwnerScheduleConflictView,
   OwnerScheduleView,
   OwnerServiceView,
+  OwnerSubscriptionView,
   PublicBusinessView,
   PublicScheduleView,
   PublicServiceView,
@@ -38,6 +39,7 @@ import {
   saveBookingInterval,
   saveSchedule,
   scheduleSnapshotOf,
+  setCustomerTelegramConnected,
 } from '@/mock/store'
 import { computeAvailableTimes } from '@/mock/availability'
 import { mockRaceSlot } from '@/mock/data'
@@ -85,6 +87,30 @@ export interface BusinessApiStub {
  */
 export const RESUBMISSION_TEST_CODE = '123456'
 
+/**
+ * Public/owned business trading state to seed before the first request. Lets a
+ * page-level test render the canonical closed states without walking the owner
+ * UI first. None of these fields are required; unset fields keep the demo
+ * business's defaults.
+ */
+export interface BusinessApiSeedState {
+  /** Seeded `isPaused` on the owned business (pause route equivalent). */
+  isPaused?: boolean
+  pauseMessage?: string | null
+  reopenAt?: string | null
+  /** Seeded `isDeactivated` on the owned business (deactivate route equivalent). */
+  isDeactivated?: boolean
+  /**
+   * Simulates a backend gate that closes the business to new bookings
+   * regardless of pause (e.g. deactivated, or subscription expired). Mirrors
+   * the real availability/booking services: availability returns no slots and
+   * booking creation is rejected.
+   */
+  bookingsClosed?: boolean
+  /** Marks a customer phone as already Telegram-connected for the owned business (REQ-056). */
+  telegramCustomerConnectedPhone?: string
+}
+
 export interface BusinessApiStubOptions {
   /**
    * Consulted by the availability route ON REQUEST so a test can fail a
@@ -92,6 +118,11 @@ export interface BusinessApiStubOptions {
    * slotsError paths).
    */
   failAvailabilityFor?: (date: string) => boolean
+  /**
+   * Forces the public customer Telegram connect route to answer a 500, so the
+   * done-step card can be exercised for its degrade-gracefully error state.
+   */
+  failPublicTelegramConnect?: boolean
   /**
    * Consulted by the owner booking routes ON REQUEST (Prompt 51). Return a
    * `Response` to force an error for a specific method/path, or null to let the
@@ -105,9 +136,31 @@ export interface BusinessApiStubOptions {
    * already-connected dashboard state.
    */
   ownerTelegramConnected?: boolean
+  /**
+   * Overrides the mock-only "requested time was taken meanwhile" race. The
+   * default race targets today's next 30-minute boundary slot, which is
+   * wall-clock dependent; a test can pin an exact date+time so the
+   * SLOT_UNAVAILABLE path is deterministic.
+   */
+  raceStart?: { date: string; time: string }
+  ownedBusinesses?: readonly OwnerBusinessView[]
+  servicesByBusinessId?: Readonly<Record<string, readonly OwnerServiceView[]>>
+  subscriptionsByBusinessId?: Readonly<Record<string, OwnerSubscriptionView>>
+  /** Seeded public/owned business trading state (Prompt 55 page-level tests). */
+  seed?: BusinessApiSeedState
 }
 
-const OWNER_ID = '00000000-0000-4000-8000-0000000000a'
+export const OWNER_ID = '00000000-0000-4000-8000-0000000000a'
+
+const PROOF_MAX_BYTES = 5 * 1024 * 1024
+const PROOF_MIME_TYPES = new Set([
+  'image/bmp',
+  'image/gif',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'application/pdf',
+])
 
 function envelope(status: number, code: string, title: string, detail: string): Response {
   return new Response(
@@ -174,6 +227,35 @@ function newOwnerState(): OwnerBusinessView {
   }
 }
 
+function cloneOwnerBusiness(view: OwnerBusinessView): OwnerBusinessView {
+  return {
+    ...view,
+    category: { ...view.category },
+    coordinates: { ...view.coordinates },
+  }
+}
+
+function newOwnerSubscriptionState(): OwnerSubscriptionView {
+  const now = Date.now()
+  return {
+    status: 'TRIAL',
+    trialStartedAt: new Date(now).toISOString(),
+    trialEndsAt: new Date(now + 14 * 86_400_000).toISOString(),
+    trialGraceEndsAt: null,
+    periodEndsAt: null,
+    paidGraceEndsAt: null,
+    bookingsEnabled: true,
+    proofs: [],
+  }
+}
+
+function cloneSubscriptionState(view: OwnerSubscriptionView): OwnerSubscriptionView {
+  return {
+    ...view,
+    proofs: view.proofs.map((proof) => ({ ...proof })),
+  }
+}
+
 function publicViewOf(owner: OwnerBusinessView): PublicBusinessView {
   return {
     slug: owner.slug,
@@ -188,7 +270,10 @@ function publicViewOf(owner: OwnerBusinessView): PublicBusinessView {
     pauseMessage: owner.pauseMessage,
     reopenAt: owner.reopenAt,
     bookingIntervalMinutes: owner.bookingIntervalMinutes,
-    branding: { logoUrl: null, coverUrl: null },
+    branding: {
+      logoUrl: getBusiness(owner.slug)?.logo?.dataUrl ?? null,
+      coverUrl: getBusiness(owner.slug)?.coverPhoto?.dataUrl ?? null,
+    },
   }
 }
 
@@ -216,7 +301,10 @@ function publicViewFromStore(slug: string): PublicBusinessView | undefined {
     reopenAt:
       mock.pause?.kind === 'until' ? `${mock.pause.reopenDate}T00:00:00.000Z` : null,
     bookingIntervalMinutes: mock.bookingIntervalMinutes,
-    branding: { logoUrl: null, coverUrl: null },
+    branding: {
+      logoUrl: mock.logo?.dataUrl ?? null,
+      coverUrl: mock.coverPhoto?.dataUrl ?? null,
+    },
   }
 }
 
@@ -438,6 +526,14 @@ function publicServiceFromOwner(view: OwnerServiceView): PublicServiceView {
 
 function newServicesState(): OwnerServiceView[] {
   return getServices(PRIMARY_BUSINESS_SLUG).map(ownerServiceFromStore)
+}
+
+function cloneServiceState(view: OwnerServiceView): OwnerServiceView {
+  return {
+    ...view,
+    variations: view.variations.map((variation) => ({ ...variation })),
+    addOns: view.addOns.map((addOn) => ({ ...addOn })),
+  }
 }
 
 function validateServiceInput(body: unknown): Record<string, string> | null {
@@ -740,8 +836,49 @@ export function installBusinessApiStub(
   options: BusinessApiStubOptions = {},
 ): BusinessApiStub {
   const calls: RecordedRequest[] = []
-  const state = newOwnerState()
-  const servicesState = newServicesState()
+  const configuredBusinesses = options.ownedBusinesses?.map(cloneOwnerBusiness)
+  const state = configuredBusinesses?.[0] ?? newOwnerState()
+  const ownedBusinessStates: OwnerBusinessView[] = configuredBusinesses ?? [state]
+  const seed = options.seed ?? {}
+  if (seed.isPaused !== undefined) state.isPaused = seed.isPaused
+  if (seed.pauseMessage !== undefined) state.pauseMessage = seed.pauseMessage
+  if (seed.reopenAt !== undefined) state.reopenAt = seed.reopenAt
+  if (seed.isDeactivated !== undefined) state.isDeactivated = seed.isDeactivated
+  // The real availability/booking services close a deactivated business to new
+  // bookings; `bookingsClosed` additionally models the subscription-expired
+  // gate. The public page still renders (page always visible).
+  const bookingsClosed = Boolean(seed.bookingsClosed) || state.isDeactivated
+  if (seed.telegramCustomerConnectedPhone) {
+    setCustomerTelegramConnected(state.slug, seed.telegramCustomerConnectedPhone, true)
+  }
+  const servicesByBusinessId = new Map<string, OwnerServiceView[]>()
+  for (const business of ownedBusinessStates) {
+    const seeded = options.servicesByBusinessId?.[business.id]
+    servicesByBusinessId.set(
+      business.id,
+      seeded
+        ? seeded.map(cloneServiceState)
+        : business.id === state.id && business.slug === PRIMARY_BUSINESS_SLUG
+          ? newServicesState()
+          : [],
+    )
+  }
+  const servicesState = servicesByBusinessId.get(state.id) ?? []
+  const subscriptionsByBusinessId = new Map<string, OwnerSubscriptionView>()
+  for (const business of ownedBusinessStates) {
+    subscriptionsByBusinessId.set(
+      business.id,
+      options.subscriptionsByBusinessId?.[business.id]
+        ? cloneSubscriptionState(options.subscriptionsByBusinessId[business.id])
+        : newOwnerSubscriptionState(),
+    )
+  }
+  const subscriptionProofByKey = new Map<
+    string,
+    { businessId: string; proof: OwnerSubscriptionView['proofs'][number] }
+  >()
+  let subscriptionProofSerial = 0
+  let businessSerial = 0
   let variantSerial = 0
   let exceptionSerial = 0
   const nextVariantId = () => `variant-${++variantSerial}`
@@ -763,6 +900,7 @@ export function installBusinessApiStub(
       (slug) => slug !== state.slug,
     ),
   )
+  for (const business of ownedBusinessStates.slice(1)) takenSlugs.add(business.slug)
   // The owned business's mock-store page is a stale duplicate of the live
   // record (`state`); once its slug changes the old slug must 404, so that page
   // is excluded from the "other demo businesses" public fallback.
@@ -774,7 +912,12 @@ export function installBusinessApiStub(
   // Prompt 51 Telegram: the double models the real connection life-cycle — a
   // connect issues a one-time deep link and the connection is considered linked
   // afterwards, and an already-linked connect answers `{ status: 'connected' }`.
-  let ownerTelegramConnected = options.ownerTelegramConnected ?? false
+  const ownerTelegramByBusinessId = new Map<string, boolean>(
+    ownedBusinessStates.map((business, index) => [
+      business.id,
+      index === 0 ? Boolean(options.ownerTelegramConnected) : false,
+    ]),
+  )
   const originalFetch = globalThis.fetch
 
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -828,15 +971,115 @@ export function installBusinessApiStub(
       const rest = segments.slice(2)
       if (rest[0] === 'owner' && rest[1] === 'businesses') {
         if (!rest[2]) {
-          if (method === 'GET') return json([{ ...state }])
+          if (method === 'GET') return json(ownedBusinessStates.map(cloneOwnerBusiness))
+          if (method === 'POST') {
+            const input = (body ?? {}) as Record<string, unknown>
+            const fields: Record<string, string> = {}
+            const slug = typeof input.slug === 'string' ? input.slug.trim() : ''
+            const name = typeof input.name === 'string' ? input.name.trim() : ''
+            if (!slug) fields.slug = 'A public slug is required.'
+            if (!name) fields.name = 'A business name is required.'
+            if (slug && takenSlugs.has(slug)) fields.slug = 'This public slug is already in use.'
+            if (Object.keys(fields).length > 0) return validationEnvelope(fields)
+            const categoryCode =
+              input.categoryCode === 'OTHER' ? 'OTHER' : ('SALON_AND_BARBER' as const)
+            const created: OwnerBusinessView = {
+              id: `owner-created-${++businessSerial}`,
+              slug,
+              name,
+              category: {
+                code: categoryCode,
+                label: categoryCode === 'OTHER' ? 'Other' : 'Salon & Barber',
+              },
+              description: typeof input.description === 'string' ? input.description : null,
+              address: typeof input.address === 'string' ? input.address : null,
+              phonePublic: typeof input.phonePublic === 'string' ? input.phonePublic : null,
+              coordinates: { latitude: null, longitude: null },
+              isDeactivated: false,
+              isPaused: false,
+              pauseMessage: null,
+              reopenAt: null,
+              bookingIntervalMinutes:
+                typeof input.bookingIntervalMinutes === 'number' &&
+                Number.isFinite(input.bookingIntervalMinutes)
+                  ? input.bookingIntervalMinutes
+                  : 60,
+              prepaymentMode: 'NONE',
+              prepaymentPercent: null,
+              prepaymentFixedMinor: null,
+              createdAt: new Date().toISOString(),
+            }
+            ownedBusinessStates.push(created)
+            servicesByBusinessId.set(created.id, [])
+            subscriptionsByBusinessId.set(created.id, newOwnerSubscriptionState())
+            ownerTelegramByBusinessId.set(created.id, false)
+            takenSlugs.add(created.slug)
+            return json(cloneOwnerBusiness(created))
+          }
           return envelope(404, 'NOT_FOUND', 'Not found', 'No fetch stub for this owner business route.')
         }
-        if (rest[2] !== OWNER_ID) {
+        const routeState = ownedBusinessStates.find((business) => business.id === rest[2])
+        if (!routeState) {
           return envelope(404, 'NOT_FOUND', 'Not found', 'Business not found.')
         }
         const action = rest[3]
-        if (!action && method === 'GET') return json({ ...state })
+        if (!action && method === 'GET') return json(cloneOwnerBusiness(routeState))
+        if (action === 'subscription') {
+          const subscription = subscriptionsByBusinessId.get(routeState.id)
+          if (!subscription) {
+            return envelope(404, 'NOT_FOUND', 'Not found', 'Subscription not found.')
+          }
+          if (!rest[4] && method === 'GET') return json(cloneSubscriptionState(subscription))
+          if (rest[4] === 'proof' && method === 'POST') {
+            const submissionKey =
+              typeof (body as { submissionKey?: unknown } | undefined)?.submissionKey === 'string'
+                ? (body as { submissionKey: string }).submissionKey.trim()
+                : ''
+            if (!submissionKey || submissionKey.length > 128) {
+              return validationEnvelope({ submissionKey: 'A submission key of at most 128 characters is required.' })
+            }
+            const existing = subscriptionProofByKey.get(submissionKey)
+            if (existing) {
+              if (existing.businessId !== routeState.id) {
+                return envelope(
+                  409,
+                  'IDEMPOTENCY_CONFLICT',
+                  'Conflict',
+                  'This submission key was already used for another business.',
+                )
+              }
+              return json({ ...existing.proof })
+            }
+            if (!proofFile) {
+              return validationEnvelope({ proof: 'A payment proof file is required.' })
+            }
+            if (proofFile.size > PROOF_MAX_BYTES) {
+              return envelope(413, 'PROOF_FILE_TOO_LARGE', 'File too large', 'Payment proof must be 5 MB or smaller.')
+            }
+            if (!PROOF_MIME_TYPES.has(proofFile.type)) {
+              return envelope(415, 'PROOF_FILE_TYPE_INVALID', 'Unsupported file', 'Use a supported image or PDF file.')
+            }
+            const requestedAt = new Date().toISOString()
+            const proof = {
+              id: `sub-proof-${++subscriptionProofSerial}`,
+              reviewState: 'PENDING' as const,
+              requestedAt,
+              reviewedBy: null,
+              rejectionReason: null,
+              approvedUntil: null,
+              createdAt: requestedAt,
+            }
+            subscriptionProofByKey.set(submissionKey, { businessId: routeState.id, proof })
+            subscription.proofs = [proof, ...subscription.proofs]
+            return json({ ...proof })
+          }
+          return envelope(404, 'NOT_FOUND', 'Not found', 'No fetch stub for this subscription route.')
+        }
         if (action === 'bookings') {
+          if (routeState.id !== state.id) {
+            if (method === 'GET' && !rest[4]) return json([])
+            return envelope(404, 'NOT_FOUND', 'Not found', 'Booking not found.')
+          }
           const forced = options.failOwnerBookingRequest?.({ method, path: pathname })
           if (forced) return forced
           const routeBookingId = rest[4]
@@ -958,42 +1201,43 @@ export function installBusinessApiStub(
         }
         if (!action && method === 'PATCH') {
           const patch = (body ?? {}) as Record<string, unknown>
-          if (typeof patch.name === 'string') state.name = patch.name
-          if (typeof patch.description === 'string') state.description = patch.description
-          if (typeof patch.address === 'string') state.address = patch.address
-          if (typeof patch.phonePublic === 'string') state.phonePublic = patch.phonePublic
+          if (typeof patch.name === 'string') routeState.name = patch.name
+          if (typeof patch.description === 'string') routeState.description = patch.description
+          if (typeof patch.address === 'string') routeState.address = patch.address
+          if (typeof patch.phonePublic === 'string') routeState.phonePublic = patch.phonePublic
           if (patch.categoryCode === 'SALON_AND_BARBER' || patch.categoryCode === 'OTHER') {
-            state.category = {
+            routeState.category = {
               code: patch.categoryCode,
               label: patch.categoryCode === 'SALON_AND_BARBER' ? 'Salon & Barber' : 'Other',
             }
           }
           if (typeof patch.latitude === 'number') {
-            state.coordinates = { ...state.coordinates, latitude: patch.latitude }
+            routeState.coordinates = { ...routeState.coordinates, latitude: patch.latitude }
           }
           if (typeof patch.longitude === 'number') {
-            state.coordinates = { ...state.coordinates, longitude: patch.longitude }
+            routeState.coordinates = { ...routeState.coordinates, longitude: patch.longitude }
           }
-          return json({ ...state })
+          return json(cloneOwnerBusiness(routeState))
         }
         if (action === 'slug' && method === 'PATCH') {
           const publicSlug = (body as { publicSlug?: unknown } | undefined)?.publicSlug
           if (typeof publicSlug !== 'string' || takenSlugs.has(publicSlug)) {
             return envelope(409, 'CONFLICT', 'Conflict', 'This public slug is already in use.')
           }
-          state.slug = publicSlug
-          return json({ ...state })
+          routeState.slug = publicSlug
+          return json(cloneOwnerBusiness(routeState))
         }
         if (action === 'telegram') {
           const sub = rest[4]
+          const connected = ownerTelegramByBusinessId.get(routeState.id) ?? false
           if (sub === 'status' && method === 'GET') {
-            return json({ connected: ownerTelegramConnected })
+            return json({ connected })
           }
           if (sub === 'connect' && method === 'POST') {
-            if (ownerTelegramConnected) {
+            if (connected) {
               return json({ status: 'connected', deepLink: null, expiresInMs: null })
             }
-            ownerTelegramConnected = true
+            ownerTelegramByBusinessId.set(routeState.id, true)
             return json({
               status: 'ready',
               deepLink: 'https://t.me/werefademo?start=owner-connect-test',
@@ -1004,31 +1248,32 @@ export function installBusinessApiStub(
         }
         if (action === 'pause' && method === 'POST') {
           const pause = (body ?? {}) as { pauseMessage?: unknown; reopenAt?: unknown }
-          state.isPaused = true
-          state.pauseMessage = typeof pause.pauseMessage === 'string' ? pause.pauseMessage : null
-          state.reopenAt = typeof pause.reopenAt === 'string' ? pause.reopenAt : null
-          return json({ ...state })
+          routeState.isPaused = true
+          routeState.pauseMessage = typeof pause.pauseMessage === 'string' ? pause.pauseMessage : null
+          routeState.reopenAt = typeof pause.reopenAt === 'string' ? pause.reopenAt : null
+          return json(cloneOwnerBusiness(routeState))
         }
         if (action === 'resume' && method === 'POST') {
-          state.isPaused = false
-          state.pauseMessage = null
-          state.reopenAt = null
-          return json({ ...state })
+          routeState.isPaused = false
+          routeState.pauseMessage = null
+          routeState.reopenAt = null
+          return json(cloneOwnerBusiness(routeState))
         }
         if (action === 'deactivate' && method === 'POST') {
-          state.isDeactivated = true
-          return json({ ...state })
+          routeState.isDeactivated = true
+          return json(cloneOwnerBusiness(routeState))
         }
         if (action === 'reactivate' && method === 'POST') {
-          state.isDeactivated = false
-          return json({ ...state })
+          routeState.isDeactivated = false
+          return json(cloneOwnerBusiness(routeState))
         }
 
         if (action === 'services') {
+          const routeServices = servicesByBusinessId.get(routeState.id) ?? []
           const serviceId = rest[4]
           if (!serviceId) {
             if (method === 'GET') {
-              return json(servicesState.map((s) => ({ ...ownerServiceFromStore(s) })))
+              return json(routeServices.map(cloneServiceState))
             }
             if (method === 'POST') {
               const fields = validateServiceInput(body)
@@ -1037,7 +1282,7 @@ export function installBusinessApiStub(
               }
               const input = body as { name: string; basePriceMinor: number; baseDurationMinutes: number }
               const created: OwnerServiceView = {
-                id: `svc-${servicesState.length + 1}`,
+                id: `${routeState.id}-svc-${routeServices.length + 1}`,
                 name: input.name.trim(),
                 basePriceMinor: input.basePriceMinor,
                 baseDurationMinutes: input.baseDurationMinutes,
@@ -1045,12 +1290,12 @@ export function installBusinessApiStub(
                 variations: [],
                 addOns: [],
               }
-              servicesState.push(created)
-              return json(ownerServiceFromStore(created))
+              routeServices.push(created)
+              return json(cloneServiceState(created))
             }
             return envelope(404, 'NOT_FOUND', 'Not found', 'No fetch stub for this services route.')
           }
-          const svc = servicesState.find((s) => s.id === serviceId)
+          const svc = routeServices.find((s) => s.id === serviceId)
           if (!svc) {
             return envelope(404, 'NOT_FOUND', 'Not found', 'Service not found.')
           }
@@ -1062,15 +1307,15 @@ export function installBusinessApiStub(
             if (typeof input.baseDurationMinutes === 'number') {
               svc.baseDurationMinutes = input.baseDurationMinutes
             }
-            return json(ownerServiceFromStore(svc))
+            return json(cloneServiceState(svc))
           }
           if (sub === 'deactivate' && method === 'POST') {
             svc.isActive = false
-            return json(ownerServiceFromStore(svc))
+            return json(cloneServiceState(svc))
           }
           if (sub === 'reactivate' && method === 'POST') {
             svc.isActive = true
-            return json(ownerServiceFromStore(svc))
+            return json(cloneServiceState(svc))
           }
           if (sub === 'variations' && method === 'POST') {
             const fields = validateVariantInput(body)
@@ -1102,13 +1347,18 @@ export function installBusinessApiStub(
         if (action === 'settings' && method === 'PATCH') {
           const input = (body ?? {}) as { bookingIntervalMinutes?: unknown }
           if (typeof input.bookingIntervalMinutes === 'number' && Number.isFinite(input.bookingIntervalMinutes)) {
-            state.bookingIntervalMinutes = input.bookingIntervalMinutes
-            saveBookingInterval(storeSlug, input.bookingIntervalMinutes)
+            routeState.bookingIntervalMinutes = input.bookingIntervalMinutes
+            if (routeState.id === state.id) {
+              saveBookingInterval(storeSlug, input.bookingIntervalMinutes)
+            }
           }
-          return json({ ...state })
+          return json(cloneOwnerBusiness(routeState))
         }
 
         if (action === 'schedule') {
+          if (routeState.id !== state.id) {
+            return envelope(404, 'NOT_FOUND', 'Not found', 'Schedule not found.')
+          }
           const sub = rest[4]
           if (sub === 'current' && method === 'GET') {
             return json(currentScheduleView(storeSlug))
@@ -1201,6 +1451,9 @@ export function installBusinessApiStub(
           if (enrichServices.length === 0) {
             return envelope(404, 'NOT_FOUND', 'Not found', 'Business not found.')
           }
+          if (bookingsClosed) {
+            return envelope(409, 'BUSINESS_PAUSED', 'Business paused', 'This business is not accepting bookings.')
+          }
           const wireSelections: AvailabilitySelection[] = selections.map((sel) => {
             const s = sel as Record<string, unknown>
             return {
@@ -1248,7 +1501,7 @@ export function installBusinessApiStub(
           const bizSlug = state.slug === slug ? storeSlug : slug
           const business = state.slug === slug ? getBusiness(storeSlug) : getBusiness(slug)
 
-          const race = mockRaceSlot(bizSlug)
+          const race = options.raceStart ?? mockRaceSlot(bizSlug)
           if (race && race.date === date && race.time === time) {
             return envelope(409, 'SLOT_UNAVAILABLE', 'Conflict', 'The requested time is no longer available.')
           }
@@ -1458,8 +1711,14 @@ export function installBusinessApiStub(
             return json(publicScheduleViewFor(rest[2]))
           }
           if (rest[3] === 'services') {
-            if (state.slug === rest[2]) {
-              return json(servicesState.filter((s) => s.isActive).map((s) => publicServiceFromOwner(s)))
+            const ownedServiceState = ownedBusinessStates.find((business) => business.slug === rest[2])
+            if (ownedServiceState) {
+              const ownedServices = servicesByBusinessId.get(ownedServiceState.id) ?? []
+              return json(
+                ownedServices
+                  .filter((service) => service.isActive)
+                  .map((service) => publicServiceFromOwner(service)),
+              )
             }
             if (rest[2] === initialOwnedSlug) {
               return envelope(404, 'NOT_FOUND', 'Not found', 'Business not found.')
@@ -1470,7 +1729,10 @@ export function installBusinessApiStub(
             }
             return json(storeServices.filter((s) => s.isActive).map(ownerServiceFromStore).map((s) => publicServiceFromOwner(s)))
           }
-          if (state.slug === rest[2]) return json(publicViewOf(state))
+          const ownedPublicBusiness = ownedBusinessStates.find(
+            (business) => business.slug === rest[2],
+          )
+          if (ownedPublicBusiness) return json(publicViewOf(ownedPublicBusiness))
           const other =
             rest[2] === initialOwnedSlug ? undefined : publicViewFromStore(rest[2])
           if (other) return json(other)
@@ -1484,6 +1746,9 @@ export function installBusinessApiStub(
             state.slug !== rest[2]
           ) {
             return envelope(404, 'NOT_FOUND', 'Not found', 'Business not found.')
+          }
+          if (options.failPublicTelegramConnect) {
+            return envelope(500, 'SERVER_ERROR', 'Server error', 'Telegram connection failed.')
           }
           const phone = String((body as { phone?: unknown } | undefined)?.phone ?? '')
           if (!phone.trim()) {
@@ -1536,6 +1801,17 @@ export function installBusinessApiStub(
             return validationEnvelope(totals.fields ?? {})
           }
           const date = String(parsed.date)
+          // The real availability service returns no slots for a deactivated or
+          // subscription-expired business (page stays visible, bookings closed).
+          if (bookingsClosed || state.isPaused) {
+            return json({
+              date,
+              slots: [],
+              computedDurationMinutes: totals.durationMinutes,
+              computedTotalPriceMinor: totals.totalPriceMinor,
+              requiredPrepaidMinor: 0,
+            })
+          }
           const times = computeAvailableTimes(
             business,
             date,
@@ -1547,6 +1823,7 @@ export function installBusinessApiStub(
             slots: times.map((time) => slotInstants(date, time, totals.durationMinutes)),
             computedDurationMinutes: totals.durationMinutes,
             computedTotalPriceMinor: totals.totalPriceMinor,
+            requiredPrepaidMinor: prepaymentAmount(business.prepayment, totals.totalPriceMinor) ?? 0,
           })
         }
 

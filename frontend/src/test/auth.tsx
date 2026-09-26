@@ -5,6 +5,7 @@ import type { AuthPrincipal } from '@/api/types'
 import { AuthProvider } from '@/features/auth/AuthProvider'
 import type { AuthState } from '@/features/auth/auth-context'
 import { appRoutes } from '@/routes'
+import { ownerBusinessStorageKey } from '@/features/owner-portal/state/OwnerBusinessContext'
 import {
   installBusinessApiStub,
   type BusinessApiStub,
@@ -24,6 +25,12 @@ export const ADMIN_PRINCIPAL: AuthPrincipal = {
   email: 'admin@werefa.test',
 }
 
+export const SUPER_ADMIN_PRINCIPAL: AuthPrincipal = {
+  id: 'super-admin-test',
+  role: 'SUPER_ADMIN',
+  email: 'superadmin@werefa.test',
+}
+
 export const AUTHENTICATED_OWNER: AuthState = {
   status: 'authenticated',
   principal: OWNER_PRINCIPAL,
@@ -33,6 +40,12 @@ export const AUTHENTICATED_OWNER: AuthState = {
 export const AUTHENTICATED_ADMIN: AuthState = {
   status: 'authenticated',
   principal: ADMIN_PRINCIPAL,
+  error: null,
+}
+
+export const AUTHENTICATED_SUPER_ADMIN: AuthState = {
+  status: 'authenticated',
+  principal: SUPER_ADMIN_PRINCIPAL,
   error: null,
 }
 
@@ -47,6 +60,7 @@ export interface RenderAppOptions {
   auth?: AuthState
   /** Extra behavior for the stateful business API test double. */
   businessApi?: BusinessApiStubOptions
+  initialSelectedBusinessId?: string
 }
 
 const cleanupStubs: Array<() => void> = []
@@ -73,9 +87,17 @@ export function renderAppAt(
 } {
   const stub = installBusinessApiStub(undefined, options.businessApi)
   cleanupStubs.push(stub.restore)
+  const auth = options.auth ?? AUTHENTICATED_OWNER
+  window.localStorage.clear()
+  if (options.initialSelectedBusinessId && auth.principal?.role === 'OWNER') {
+    window.localStorage.setItem(
+      ownerBusinessStorageKey(auth.principal.id),
+      options.initialSelectedBusinessId,
+    )
+  }
   const router = createMemoryRouter(appRoutes, { initialEntries: [path] })
   const result = render(
-    <AuthProvider initialState={options.auth ?? AUTHENTICATED_OWNER}>
+    <AuthProvider initialState={auth}>
       <RouterProvider router={router} />
     </AuthProvider>,
   )

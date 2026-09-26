@@ -1,10 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import type { CSSProperties } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import type {
-  BusinessPage,
-  CustomerBookingStatusEntry,
-} from '@/types/models'
+import type { BusinessDetails, CustomerBookingStatusEntry } from '@/types/models'
 import { getPublicBusiness, isNotFoundError } from '@/api/business'
 import { getCustomerBookingStatus } from '@/api/booking'
 import {
@@ -12,8 +9,7 @@ import {
   telegramConnectedFromView,
 } from '@/api/booking.mapper'
 import { hybridizePublicBusiness } from '@/api/business.mapper'
-import { mockApi } from '@/mock/api'
-import { PRIMARY_BUSINESS_SLUG } from '@/mock/data'
+import { SITE_HOME_SLUG } from '@/config/site'
 import { isValidPhone } from '@/lib/validation'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
@@ -24,7 +20,7 @@ import { ResubmissionPanel } from '@/features/customer-status/ResubmissionPanel'
 
 type LoadState =
   | { status: 'loading' }
-  | { status: 'ready'; page: BusinessPage }
+  | { status: 'ready'; business: BusinessDetails }
   | { status: 'notfound' }
   | { status: 'error' }
 
@@ -59,18 +55,9 @@ export function BookingStatusPage() {
     setPhoneError(null)
     void (async () => {
       try {
-        const [view, mockPage] = await Promise.all([
-          getPublicBusiness(slug ?? ''),
-          mockApi.getBusinessPage(slug ?? ''),
-        ])
+        const view = await getPublicBusiness(slug ?? '')
         if (cancelled) return
-        setLoad({
-          status: 'ready',
-          page: {
-            business: hybridizePublicBusiness(view, mockPage?.business),
-            services: mockPage?.services ?? [],
-          },
-        })
+        setLoad({ status: 'ready', business: hybridizePublicBusiness(view) })
       } catch (error) {
         if (cancelled) return
         setLoad(isNotFoundError(error) ? { status: 'notfound' } : { status: 'error' })
@@ -83,7 +70,7 @@ export function BookingStatusPage() {
 
   useEffect(() => {
     if (load.status === 'ready') {
-      document.title = `${load.page.business.name} — Check my booking — Werefa`
+      document.title = `${load.business.name} — Check my booking — Werefa`
     } else {
       document.title = 'Werefa'
     }
@@ -133,7 +120,7 @@ export function BookingStatusPage() {
       className="page-root"
       style={
         load.status === 'ready'
-          ? ({ '--accent': load.page.business.accentColor } as CSSProperties)
+          ? ({ '--accent': load.business.accentColor } as CSSProperties)
           : undefined
       }
     >
@@ -155,7 +142,7 @@ export function BookingStatusPage() {
               given, or ask the business for its correct booking link.
             </Alert>
             <div style={{ marginTop: 'var(--space-4)' }}>
-              <Link className="btn btn--outline" to={`/p/${PRIMARY_BUSINESS_SLUG}`}>
+              <Link className="btn btn--outline" to={`/p/${SITE_HOME_SLUG}`}>
                 Go to the demo business
               </Link>
             </div>
@@ -174,7 +161,7 @@ export function BookingStatusPage() {
           <div className="container" style={{ paddingBlock: 'var(--space-6)' }}>
             <div className="status-page__header">
               <nav aria-label="Breadcrumb" className="booking-breadcrumb">
-                <Link to={`/p/${load.page.business.slug}`}>{load.page.business.name}</Link>
+                <Link to={`/p/${load.business.slug}`}>{load.business.name}</Link>
                 <span aria-hidden="true">/</span>
                 <span>Check my booking</span>
               </nav>

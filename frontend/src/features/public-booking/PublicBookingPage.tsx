@@ -7,8 +7,7 @@ import { getPublicServices } from '@/api/catalog'
 import { getPublicSchedule } from '@/api/schedule'
 import { availabilityScheduleFromView } from '@/api/schedule.mapper'
 import { hybridizePublicBusiness } from '@/api/business.mapper'
-import { mockApi } from '@/mock/api'
-import { PRIMARY_BUSINESS_SLUG } from '@/mock/data'
+import { SITE_HOME_SLUG } from '@/config/site'
 import { Alert } from '@/components/ui/Alert'
 import { Spinner } from '@/components/ui/Spinner'
 import { BusinessHero } from '@/features/public-booking/components/BusinessHero'
@@ -31,19 +30,16 @@ export function PublicBookingPage() {
     void (async () => {
       // The backend is authoritative for existence, profile, pause state,
       // schedule and the active service catalog (REQ-079 hides deactivated
-      // services). The availability fixture still reads the legacy
-      // `BusinessDetails` schedule fields, so the real public schedule is
-      // derived into them; the cosmetic profile fields the evolved backend
-      // does not persist yet stay on the mock seam.
+      // services). Availability is fetched per date by the wizard's real
+      // availability clients; the public schedule feeds the page frame.
       try {
-        const [view, servicesView, scheduleView, mockPage] = await Promise.all([
+        const [view, servicesView, scheduleView] = await Promise.all([
           getPublicBusiness(slug ?? ''),
           getPublicServices(slug ?? ''),
           getPublicSchedule(slug ?? ''),
-          mockApi.getBusinessPage(slug ?? ''),
         ])
         if (cancelled) return
-        const business = hybridizePublicBusiness(view, mockPage?.business)
+        const business = hybridizePublicBusiness(view)
         business.bookingIntervalMinutes = view.bookingIntervalMinutes
         const availability = availabilityScheduleFromView(scheduleView, {
           intervalMinutes: view.bookingIntervalMinutes,
@@ -108,7 +104,7 @@ export function PublicBookingPage() {
               given, or ask the business for its correct booking link.
             </Alert>
             <div style={{ marginTop: 'var(--space-4)' }}>
-              <Link className="btn btn--outline" to={`/p/${PRIMARY_BUSINESS_SLUG}`}>
+              <Link className="btn btn--outline" to={`/p/${SITE_HOME_SLUG}`}>
                 Go to the demo business
               </Link>
             </div>

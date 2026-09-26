@@ -2,6 +2,7 @@ import { ApiError, isApiError } from './errors'
 import { apiRequest } from './http'
 import type {
   ChangePublicSlugInput,
+  CreateOwnedBusinessInput,
   OwnerBusinessView,
   PauseBusinessInput,
   PublicBusinessView,
@@ -50,6 +51,12 @@ export function changeOwnedBusinessSlug(businessId: string, publicSlug: string):
   }).then(({ data }) => data)
 }
 
+export function createOwnedBusiness(input: CreateOwnedBusinessInput): Promise<OwnerBusinessView> {
+  return apiRequest<OwnerBusinessView>(OWNER_BUSINESSES, {
+    method: 'POST',
+    body: input,
+  }).then(({ data }) => data)
+}
 export function pauseOwnedBusiness(
   businessId: string,
   input: PauseBusinessInput,

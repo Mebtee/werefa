@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   changeOwnedBusinessSlug,
+  createOwnedBusiness,
   getOwnedBusiness,
   getPublicBusiness,
   getPrimaryOwnedBusiness,
@@ -261,5 +262,36 @@ describe('primary owned business cache', () => {
     const thrown = await loadPrimaryOwnedBusiness().catch((e: unknown) => e)
     expect(isApiError(thrown)).toBe(true)
     expect((thrown as ApiError).kind).toBe('not-found')
+  })
+})
+
+describe("createOwnedBusiness (Prompt 54)", () => {
+  const INPUT = {
+    slug: "addis-beauty-lounge",
+    name: "Addis Beauty Lounge",
+    categoryCode: "SALON_AND_BARBER" as const,
+    bookingIntervalMinutes: 60,
+  }
+
+  it("POSTs to /owner/businesses with the allowlisted category and returns the created view", async () => {
+    const calls = stubFetch((url, init) => {
+      expect(url).toBe(`${BASE}/owner/businesses`)
+      expect(init?.method).toBe("POST")
+      const body = JSON.parse(String(init?.body))
+      expect(body.categoryCode).toBe("SALON_AND_BARBER")
+      expect(body).not.toHaveProperty("ownerId")
+      expect(body).not.toHaveProperty("businessId")
+      return jsonResponse(OWNER_VIEW, 201)
+    })
+    const result = await createOwnedBusiness(INPUT)
+    expect(result.slug).toBe(OWNER_VIEW.slug)
+    expect(calls).toHaveLength(1)
+  })
+
+  it("surfaces the NOT_FOUND architecture envelope as an ApiError", async () => {
+    stubFetch(() => errorResponse(404, "NOT_FOUND", "Not found"))
+    const thrown = await createOwnedBusiness(INPUT).catch((e: unknown) => e)
+    expect(isApiError(thrown)).toBe(true)
+    expect((thrown as ApiError).kind).toBe("not-found")
   })
 })

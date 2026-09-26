@@ -1,21 +1,31 @@
 import type { RouteObject } from 'react-router-dom'
 import { createBrowserRouter, Navigate } from 'react-router-dom'
-import { PRIMARY_BUSINESS_SLUG } from '@/mock/data'
+import { SITE_HOME_SLUG } from '@/config/site'
 import { PublicBookingPage } from '@/pages/PublicBookingPage'
 import { BookingStatusPage } from '@/pages/BookingStatusPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { LoginPage } from '@/features/auth/LoginPage'
+import { RegisterPage } from '@/features/auth/RegisterPage'
 import { RequireOwner } from '@/features/auth/RequireOwner'
 import { RequireAdmin } from '@/features/auth/RequireAdmin'
+import { RequireSuperAdmin } from '@/features/auth/RequireSuperAdmin'
+import { AdminLayout } from '@/features/admin/AdminLayout'
+import { AdminDashboardPage } from '@/features/admin/AdminDashboardPage'
+import { AdminAccountsPage } from '@/features/admin/AdminAccountsPage'
+import { SecurityHistoryPage } from '@/features/admin/SecurityHistoryPage'
+import { BookingHistoryReportPage } from '@/features/admin/BookingHistoryReportPage'
+import { RecoveryPage } from '@/features/admin/RecoveryPage'
 import { SubscriptionReviewPage } from '@/features/admin/SubscriptionReviewPage'
 import { OwnerLayoutApp } from '@/features/owner-portal/components/OwnerLayout'
 import { DashboardPage } from '@/features/owner-portal/pages/DashboardPage'
 import { BusinessProfilePage } from '@/features/owner-portal/pages/BusinessProfilePage'
+import { CreateBusinessPage } from '@/features/owner-portal/pages/CreateBusinessPage'
 import { ServicesPage } from '@/features/owner-portal/pages/ServicesPage'
 import { ServiceEditorPage } from '@/features/owner-portal/pages/ServiceEditorPage'
 import { SchedulePage } from '@/features/owner-portal/pages/SchedulePage'
 import { BookingsPage } from '@/features/owner-portal/pages/BookingsPage'
 import { BookingDetailPage } from '@/features/owner-portal/pages/BookingDetailPage'
+import SubscriptionPage from '@/features/owner-portal/pages/SubscriptionPage'
 
 /**
  * Route tree.
@@ -23,15 +33,15 @@ import { BookingDetailPage } from '@/features/owner-portal/pages/BookingDetailPa
  * Public surface (this phase): the business page lives at /p/:slug. Customers
  * remain unauthenticated (REQ-040).
  * The owner surface (/owner/*) requires a real backend Owner session (Prompt
- * 44): unauthenticated visitors are redirected to /owner/login. The admin
- * subscription review workbench (/admin/subscriptions, Prompt 52) requires a
- * real Admin/Super Admin session (REQ-137). Super-admin management surfaces
- * remain reserved for later phases.
+ * 44): unauthenticated visitors are redirected to /owner/login. The platform
+ * administration surface (/admin/*, Prompt 53) requires a real Admin/Super
+ * Admin session; Super-Admin-only sections are additionally guarded (REQ-137,
+ * REQ-202/203/205, REQ-217/219/220, REQ-198–200).
  */
 export const appRoutes: RouteObject[] = [
   {
     path: '/',
-    element: <Navigate to={`/p/${PRIMARY_BUSINESS_SLUG}`} replace />,
+    element: <Navigate to={`/p/${SITE_HOME_SLUG}`} replace />,
   },
   {
     path: '/p/:slug',
@@ -46,6 +56,10 @@ export const appRoutes: RouteObject[] = [
     element: <LoginPage />,
   },
   {
+    path: '/owner/register',
+    element: <RegisterPage />,
+  },
+  {
     path: '/owner',
     element: (
       <RequireOwner>
@@ -54,6 +68,7 @@ export const appRoutes: RouteObject[] = [
     ),
     children: [
       { index: true, element: <DashboardPage /> },
+      { path: 'business/new', element: <CreateBusinessPage /> },
       { path: 'business', element: <BusinessProfilePage /> },
       { path: 'services', element: <ServicesPage /> },
       { path: 'services/new', element: <ServiceEditorPage /> },
@@ -61,15 +76,45 @@ export const appRoutes: RouteObject[] = [
       { path: 'schedule', element: <SchedulePage /> },
       { path: 'bookings', element: <BookingsPage /> },
       { path: 'bookings/:bookingId', element: <BookingDetailPage /> },
+      { path: 'subscription', element: <SubscriptionPage /> },
     ],
   },
   {
-    path: '/admin/subscriptions',
+    path: '/admin',
     element: (
       <RequireAdmin>
-        <SubscriptionReviewPage />
+        <AdminLayout />
       </RequireAdmin>
     ),
+    children: [
+      { index: true, element: <AdminDashboardPage /> },
+      { path: 'subscriptions', element: <SubscriptionReviewPage /> },
+      {
+        path: 'admins',
+        element: (
+          <RequireSuperAdmin>
+            <AdminAccountsPage />
+          </RequireSuperAdmin>
+        ),
+      },
+      { path: 'security', element: <SecurityHistoryPage /> },
+      {
+        path: 'reports',
+        element: (
+          <RequireSuperAdmin>
+            <BookingHistoryReportPage />
+          </RequireSuperAdmin>
+        ),
+      },
+      {
+        path: 'recovery',
+        element: (
+          <RequireSuperAdmin>
+            <RecoveryPage />
+          </RequireSuperAdmin>
+        ),
+      },
+    ],
   },
   {
     path: '*',

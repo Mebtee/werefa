@@ -2,11 +2,12 @@ import type {
   BusinessDetails,
   CustomerDetails,
   DateString,
+  Money,
   Service,
   ServiceSelection,
   TimeOfDay,
 } from '@/types/models'
-import { buildLineItems, formatMoney, prepaymentAmount, totalPrice } from '@/lib/format'
+import { formatMoney } from '@/lib/format'
 import { BookingSummary } from '@/features/public-booking/components/BookingSummary'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
@@ -19,6 +20,8 @@ interface ReviewStepProps {
   date: DateString | null
   time: TimeOfDay | null
   customer: CustomerDetails
+  /** Deposit due (minor), from the backend availability view (REQ-110/111). */
+  depositMinor: Money
   goTo: (step: number) => void
   submit: () => void
   submitting: boolean
@@ -31,14 +34,12 @@ export function ReviewStep({
   date,
   time,
   customer,
+  depositMinor,
   goTo,
   submit,
   submitting,
 }: ReviewStepProps) {
-  const total = totalPrice(buildLineItems(services, selections))
-  const config = business.prepayment
-  const deposit =
-    config.mode === 'none' ? null : prepaymentAmount(config, total)
+  const deposit = depositMinor > 0 ? depositMinor : null
 
   return (
     <>
@@ -60,9 +61,7 @@ export function ReviewStep({
       />
 
       {deposit !== null && (
-        <Alert tone="info" title={business.prepayment.mode === 'percentage'
-          ? `${business.prepayment.value}% deposit required`
-          : 'Deposit required'}>
+        <Alert tone="info" title="Deposit required">
           This business asks for a deposit of{' '}
           <strong>{formatMoney(deposit, business.currency)}</strong> before it
           can confirm the booking. You will pay it in the next step.
@@ -73,7 +72,7 @@ export function ReviewStep({
         <Button variant="outline" onClick={() => goTo(STEP_CUSTOMER)}>
           Back
         </Button>
-        {config.mode === 'none' ? (
+        {deposit === null ? (
           <Button variant="primary" onClick={submit} loading={submitting} disabled={submitting}>
             Confirm booking
           </Button>

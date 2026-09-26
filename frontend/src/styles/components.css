@@ -1016,6 +1016,65 @@ fieldset.option-group legend {
   flex-wrap: wrap;
 }
 
+.owner-business-switcher {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 180px;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.owner-business-switcher select {
+  min-height: 40px;
+  max-width: 240px;
+}
+
+.owner-business-picker {
+  max-width: 720px;
+  margin-inline: auto;
+}
+
+.owner-business-picker__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+}
+
+.owner-business-picker__option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  min-height: 88px;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.owner-business-picker__option:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.owner-business-picker__name {
+  font-weight: 700;
+}
+
+.owner-business-picker__meta {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.owner-subscription-warning {
+  margin-bottom: var(--space-4);
+}
+
 .owner-brand {
   display: inline-flex;
   align-items: center;
@@ -2714,11 +2773,13 @@ fieldset.option-group legend {
   }
 }
 
-/* ---------------------------------------------------------------------------
- * Subscription (Prompt 52): owner dashboard card + admin review queue.
- * Uses the existing design tokens; the backend response carries status chips
- * (TRIAL/TRIAL_GRACE/ACTIVE/PAID_GRACE/EXPIRED/NONE) and proof history.
- * ------------------------------------------------------------------------- */
+.subscription-card {
+  max-width: 820px;
+}
+
+.subscription-error {
+  color: var(--color-danger);
+}
 
 .subscription-status {
   display: flex;
@@ -2810,4 +2871,174 @@ fieldset.option-group legend {
   gap: var(--space-2);
   align-items: center;
   flex-wrap: wrap;
+}
+
+/* ---------------------------------------------------------------------------
+ * Platform administration (Prompt 53)
+ * ------------------------------------------------------------------------- */
+
+.admin-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.admin-header {
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.admin-header__inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-block: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.admin-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.admin-brand__mark {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+}
+
+.admin-brand__text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
+.admin-brand__name {
+  font-weight: 700;
+  font-size: var(--text-lg);
+}
+
+.admin-brand__sub {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.admin-nav ul {
+  list-style: none;
+  display: flex;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  flex-wrap: wrap;
+}
+
+.admin-nav__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  color: var(--color-text-muted);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.admin-nav__link:hover {
+  color: var(--color-text);
+  background: var(--color-surface-muted);
+}
+
+.admin-nav__link[aria-current="page"] {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.admin-session {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  flex-wrap: wrap;
+}
+
+.admin-session__user {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.admin-session__link {
+  text-decoration: none;
+  color: var(--accent-strong);
+  font-weight: 600;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.admin-session__link:hover {
+  text-decoration: underline;
+}
+
+.admin-main {
+  flex: 1;
+  padding-block: var(--space-6);
+}
+
+.admin-footer {
+  border-top: 1px solid var(--color-border);
+  padding-block: var(--space-5);
+  margin-top: var(--space-8);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.admin-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.admin-card__title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-lg);
+}
+
+.admin-card__title a {
+  color: var(--accent-strong);
+  text-decoration: none;
+}
+
+.admin-card__title a:hover {
+  text-decoration: underline;
+}
+
+.admin-card__body {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.admin-create,
+.admin-delete {
+  margin-bottom: var(--space-4);
+}
+
+.admin-list {
+  margin-top: var(--space-3);
+}
+
+.admin-event {
+  min-width: 0;
 }

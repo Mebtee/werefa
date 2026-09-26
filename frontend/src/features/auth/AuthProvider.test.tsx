@@ -17,7 +17,7 @@ afterEach(() => {
 })
 
 function AuthProbe() {
-  const { status, principal, error, login, logout } = useAuth()
+  const { status, principal, error, login, logout, register } = useAuth()
   return (
     <div>
       <span data-testid="status">{status}</span>
@@ -31,6 +31,11 @@ function AuthProbe() {
         login
       </button>
       <button onClick={() => void logout()}>logout</button>
+      <button
+        onClick={() => void register({ email: 'owner@werefa.test', password: 'secret' })}
+      >
+        register
+      </button>
       <button
         onClick={() => {
           void apiRequest('/owner/bookings').catch(() => undefined)
@@ -192,5 +197,28 @@ describe('AuthProvider', () => {
     await waitFor(() =>
       expect(screen.getByTestId('status')).toHaveTextContent('unauthenticated'),
     )
+  })
+
+  it('registers a new owner through POST /auth/register and auto-signs them in', async () => {
+    stub = installFetchStub([
+      {
+        method: 'POST',
+        path: '/auth/register',
+        status: 201,
+        body: { expiresAt: '2030-01-01T00:00:00.000Z', user: { id: 'owner-new', role: 'OWNER' } },
+      },
+    ])
+    render(
+      <AuthProvider initialState={UNAUTHENTICATED}>
+        <AuthProbe />
+      </AuthProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'register' }))
+    await waitFor(() =>
+      expect(screen.getByTestId('status')).toHaveTextContent('authenticated'),
+    )
+    expect(screen.getByTestId('email')).toHaveTextContent('owner@werefa.test')
+    expect(stub.calls.some((call) => call.url.includes('/auth/register'))).toBe(true)
   })
 })

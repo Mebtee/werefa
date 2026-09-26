@@ -5,6 +5,8 @@ import { LoadState } from '@/features/owner-portal/components/LoadState'
 import { ScheduleConflicts } from '@/features/owner-portal/components/ScheduleConflicts'
 import { ScheduleHistory } from '@/features/owner-portal/components/ScheduleHistory'
 import { toUserMessage } from '@/api/errors'
+import { downloadScheduleHistoryPdf } from '@/api/reports'
+import { saveBlob } from '@/lib/download'
 import {
   getOwnerSchedule,
   listOwnerScheduleConflicts,
@@ -62,6 +64,8 @@ export function SchedulePage() {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState(false)
   const [pausedPending, setPausedPending] = useState(false)
+  const [exportingPdf, setExportingPdf] = useState(false)
+  const [pdfError, setPdfError] = useState<string | null>(null)
 
   const [versions, setVersions] = useState<readonly ScheduleVersionHistoryEntry[]>([])
   const [openConflicts, setOpenConflicts] = useState<readonly ScheduleConflictItem[]>([])
@@ -338,6 +342,21 @@ export function SchedulePage() {
   const handleConflictsChanged = async () => {
     await Promise.all([loadConflicts(businessId), loadHistory(businessId)])
     await reload()
+  }
+
+  /** Real schedule-history PDF export of the owner's own business (REQ-170). */
+  const handleExportSchedulePdf = async () => {
+    if (!businessId || exportingPdf) return
+    setExportingPdf(true)
+    setPdfError(null)
+    try {
+      const { blob, fileName } = await downloadScheduleHistoryPdf(businessId, 'owner')
+      saveBlob(blob, fileName ?? 'schedule-history.pdf')
+    } catch (err) {
+      setPdfError(toUserMessage(err))
+    } finally {
+      setExportingPdf(false)
+    }
   }
 
   const discard = () => {
@@ -681,7 +700,16 @@ export function SchedulePage() {
       </div>
 
       <div style={{ marginTop: 'var(--space-4)' }}>
-        <ScheduleHistory versions={versions} />
+        {pdfError && (
+          <Alert tone="danger" title="The PDF export did not go through">
+            {pdfError}
+          </Alert>
+        )}
+        <ScheduleHistory
+          versions={versions}
+          onExportPdf={() => void handleExportSchedulePdf()}
+          exportingPdf={exportingPdf}
+        />
       </div>
     </>
   )

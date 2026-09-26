@@ -711,8 +711,14 @@ describe('schedule editor: blocked days & periods (REQ-084/085)', () => {
       })
     }
 
+    // The seed schedule may already carry a Monday block depending on the run
+    // date (it is anchored to `addDays(today, 4)`); scope the removal to the row
+    // this test added so the assertion stays date-independent.
+    const addedBlockRow = screen
+      .getByText('Blocked 09:30–10:30 on Monday')
+      .closest('.block-row') as HTMLElement
     await user.click(
-      screen.getByRole('button', {
+      within(addedBlockRow).getByRole('button', {
         name: 'Remove blocked period on Monday',
       }),
     )

@@ -32,6 +32,48 @@ export interface LoginRequest {
   password: string
 }
 
+/**
+ * `POST /api/v1/auth/register` body (Prompt 54; REQ-005/009/032). Owner
+ * self-service signup; the backend creates an unverified account
+ * (`isEmailVerified=false`, REQ-026 deferred) and auto-logs the caller in, so
+ * `register` resolves with the same login projection and the new session is
+ * immediately active. Ownership of any business is never part of this input —
+ * it is created afterwards through the owner onboarding slice.
+ */
+export interface RegisterRequest {
+  email: string
+  password: string
+}
+
+/**
+ * `POST /auth/register` body (Prompt 54; REQ-005/009/032). Owner
+ * self-service registration; the backend signs the new owner straight in
+ * (auto-login) with an account created `isEmailVerified=false` — verification
+ * is deferred (REQ-026–031) and never gates operation.
+ */
+export interface RegisterRequest {
+  email: string
+  password: string
+}
+
+/**
+ * `POST /api/v1/owner/businesses` body (Prompt 54; REQ-065/068/069/086/087).
+ * The category allowlist is enforced backend-side; SALON_AND_BARBER|OTHER are
+ * the only choices for this slice (REQ-061/063/223/224/236). Slug/name are
+ * required; every other field is optional and maps to the canonical business
+ * projection. Phone is mapped to `phonePublic` (REQ-213; no separate private
+ * field exists until contacts land).
+ */
+export interface CreateOwnedBusinessInput {
+  slug: string
+  name: string
+  categoryCode: BusinessCategoryCode
+  description?: string
+  address?: string
+  phonePublic?: string
+  bookingIntervalMinutes?: number
+}
+
 export interface ChangePasswordRequest {
   currentPassword: string
   newPassword: string
@@ -89,7 +131,7 @@ export interface PublicBusinessView {
   pauseMessage: string | null
   reopenAt: string | null
   bookingIntervalMinutes: number
-  branding: { logoUrl: null; coverUrl: null }
+  branding: { logoUrl: string | null; coverUrl: string | null }
 }
 
 /** `PATCH /api/v1/owner/businesses/:id` body (REQ-211 AC1). */
@@ -331,6 +373,12 @@ export interface PublicAvailabilityView {
   slots: PublicAvailabilitySlot[]
   computedDurationMinutes: number
   computedTotalPriceMinor: number
+  /**
+   * Deposit due for this selection per the business prepayment settings
+   * (REQ-110/111). 0 when no prepayment is required. The booking wizard shows
+   * its payment-proof step exactly when this is greater than 0.
+   */
+  requiredPrepaidMinor: number
 }
 
 // ---------------------------------------------------------------------------
@@ -422,8 +470,9 @@ export interface OwnerTelegramStatusView {
 // ---------------------------------------------------------------------------
 // REJECTED-BOOKING RESUBMISSION wire types (Prompt 50). Mirror the backend
 // contract; the backend remains authoritative. Codes are one-time, expiring and
-// phone-scoped (REQ-230); code DELIVERY is out of scope, so the frontend never
-// claims a code was "sent" — it only offers a code-input step.
+// phone-scoped (REQ-230); the backend delivers the code to the customer's
+// connected Telegram chat (Section 23.3), so the frontend never returns or
+// displays the code itself — it only offers a code-input step.
 // ---------------------------------------------------------------------------
 
 /** `POST /api/v1/customer/resubmission/request-code` body (JSON). */
@@ -442,7 +491,8 @@ export interface ResubmissionVerifyInput extends ResubmissionRequestInput {
 
 /**
  * `POST …/resubmission/request-code` response. The code itself is never
- * returned; only its expiry is disclosed (delivery is out of scope).
+ * returned; only its expiry is disclosed (the backend delivers it to the
+ * customer's connected Telegram chat; the frontend never sees the code).
  */
 export interface ResubmissionRequestCodeView {
   expiresAt: string
@@ -601,4 +651,75 @@ export interface AdminSubscriptionProofView extends SubscriptionProofView {
   businessId: string
   businessName: string
   ownerEmail: string
+}
+
+// ---------------------------------------------------------------------------
+// PLATFORM ADMINISTRATION wire types (Prompt 53; spec §20, §27.3,
+// REQ-191…206, REQ-217…221). Mirror the Prompt 43 backend views; the backend
+// remains authoritative. No password/recovery material is ever returned.
+// ---------------------------------------------------------------------------
+
+/** `GET /api/v1/admin/admins` item and `POST /api/v1/admin/admins` result (REQ-217). */
+export interface AdminUserView {
+  id: string
+  email: string
+  createdAt: string
+  isDeactivated: boolean
+  activeSessions: number
+}
+
+/** One security-history record (REQ-191/192/201/202/203). */
+export interface SecurityEventView {
+  id: string
+  /** Present only in the Super Admin platform-wide list (REQ-203). */
+  userId?: string | null
+  type: string
+  ip: string | null
+  device: string | null
+  browser: string | null
+  result: string
+  createdAt: string
+}
+
+/** One canonical booking-history row (REQ-182 fields; no reasons/notes, REQ-183). */
+export interface BookingHistoryRowView {
+  occurredAt: string
+  bookingId: number
+  customerName: string
+  businessName: string
+  fromStatus: string | null
+  toStatus: string
+  actorType: string
+}
+
+/** Super Admin booking status-history report (REQ-177/184…190). */
+export interface BookingHistoryReportView {
+  rows: BookingHistoryRowView[]
+  total: number
+  from: string
+  to: string
+  sortBy: string
+  sortDirection: string
+}
+
+export interface CreateAdminRequest {
+  email: string
+  password: string
+  recoveryEmail?: string
+}
+
+export interface ResetAdminPasswordRequest {
+  newPassword: string
+}
+
+/** `POST /api/v1/auth/recovery/request` body (REQ-198/199). */
+export interface RecoveryRequestInput {
+  email: string
+}
+
+/** `POST /api/v1/auth/recovery/confirm` body (REQ-200). */
+export interface RecoveryConfirmInput {
+  email: string
+  code: string
+  newPassword: string
 }

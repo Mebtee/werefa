@@ -7,6 +7,7 @@ import type {
 } from '@/types/models'
 import { formatBytes, formatMoney } from '@/lib/format'
 import { validateProofFile } from '@/lib/validation'
+import { PAYMENT_METHOD_FALLBACK } from '@/config/site'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/cn'
@@ -37,7 +38,13 @@ export function PaymentStep({
   const [proofError, setProofError] = useState<string | null>(null)
   const [touched, setTouched] = useState(false)
 
-  const methods = business.paymentInstructions.methods
+  // The backend does not yet project per-business payment instructions, so the
+  // payment step uses generic presentational steps. The deposit AMOUNT shown
+  // above is always the backend-computed value from the availability view.
+  const methods =
+    business.paymentInstructions.methods.length > 0
+      ? business.paymentInstructions.methods
+      : PAYMENT_METHOD_FALLBACK
 
   const handleProofChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] ?? null

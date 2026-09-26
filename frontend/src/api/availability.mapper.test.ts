@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { bookingDatesFromViews, slotTimesFromView } from './availability.mapper'
 import type { PublicAvailabilityView } from './types'
 
@@ -16,6 +16,7 @@ function view(slots: { startAt: string; endAt: string }[]): PublicAvailabilityVi
     slots,
     computedDurationMinutes: 60,
     computedTotalPriceMinor: 30000,
+    requiredPrepaidMinor: 0,
   }
 }
 
@@ -58,49 +59,64 @@ describe('slotTimesFromView', () => {
   })
 
   it('drops only today slots that have already started', () => {
-    const now = new Date()
-    const earlier = new Date(now.getTime() - 60 * 60_000).toISOString()
-    const later = new Date(now.getTime() + 60 * 60_000).toISOString()
-    const evenLater = new Date(now.getTime() + 120 * 60_000).toISOString()
-    const times = slotTimesFromView(
-      {
-        ...view([
-          { startAt: earlier, endAt: later },
-          { startAt: later, endAt: evenLater },
-        ]),
-        date: todayKey(),
-      },
-    )
-    expect(times).toContain(localOf(later))
-    expect(times).not.toContain(localOf(earlier))
+    // Pin the clock to a local midday so the ±1h slots never cross midnight
+    // (a midnight-crossing "later" slot would be misread as today-past).
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 5, 15, 12, 0, 0))
+    try {
+      const now = new Date()
+      const earlier = new Date(now.getTime() - 60 * 60_000).toISOString()
+      const later = new Date(now.getTime() + 60 * 60_000).toISOString()
+      const evenLater = new Date(now.getTime() + 120 * 60_000).toISOString()
+      const times = slotTimesFromView(
+        {
+          ...view([
+            { startAt: earlier, endAt: later },
+            { startAt: later, endAt: evenLater },
+          ]),
+          date: todayKey(),
+        },
+      )
+      expect(times).toContain(localOf(later))
+      expect(times).not.toContain(localOf(earlier))
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 
 describe('bookingDatesFromViews', () => {
   it('marks hasTimes false for a view whose only times are today-past', () => {
-    const now = new Date()
-    const earlier = new Date(now.getTime() - 60 * 60_000).toISOString()
-    const later = new Date(now.getTime() + 60 * 60_000).toISOString()
-    const evenLater = new Date(now.getTime() + 120 * 60_000).toISOString()
-    const dates = bookingDatesFromViews([
-      view([]),
-      {
-        ...view([{ startAt: earlier, endAt: later }]),
-        date: todayKey(),
-      },
-      {
-        ...view([
-          { startAt: earlier, endAt: later },
-          { startAt: later, endAt: evenLater },
-        ]),
-        date: todayKey(),
-      },
-    ])
-    expect(dates).toEqual([
-      { date: '2026-11-20', hasTimes: false },
-      { date: todayKey(), hasTimes: false },
-      { date: todayKey(), hasTimes: true },
-    ])
+    // Pin the clock to a local midday so the ±1h slots never cross midnight.
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 5, 15, 12, 0, 0))
+    try {
+      const now = new Date()
+      const earlier = new Date(now.getTime() - 60 * 60_000).toISOString()
+      const later = new Date(now.getTime() + 60 * 60_000).toISOString()
+      const evenLater = new Date(now.getTime() + 120 * 60_000).toISOString()
+      const dates = bookingDatesFromViews([
+        view([]),
+        {
+          ...view([{ startAt: earlier, endAt: later }]),
+          date: todayKey(),
+        },
+        {
+          ...view([
+            { startAt: earlier, endAt: later },
+            { startAt: later, endAt: evenLater },
+          ]),
+          date: todayKey(),
+        },
+      ])
+      expect(dates).toEqual([
+        { date: '2026-11-20', hasTimes: false },
+        { date: todayKey(), hasTimes: false },
+        { date: todayKey(), hasTimes: true },
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('keeps the slot order of a fully open day', () => {

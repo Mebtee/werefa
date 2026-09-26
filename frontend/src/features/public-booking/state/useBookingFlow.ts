@@ -40,6 +40,11 @@ export function useBookingFlow(business: BusinessDetails) {
   const [proof, setProof] = useState<ProofFile | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState<SubmitResult | null>(null)
+  // Deposit due for the current selection, from the REAL availability view
+  // (backend-computed, REQ-110/111). `0`/`null` means no payment proof is
+  // required; the value drives whether the payment step appears and what the
+  // customer must submit. Never derives from frontend state.
+  const [depositMinor, setDepositMinor] = useState<number | null>(null)
   // Idempotency key (REQ-121): one stable key per wizard session so a double
   // submit (or a retry) is a no-op server-side, not a duplicated booking.
   // Regenerated only on reset() — never in a render effect.
@@ -134,6 +139,7 @@ export function useBookingFlow(business: BusinessDetails) {
     setPaymentMethod(null)
     setProof(null)
     setResult(null)
+    setDepositMinor(null)
     setSubmitting(false)
     setStep(STEP_SERVICES)
   }, [clearDateTime, clearCustomer])
@@ -142,7 +148,7 @@ export function useBookingFlow(business: BusinessDetails) {
       if (date === null || time === null || customer.name.trim() === '' || customer.phone.trim() === '') {
         return
       }
-      const requiresPayment = business.prepayment.mode !== 'none'
+      const requiresPayment = (depositMinor ?? 0) > 0
       if (requiresPayment && (paymentMethod === null || !proof?.file)) {
         return
       }
@@ -185,7 +191,7 @@ export function useBookingFlow(business: BusinessDetails) {
       } finally {
         setSubmitting(false)
       }
-    }, [selections, date, time, customer, paymentMethod, proof, business])
+    }, [selections, date, time, customer, paymentMethod, proof, depositMinor, business])
 
   return {
     step,
@@ -197,6 +203,9 @@ export function useBookingFlow(business: BusinessDetails) {
     proof,
     submitting,
     result,
+    // Deposit due (minor) disclosed by the real availability view; 0 when no
+    // prepayment is configured. Null before the date/time step has resolved.
+    depositMinor,
     toggleService,
     setVariation,
     toggleAddOn,
@@ -207,6 +216,7 @@ export function useBookingFlow(business: BusinessDetails) {
     replaceCustomer,
     setPayment,
     setProofFile,
+    setDepositMinor,
     goTo,
     reset,
     submit,

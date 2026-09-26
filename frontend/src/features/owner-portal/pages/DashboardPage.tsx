@@ -3,7 +3,6 @@ import { useOwnedBusiness } from '@/features/owner-portal/state/useOwnedBusiness
 import { LoadState } from '@/features/owner-portal/components/LoadState'
 import { PauseCard } from '@/features/owner-portal/components/PauseCard'
 import { TelegramOwnerCard } from '@/features/owner-portal/components/TelegramOwnerCard'
-import { SubscriptionCard } from '@/features/owner-portal/components/SubscriptionCard'
 import { CATEGORY_LABEL } from '@/features/owner-portal/lib/labels'
 
 export function DashboardPage() {
@@ -11,11 +10,7 @@ export function DashboardPage() {
     useOwnedBusiness()
 
   return (
-    <LoadState
-      loading={loading && business === null}
-      error={error && business === null}
-      onRetry={reload}
-    >
+    <LoadState loading={loading} error={error} onRetry={reload}>
       {business && businessId && (
         <>
           <h1 className="page-title">Dashboard</h1>
@@ -75,7 +70,7 @@ export function DashboardPage() {
               <h2 className="card__title" id="dash-today-title">
                 Today
               </h2>
-              <p className="card__subtitle">Summary for the demo business</p>
+              <p className="card__subtitle">Summary for this business</p>
               <p className="stat">
                 {bookingsToday}
                 <span className="stat__label">
@@ -102,7 +97,6 @@ export function DashboardPage() {
               </div>
             </section>
 
-            <SubscriptionCard businessId={businessId} />
             <TelegramOwnerCard businessId={businessId} />
           </div>
 
@@ -116,6 +110,9 @@ export function DashboardPage() {
             </Link>
             <Link className="shortcut" to="/owner/schedule">
               Working hours
+            </Link>
+            <Link className="shortcut" to="/owner/subscription">
+              Subscription &amp; billing
             </Link>
           </nav>
 

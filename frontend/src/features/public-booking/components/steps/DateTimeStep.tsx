@@ -22,6 +22,8 @@ interface DateTimeStepProps {
   selectTime: (time: TimeOfDay | null) => void
   onBack: () => void
   onNext: () => void
+  /** Reports the backend-computed deposit for the current selection (REQ-110/111). */
+  onDeposit?: (depositMinor: number) => void
 }
 
 interface DateTimeState {
@@ -43,6 +45,7 @@ export function DateTimeStep({
   selectTime,
   onBack,
   onNext,
+  onDeposit,
 }: DateTimeStepProps) {
   const [state, setState] = useState<DateTimeState>({
     dates: null,
@@ -84,11 +87,12 @@ export function DateTimeStep({
         (r) => (r as PromiseFulfilledResult<PublicAvailabilityView>).value,
       )
       setState((s) => ({ ...s, dates: bookingDatesFromViews(views), datesError: false }))
+      if (views.length > 0) onDeposit?.(views[0].requiredPrepaidMinor)
     })
     return () => {
       cancelled = true
     }
-  }, [business, wireSelections, state.retryToken])
+  }, [business, wireSelections, state.retryToken, onDeposit])
 
   useEffect(() => {
     if (!date) {
@@ -99,7 +103,10 @@ export function DateTimeStep({
     setState((s) => ({ ...s, slots: null, slotsError: false }))
     getPublicAvailability(business.slug, { date, selections: wireSelections })
       .then((view) => {
-        if (!cancelled) setState((s) => ({ ...s, slots: [...slotTimesFromView(view)], slotsError: false }))
+        if (!cancelled) {
+          setState((s) => ({ ...s, slots: [...slotTimesFromView(view)], slotsError: false }))
+          onDeposit?.(view.requiredPrepaidMinor)
+        }
       })
       .catch(() => {
         if (!cancelled) setState((s) => ({ ...s, slotsError: true }))
@@ -107,7 +114,7 @@ export function DateTimeStep({
     return () => {
       cancelled = true
     }
-  }, [business, date, wireSelections, state.retryToken])
+  }, [business, date, wireSelections, state.retryToken, onDeposit])
 
   // If the previously picked time no longer fits the new selection (e.g. after
   // going back and changing services), clear it instead of letting the user

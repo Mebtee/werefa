@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Alert } from '@/components/ui/Alert'
 import { toUserMessage } from '@/api/errors'
@@ -7,24 +7,12 @@ import {
   submitSubscriptionProof,
   type PendingProofFile,
 } from '@/api/subscription'
-import type { SubscriptionProofView, SubscriptionStatusCode } from '@/api/types'
+import type { OwnerSubscriptionView, SubscriptionProofView } from '@/api/types'
 import {
   SUBSCRIPTION_STATUS_CHIP,
   SUBSCRIPTION_STATUS_LABEL,
 } from '@/features/owner-portal/lib/labels'
-
-/**
- * Owner subscription card (Prompt 52; spec §17/§27.2, REQ-125…141).
- *
- * Replaces the demo "Subscription active" badge with the REAL owner
- * subscription view keyed by the tenant business id. Renders the status chip,
- * the REQ-141 warning banner when bookings are at risk (grace) or closed
- * (expired), the manual payment-proof upload (REQ-135/136, idempotent by
- * `submissionKey`) and the proof history (REQ-138 rejection reason).
- *
- * No price is ever shown (§46 item 1 unresolved) and no storage artifacts are
- * exposed — only review state and datetimes.
- */
+import { isoDate, subscriptionBanner } from '@/features/owner-portal/lib/subscriptionPresentation'
 
 interface SubscriptionCardProps {
   businessId: string
@@ -32,9 +20,16 @@ interface SubscriptionCardProps {
 
 type Phase = 'loading' | 'ready' | 'error'
 
-function isoDate(value: string | null): string {
-  return value ? new Date(value).toLocaleDateString() : ''
-}
+const PROOF_MAX_BYTES = 5 * 1024 * 1024
+const PROOF_MIME_TYPES = new Set([
+  'image/bmp',
+  'image/gif',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'application/pdf',
+])
+const PROOF_ACCEPT = Array.from(PROOF_MIME_TYPES).join(',')
 
 function newSubmissionKey(): string {
   const rand =
@@ -42,6 +37,22 @@ function newSubmissionKey(): string {
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(36).slice(2)}`
   return `sub-${rand}`
+}
+
+function fileSignature(file: File): string {
+  return `${file.name}:${file.size}:${file.lastModified}:${file.type}`
+}
+
+function readFileBytes(file: File): Promise<Uint8Array> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (reader.result instanceof ArrayBuffer) resolve(new Uint8Array(reader.result))
+      else reject(new Error('The selected file could not be read.'))
+    }
+    reader.onerror = () => reject(reader.error ?? new Error('The selected file could not be read.'))
+    reader.readAsArrayBuffer(file)
+  })
 }
 
 const PROOF_CHIP: Record<SubscriptionProofView['reviewState'], string> = {
@@ -58,80 +69,31 @@ function ProofChip({ reviewState }: { reviewState: SubscriptionProofView['review
   )
 }
 
-/** REQ-141 banner per canonical status (bookings keep running during grace). */
-function bannerFor(
-  status: SubscriptionStatusCode,
-  bookingsEnabled: boolean,
-  dateText: string,
-): { tone: 'info' | 'success' | 'warning' | 'danger'; title: string; text: string } | null {
-  if (!bookingsEnabled) {
-    return {
-      tone: 'danger',
-      title: 'New bookings are closed',
-      text: 'Your subscription expired. Upload a payment proof to the arefa accounts team and it will be reopened after approval.',
-    }
-  }
-  switch (status) {
-    case 'TRIAL':
-      return {
-        tone: 'info',
-        title: 'Free trial',
-        text: dateText ? `Your free trial runs until ${dateText}.` : 'Your free trial is running.',
-      }
-    case 'TRIAL_GRACE':
-      return {
-        tone: 'warning',
-        title: 'Trial grace period',
-        text: dateText
-          ? `Your trial ended. Bookings continue until ${dateText} — upload a payment proof to stay live (REQ-132).`
-          : 'Your trial ended. Bookings continue during the grace period.',
-      }
-    case 'PAID_GRACE':
-      return {
-        tone: 'warning',
-        title: 'Paid grace period',
-        text: dateText
-          ? `Your paid period ended. Bookings continue until ${dateText} — upload a payment proof to renew (REQ-132).`
-          : 'Your paid period ended. Bookings continue during the grace period.',
-      }
-    case 'ACTIVE':
-      return {
-        tone: 'success',
-        title: 'Subscription active',
-        text: dateText ? `Your paid subscription runs until ${dateText}.` : 'Your subscription is active.',
-      }
-    default:
-      return null
-  }
-}
-
 export function SubscriptionCard({ businessId }: SubscriptionCardProps) {
   const [phase, setPhase] = useState<Phase>('loading')
-  const [subscription, setSubscription] = useState<{
-    status: SubscriptionStatusCode
-    bookingsEnabled: boolean
-    trialEndsAt: string | null
-    trialGraceEndsAt: string | null
-    periodEndsAt: string | null
-    paidGraceEndsAt: string | null
-    proofs: SubscriptionProofView[]
-  } | null>(null)
+  const [subscription, setSubscription] = useState<OwnerSubscriptionView | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
-
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [submitNotice, setSubmitNotice] = useState<string | null>(null)
-  const [submissionKey, setSubmissionKey] = useState<string>(() => newSubmissionKey())
+  const [submissionKey, setSubmissionKey] = useState(newSubmissionKey)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const attemptFileRef = useRef<string | null>(null)
+  const requestIdRef = useRef(0)
 
   const refresh = useCallback(async () => {
+    const requestId = requestIdRef.current + 1
+    requestIdRef.current = requestId
     setPhase('loading')
     setLoadError(null)
     try {
       const view = await getOwnerSubscription(businessId)
+      if (requestIdRef.current !== requestId) return
       setSubscription(view)
       setPhase('ready')
     } catch (error) {
+      if (requestIdRef.current !== requestId) return
       setLoadError(toUserMessage(error))
       setPhase('error')
     }
@@ -139,48 +101,74 @@ export function SubscriptionCard({ businessId }: SubscriptionCardProps) {
 
   useEffect(() => {
     void refresh()
+    return () => {
+      requestIdRef.current += 1
+    }
   }, [refresh])
 
-  const isWarn = subscription && !subscription.bookingsEnabled
-  const banner = subscription
-    ? bannerFor(
-        subscription.status,
-        subscription.bookingsEnabled,
-        isoDate(
-          subscription.status === 'ACTIVE'
-            ? subscription.periodEndsAt
-            : subscription.status === 'TRIAL'
-              ? subscription.trialEndsAt
-              : subscription.status === 'TRIAL_GRACE'
-                ? subscription.trialGraceEndsAt
-                : subscription.paidGraceEndsAt,
-        ),
-      )
-    : null
+  const chooseFile = (file: File | null) => {
+    setSubmitNotice(null)
+    if (!file) {
+      setSelectedFile(null)
+      return
+    }
+    if (file.size > PROOF_MAX_BYTES) {
+      setSelectedFile(null)
+      setSubmitError('Payment proof must be 5 MB or smaller.')
+      if (fileInputRef.current) fileInputRef.current.value = ''
+      return
+    }
+    if (!PROOF_MIME_TYPES.has(file.type)) {
+      setSelectedFile(null)
+      setSubmitError('Choose a BMP, GIF, JPEG, PNG, WebP, or PDF file.')
+      if (fileInputRef.current) fileInputRef.current.value = ''
+      return
+    }
+
+    const signature = fileSignature(file)
+    if (attemptFileRef.current && attemptFileRef.current !== signature) {
+      setSubmissionKey(newSubmissionKey())
+    }
+    attemptFileRef.current = signature
+    setSubmitError(null)
+    setSelectedFile(file)
+  }
+
+  const banner = subscription ? subscriptionBanner(subscription) : null
 
   const handleUpload = async () => {
     setSubmitError(null)
     setSubmitNotice(null)
     if (!selectedFile) {
-      setSubmitError('Choose a payment proof image or PDF first.')
+      setSubmitError('Choose a payment proof first.')
       return
     }
-    const file: PendingProofFile = {
-      bytes: new Uint8Array(await selectedFile.arrayBuffer()),
-      contentType: selectedFile.type || 'application/octet-stream',
-      filename: selectedFile.name,
+    if (selectedFile.size > PROOF_MAX_BYTES || !PROOF_MIME_TYPES.has(selectedFile.type)) {
+      chooseFile(null)
+      setSubmitError('Choose a supported payment proof file that is 5 MB or smaller.')
+      return
     }
+
     setSubmitting(true)
     try {
+      const file: PendingProofFile = {
+        bytes: await readFileBytes(selectedFile),
+        contentType: selectedFile.type,
+        filename: selectedFile.name,
+      }
       const proof = await submitSubscriptionProof(businessId, submissionKey, file)
       setSubmitNotice(
         proof.reviewState === 'APPROVED'
-          ? 'Proof already approved.'
-          : 'Payment proof received. The team reviews it shortly (REQ-136).',
+          ? 'This proof was already approved.'
+          : 'Payment proof received. The accounts team will review it.',
+      )
+      setSubscription((current) =>
+        current ? { ...current, proofs: [proof, ...current.proofs] } : current,
       )
       setSelectedFile(null)
+      attemptFileRef.current = null
       setSubmissionKey(newSubmissionKey())
-      await refresh()
+      if (fileInputRef.current) fileInputRef.current.value = ''
     } catch (error) {
       setSubmitError(toUserMessage(error))
     } finally {
@@ -189,11 +177,11 @@ export function SubscriptionCard({ businessId }: SubscriptionCardProps) {
   }
 
   return (
-    <section className="card card--padded" aria-labelledby="dash-subscription-title">
-      <h2 className="card__title" id="dash-subscription-title">
+    <section className="card card--padded subscription-card" aria-labelledby="subscription-title">
+      <h2 className="card__title" id="subscription-title">
         Subscription
       </h2>
-      <p className="card__subtitle">Real subscription status for this business (REQ-141)</p>
+      <p className="card__subtitle">Current status and payment proof history for this business.</p>
 
       {phase === 'loading' ? (
         <p className="telegram-panel__note">Loading subscription…</p>
@@ -221,22 +209,24 @@ export function SubscriptionCard({ businessId }: SubscriptionCardProps) {
             </Alert>
           )}
 
-          {!isWarn && (
-            <p className="subscription-panel__note">
-              Bookings {subscription.bookingsEnabled ? 'are open' : 'are closed'} on your public
-              page.
-            </p>
-          )}
+          <p className="subscription-panel__note">
+            Bookings {subscription.bookingsEnabled ? 'are open' : 'are closed'} on your public page.
+          </p>
 
           <div className="subscription-upload">
-            <p className="field__label">Upload a payment proof (REQ-135/136)</p>
+            <p className="field__label">Payment proof</p>
+            <p className="field__hint">
+              After a manual bank transfer, upload the payment proof for review.
+            </p>
             <input
+              ref={fileInputRef}
               type="file"
               aria-label="Subscription payment proof"
-              accept="image/png,image/jpeg,application/pdf"
-              onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
+              accept={PROOF_ACCEPT}
+              onChange={(event) => chooseFile(event.target.files?.[0] ?? null)}
               disabled={submitting}
             />
+            <p className="field__hint">BMP, GIF, JPEG, PNG, WebP, or PDF. Maximum 5 MB.</p>
             <Button
               type="button"
               variant="primary"
@@ -248,7 +238,7 @@ export function SubscriptionCard({ businessId }: SubscriptionCardProps) {
             </Button>
           </div>
           {submitError && (
-            <p className="field__hint" role="alert">
+            <p className="field__hint subscription-error" role="alert">
               {submitError}
             </p>
           )}
@@ -257,24 +247,32 @@ export function SubscriptionCard({ businessId }: SubscriptionCardProps) {
               {submitNotice}
             </p>
           )}
-          <p className="field__hint">
-            Re-submitting the same proof is safe — a repeated upload never duplicates (REQ-121).
-          </p>
 
-          {subscription.proofs.length > 0 && (
+          {subscription.proofs.length > 0 ? (
             <ul className="subscription-history" aria-label="Subscription proof history">
               {subscription.proofs.map((proof) => (
                 <li key={proof.id} className="subscription-history__row">
-                  <ProofChip reviewState={proof.reviewState} />
-                  <span className="subscription-history__date">{isoDate(proof.requestedAt)}</span>
+                  <div>
+                    <ProofChip reviewState={proof.reviewState} />
+                    <span className="subscription-history__date">
+                      Submitted {isoDate(proof.requestedAt)}
+                    </span>
+                  </div>
+                  {proof.approvedUntil && (
+                    <span className="subscription-history__date">
+                      Approved through {isoDate(proof.approvedUntil)}
+                    </span>
+                  )}
                   {proof.rejectionReason && (
                     <span className="subscription-history__reason" data-testid="proof-rejection-reason">
-                      {proof.rejectionReason}
+                      Review note: {proof.rejectionReason}
                     </span>
                   )}
                 </li>
               ))}
             </ul>
+          ) : (
+            <p className="field__hint">No payment proofs have been submitted.</p>
           )}
         </div>
       ) : null}

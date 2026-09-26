@@ -26,6 +26,7 @@ import { Button } from '@/components/ui/Button'
 import { Field } from '@/components/ui/Field'
 import { formatDateLong, formatTimestamp } from '@/lib/time'
 import { formatBytes, formatMoney, formatTime } from '@/lib/format'
+import { PAYMENT_METHOD_FALLBACK } from '@/config/site'
 
 type ConfirmMode =
   | 'cancel-confirmed'
@@ -158,8 +159,11 @@ export function BookingDetailPage() {
   const paymentLabel = business
     ? (business.paymentInstructions.methods.find(
         (method) => method.id === booking.paymentMethod,
-      )?.label ?? booking.paymentMethod)
-    : booking.paymentMethod
+      )?.label ??
+      PAYMENT_METHOD_FALLBACK.find((method) => method.id === booking.paymentMethod)?.label ??
+      booking.paymentMethod)
+    : (PAYMENT_METHOD_FALLBACK.find((method) => method.id === booking.paymentMethod)?.label ??
+      booking.paymentMethod)
 
   const reviewPaymentStatus = paymentReview.review?.paymentStatus ?? null
 

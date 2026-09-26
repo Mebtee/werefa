@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { isApiError, toUserMessage } from '@/api/errors'
-import type { BusinessCategory } from '@/types/models'
+import type { BusinessCategory, ImageAsset } from '@/types/models'
 import {
   changeOwnedBusinessSlug,
   updateOwnedBusinessProfile,
@@ -80,6 +80,10 @@ export function BusinessProfilePage() {
   const [brandingBusy, setBrandingBusy] = useState(false)
   const [brandingError, setBrandingError] = useState<string | null>(null)
   const [brandingSuccess, setBrandingSuccess] = useState(false)
+  const [logo, setLogo] = useState<ImageAsset | null>(business?.logo ?? null)
+  const [coverPhoto, setCoverPhoto] = useState<ImageAsset | null>(
+    business?.coverPhoto ?? null,
+  )
 
   const saveBranding = async (patch: BrandingPatch) => {
     setBrandingBusy(true)
@@ -91,6 +95,8 @@ export function BusinessProfilePage() {
         setBrandingError(result.error)
         return
       }
+      if (patch.logo !== undefined) setLogo(patch.logo)
+      if (patch.coverPhoto !== undefined) setCoverPhoto(patch.coverPhoto)
       setBrandingSuccess(true)
       await reload()
     } catch {
@@ -411,13 +417,13 @@ export function BusinessProfilePage() {
 
         <div className="branding-section__pair">
           <ImagePicker
-            current={business.logo}
+            current={logo}
             onSaved={(asset) => void saveBranding({ logo: asset })}
             label="Logo"
             busy={brandingBusy}
           />
           <ImagePicker
-            current={business.coverPhoto}
+            current={coverPhoto}
             onSaved={(asset) => void saveBranding({ coverPhoto: asset })}
             label="Cover photo"
             busy={brandingBusy}

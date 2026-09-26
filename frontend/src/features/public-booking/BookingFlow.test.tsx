@@ -9,17 +9,32 @@ import {
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { appRoutes } from '@/routes'
-import { toDateString } from '@/lib/time'
-import { installBusinessApiStub, type BusinessApiStub } from '@/test/businessApi'
+import { addDays, toDateString } from '@/lib/time'
+import { createCustomerBooking } from '@/api/booking'
+import { TelegramConnectCard } from '@/features/public-booking/components/steps/TelegramConnectCard'
+import {
+  installBusinessApiStub,
+  type BusinessApiStub,
+} from '@/test/businessApi'
+import { getBookingsByPhone, getBusiness, getOccupiedBlocks, getServices } from '@/mock/store'
+import { computeAvailableTimes } from '@/mock/availability'
 
 const user = userEvent.setup()
 
 let restoreFetch: (() => void) | undefined
 let stub: BusinessApiStub | undefined
 
+type StubOptions = Parameters<typeof installBusinessApiStub>[1]
+
+function installStub(options: StubOptions = {}): void {
+  restoreFetch?.()
+  const installed = installBusinessApiStub(globalThis.fetch, options)
+  stub = installed
+  restoreFetch = installed.restore
+}
+
 beforeEach(() => {
-  stub = installBusinessApiStub()
-  restoreFetch = stub.restore
+  installStub()
 })
 
 afterEach(() => {
@@ -27,11 +42,90 @@ afterEach(() => {
   restoreFetch = undefined
 })
 
-function renderPage(): RenderResult {
+function renderPage(initialPath = '/p/addis-beauty-lounge'): RenderResult {
   const router = createMemoryRouter(appRoutes, {
-    initialEntries: ['/p/addis-beauty-lounge'],
+    initialEntries: [initialPath],
   })
   return render(<RouterProvider router={router} />)
+}
+
+/**
+ * A deterministic date (not today) that actually offers a free slot for the
+ * first service — it walks the window ahead of today so the race/idempotency
+ * tests never depend on the weekday (the demo salon is closed on Mondays) or
+ * the seeded bookings that block days 0–2.
+ */
+function freeWindowSlot(): { date: string; time: string } {
+  const business = getBusiness('addis-beauty-lounge')!
+  const duration = getServices('addis-beauty-lounge')[0].baseDurationMinutes
+  const today = toDateString(new Date())
+  for (let offset = 1; offset <= 8; offset += 1) {
+    const date = addDays(today, offset)
+    const free = computeAvailableTimes(
+      business,
+      date,
+      duration,
+      getOccupiedBlocks('addis-beauty-lounge', date),
+    )
+    if (free.length > 0) return { date, time: free[0] }
+  }
+  throw new Error('no free window slot available')
+}
+
+async function bookToPaymentStep(container: HTMLElement, date: string, time: string) {
+  const addButtons = await screen.findAllByRole('button', {
+    name: /add to booking/i,
+  })
+  await user.click(addButtons[0])
+  await user.click(
+    screen.getByRole('button', { name: /continue[\s–—-]*\d+ selected/i }),
+  )
+
+  await waitFor(() => {
+    expect(
+      container.querySelectorAll('.date-chip').length,
+    ).toBeGreaterThan(0)
+  })
+  const chips = Array.from(
+    container.querySelectorAll<HTMLButtonElement>('.date-chip'),
+  )
+  const chip = chips.find(
+    (c) => c.querySelector('.date-chip__date')?.textContent === date,
+  )
+  if (!chip) throw new Error(`no date chip for ${date}`)
+  expect(chip.disabled).toBe(false)
+  await user.click(chip)
+
+  await waitFor(() => {
+    expect(
+      container.querySelectorAll('.time-grid__item button').length,
+    ).toBeGreaterThan(0)
+  })
+  const slots = Array.from(
+    container.querySelectorAll<HTMLButtonElement>('.time-grid__item button'),
+  )
+  const slot = slots.find((s) => s.textContent === time)
+  if (!slot) throw new Error(`no slot for ${time}`)
+  await user.click(slot)
+  await user.click(screen.getByRole('button', { name: /^continue$/i }))
+
+  await screen.findByRole('heading', { name: 'Your details', level: 2 })
+  await user.type(screen.getByLabelText('Your name'), 'Selam Tesfaye')
+  await user.type(screen.getByLabelText('Phone number'), '+251911123456')
+  await user.click(screen.getByRole('button', { name: /continue to review/i }))
+
+  await screen.findByRole('heading', { name: 'Review your booking' })
+  await user.click(screen.getByRole('button', { name: /continue to payment/i }))
+  await screen.findByRole('heading', { name: 'Payment & confirmation' })
+
+  await user.click(screen.getByRole('radio', { name: /bank transfer/i }))
+  const proofInput = container.querySelector<HTMLInputElement>('#proof-upload')
+  if (!proofInput) throw new Error('proof upload input missing')
+  await user.upload(
+    proofInput,
+    new File(['proof'], 'proof.png', { type: 'image/png' }),
+  )
+  await screen.findByText('proof.png')
 }
 
 async function pickFirstAvailableSlot(container: HTMLElement) {
@@ -125,7 +219,7 @@ describe('public booking flow', () => {
 
     await user.click(screen.getByRole('radio', { name: /bank transfer/i }))
     expect(
-      within(screen.getByRole('radiogroup')).getByText(/demo bank/i),
+      within(screen.getByRole('radiogroup')).getByText(/transfer the deposit/i),
     ).toBeInTheDocument()
 
     const proofInput = container.querySelector<HTMLInputElement>('#proof-upload')
@@ -470,6 +564,234 @@ describe('date & time step navigation', () => {
         name: 'Choose your services',
         level: 2,
       }),
+    ).toBeInTheDocument()
+  })
+})
+
+describe('public business page states (Prompt 55)', () => {
+  it('shows Business not found for an invalid slug, with a way back to the demo business', async () => {
+    renderPage('/p/this-business-does-not-exist')
+
+    expect(
+      await screen.findByText('Business not found'),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/no business was found at this address/i)).toBeInTheDocument()
+
+    const homeLink = screen.getByRole('link', { name: /go to the demo business/i })
+    expect(homeLink).toHaveAttribute('href', '/p/addis-beauty-lounge')
+
+    expect(screen.queryByRole('heading', { name: 'Addis Beauty Lounge' })).not.toBeInTheDocument()
+  })
+
+  it('renders a read-only page with the pause notice for a paused business (REQ-146/147/148)', async () => {
+    installStub({
+      seed: {
+        isPaused: true,
+        pauseMessage: 'We are moving to a new location. See you soon!',
+        reopenAt: '2026-12-01T00:00:00.000Z',
+      },
+    })
+    renderPage()
+
+    await screen.findByRole('heading', { name: 'Addis Beauty Lounge' })
+    expect(
+      screen.getByText('We are currently closed to new bookings'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/we are moving to a new location\. see you soon!/i),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/bookings reopen on 2026-12-01/i)).toBeInTheDocument()
+
+    // Canonical §13.5: the page stays visible and shows the service catalog, but
+    // no booking wizard is offered.
+    expect(
+      screen.getByRole('heading', { name: 'Services & prices' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Women’s Haircut & Styling')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Book now' })).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: /add to booking/i }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('link', { name: 'Check my booking status' }),
+    ).toBeInTheDocument()
+  })
+
+  it('keeps a deactivated business page visible but without bookable times (REQ-216)', async () => {
+    installStub({ seed: { isDeactivated: true } })
+    const { container } = renderPage()
+
+    await screen.findByRole('heading', { name: 'Addis Beauty Lounge' })
+    expect(
+      screen.queryByRole('heading', { name: /business not found/i }),
+    ).not.toBeInTheDocument()
+
+    // Page stays visible: the wizard renders…
+    expect(screen.getByRole('heading', { name: 'Book now' })).toBeInTheDocument()
+
+    // …but the availability gate (deactivated) leaves no enabled dates.
+    const addButtons = await screen.findAllByRole('button', {
+      name: /add to booking/i,
+    })
+    await user.click(addButtons[0])
+    await user.click(
+      screen.getByRole('button', { name: /continue[\s–—-]*\d+ selected/i }),
+    )
+    await waitFor(() => {
+      expect(container.querySelectorAll('.date-chip').length).toBeGreaterThan(0)
+    })
+    const chips = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('.date-chip'),
+    )
+    expect(chips.length).toBeGreaterThan(0)
+    expect(chips.every((chip) => chip.disabled)).toBe(true)
+    expect(
+      screen.getByText(/pick an available date and time to continue/i),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /^continue$/i }),
+    ).toBeDisabled()
+  })
+
+  it('keeps a subscription-expired business page visible but not bookable', async () => {
+    installStub({ seed: { bookingsClosed: true } })
+    const { container } = renderPage()
+
+    await screen.findByRole('heading', { name: 'Addis Beauty Lounge' })
+
+    const addButtons = await screen.findAllByRole('button', {
+      name: /add to booking/i,
+    })
+    await user.click(addButtons[0])
+    await user.click(
+      screen.getByRole('button', { name: /continue[\s–—-]*\d+ selected/i }),
+    )
+    await waitFor(() => {
+      expect(container.querySelectorAll('.date-chip').length).toBeGreaterThan(0)
+    })
+    const chips = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('.date-chip'),
+    )
+    expect(chips.length).toBeGreaterThan(0)
+    expect(chips.every((chip) => chip.disabled)).toBe(true)
+    expect(
+      screen.getByRole('button', { name: /^continue$/i }),
+    ).toBeDisabled()
+  })
+})
+
+describe('booking conflict & idempotency (Prompt 55)', () => {
+  it('shows the recoverable "time just got taken" state when the slot is lost in a race (REQ-121/REQ-122)', async () => {
+    const { date, time } = freeWindowSlot()
+    installStub({ raceStart: { date, time } })
+    const phone = '+251911123456'
+    const before = getBookingsByPhone('addis-beauty-lounge', phone).length
+    const { container } = renderPage()
+
+    await screen.findByRole('heading', { name: 'Addis Beauty Lounge' })
+    await bookToPaymentStep(container, date, time)
+
+    await user.click(
+      screen.getByRole('button', { name: /confirm & send booking request/i }),
+    )
+
+    expect(
+      await screen.findByRole('heading', { name: 'That time just got taken' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/another customer requested the same time/i),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/nothing was reserved for you/i)).toBeInTheDocument()
+
+    // The conflict is recoverable, and nothing was persisted for the customer.
+    expect(
+      screen.getByRole('button', { name: 'Choose another time' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Change services' })).toBeInTheDocument()
+    expect(
+      getBookingsByPhone('addis-beauty-lounge', phone),
+    ).toHaveLength(before)
+  })
+
+  it('replays the original booking for a repeated submission key (REQ-121)', async () => {
+    installStub()
+    const { date, time } = freeWindowSlot()
+    const business = getBusiness('addis-beauty-lounge')!
+    const serviceId = getServices('addis-beauty-lounge')[0].id
+    const submissionKey = 'booking-flow-idempotency-key'
+    const phone = '+251911123456'
+    const before = getBookingsByPhone(business.slug, phone).length
+
+    const payload = {
+      businessSlug: 'addis-beauty-lounge',
+      selections: [{ serviceId }],
+      customerName: 'Selam Tesfaye',
+      customerPhone: phone,
+      startAt: new Date(`${date}T${time}:00`).toISOString(),
+      submissionKey,
+      paymentMethod: 'BANK_TRANSFER' as const,
+    }
+    const proof = new File(['proof'], 'proof.png', { type: 'image/png' })
+
+    const first = await createCustomerBooking(payload, proof)
+    const replay = await createCustomerBooking(payload, proof)
+
+    expect(replay.status).toBe(first.status)
+    expect(replay).toEqual(first)
+
+    // A replay is exactly that — not a second booking.
+    expect(getBookingsByPhone(business.slug, phone)).toHaveLength(before + 1)
+    expect(getBookingsByPhone(business.slug, phone)[0].paymentMethod).toBe('BANK_TRANSFER')
+  })
+})
+
+describe('Customer Telegram connect states (Prompt 55)', () => {
+  it('reports an already-connected phone without showing a link', async () => {
+    installStub({
+      seed: { telegramCustomerConnectedPhone: '+251911123456' },
+    })
+    render(
+      <TelegramConnectCard
+        businessSlug="addis-beauty-lounge"
+        phone="+251911123456"
+      />,
+    )
+
+    await user.click(
+      screen.getByRole('button', { name: 'Connect Telegram' }),
+    )
+
+    const status = await screen.findByText(/Telegram connected for \+251911123456/)
+    expect(status).toHaveAttribute('data-connected', 'true')
+    expect(
+      screen.queryByRole('link', { name: 'Open Telegram' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('degrades gracefully when the connect call fails, leaving the booking untouched', async () => {
+    installStub({ failPublicTelegramConnect: true })
+    render(
+      <TelegramConnectCard
+        businessSlug="addis-beauty-lounge"
+        phone="+251911123456"
+      />,
+    )
+
+    await user.click(
+      screen.getByRole('button', { name: 'Connect Telegram' }),
+    )
+
+    expect(
+      await screen.findByText(
+        /could not link telegram right now — your booking is unaffected\. you can try again\./i,
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('link', { name: 'Open Telegram' }),
+    ).not.toBeInTheDocument()
+    // Non-blocking: the card stays in its idle form so the customer can retry.
+    expect(
+      screen.getByRole('button', { name: 'Connect Telegram' }),
     ).toBeInTheDocument()
   })
 })

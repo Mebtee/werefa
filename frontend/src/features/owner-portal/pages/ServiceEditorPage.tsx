@@ -128,7 +128,7 @@ export function ServiceEditorPage() {
     }
   }, [existing, isNew, initializedFor])
 
-  if (!business) {
+  if (!business || (!isNew && (loading || error))) {
     return (
       <LoadState loading={loading} error={error} onRetry={reload}>
         {null}

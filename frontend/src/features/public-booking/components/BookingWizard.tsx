@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import type { BusinessDetails, Service } from '@/types/models'
-import { buildLineItems, formatMoney, prepaymentAmount, totalDurationMinutes, totalPrice } from '@/lib/format'
+import { buildLineItems, formatMoney, totalDurationMinutes, totalPrice } from '@/lib/format'
 import { Stepper } from '@/components/ui/Stepper'
 import { BookingSummary } from '@/features/public-booking/components/BookingSummary'
 import {
@@ -30,7 +30,8 @@ export function BookingWizard({ business, services }: BookingWizardProps) {
   const lineItems = buildLineItems(services, flow.selections)
   const total = totalPrice(lineItems)
   const duration = totalDurationMinutes(lineItems)
-  const deposit = prepaymentAmount(business.prepayment, total)
+  // Deposit comes from the backend availability view (authoritative, REQ-110/111).
+  const deposit = flow.depositMinor ?? 0
 
   const mainRef = useRef<HTMLDivElement | null>(null)
   const prevStep = useRef<number | null>(null)
@@ -80,6 +81,7 @@ export function BookingWizard({ business, services }: BookingWizardProps) {
           time={flow.time}
           selectDate={flow.selectDate}
           selectTime={flow.selectTime}
+          onDeposit={flow.setDepositMinor}
           onBack={() => jumpTo(STEP_SERVICES)}
           onNext={() => jumpTo(STEP_CUSTOMER)}
         />
@@ -104,6 +106,7 @@ export function BookingWizard({ business, services }: BookingWizardProps) {
           date={flow.date}
           time={flow.time}
           customer={flow.customer}
+          depositMinor={deposit}
           goTo={jumpTo}
           submit={() => void flow.submit()}
           submitting={flow.submitting}
@@ -114,7 +117,7 @@ export function BookingWizard({ business, services }: BookingWizardProps) {
       content = (
         <PaymentStep
           business={business}
-          deposit={deposit ?? 0}
+          deposit={deposit}
           paymentMethod={flow.paymentMethod}
           setPayment={flow.setPayment}
           proof={flow.proof}

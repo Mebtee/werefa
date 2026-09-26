@@ -27,6 +27,7 @@ const VIEW: PublicAvailabilityView = {
   ],
   computedDurationMinutes: 60,
   computedTotalPriceMinor: 30000,
+  requiredPrepaidMinor: 0,
 }
 
 interface RecordedCall {
