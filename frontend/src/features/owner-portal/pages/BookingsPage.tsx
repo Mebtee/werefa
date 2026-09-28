@@ -266,7 +266,9 @@ export function BookingsPage() {
                     </span>
                     <span className="booking-card__time">
                       <strong>
-                        {formatDateLong(booking.date)} · {booking.time}
+                        {booking.date && booking.time
+                          ? `${formatDateLong(booking.date)} · ${booking.time}`
+                          : 'Time not available'}
                       </strong>
                       <span className="booking-card__meta">
                         {booking.lineItems.length}{' '}

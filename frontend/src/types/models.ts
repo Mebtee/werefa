@@ -6,8 +6,9 @@
  * no customer dashboard, no customer-visible booking reference.
  *
  * Money amounts are integers in minor units (cents) to mirror the approved
- * API/backend contract (integer-minor money). The display currency is part of
- * the mock business data; the specification does not define a currency.
+ * API/backend contract (integer-minor money). The display currency is a
+ * presentation constant (`DEFAULT_PUBLIC_BUSINESS_FIELDS`); the specification
+ * defines no currency and the backend projects none.
  */
 
 /** A wall-clock time in 24-hour "HH:MM" form (e.g. "14:30"). */
@@ -25,8 +26,10 @@ export type BusinessCategory = 'salon-barber' | 'other'
 export type MapProvider = 'google' | 'osm'
 
 /**
- * A deterministic mock image asset stored inline as a data URL (development
- * preview only — no real object storage or backend upload exists).
+ * An image asset the backend projected as a URL (`branding.logoUrl` /
+ * `branding.coverUrl`), carried inline as the browser-safe data URI used as
+ * the `<img src>`. The backend projects null until file storage lands and
+ * exposes no upload endpoint, so this is never a locally-selected file.
  *
  * `alt` is owner-authored descriptive text rendered as the image's accessible
  * label. `dataUrl` carries the browser-safe data: URI used as the `<img src>`.
@@ -175,8 +178,8 @@ export type PauseState =
   | { kind: 'until'; reopenDate: DateString; message?: string }
   | null
 
-// NOTE: the mock `subscriptionStatus` field ('active'|'suspended'|'deactivated')
-// was removed in Prompt 52. Subscription state is now real and lives in
+// NOTE: the legacy `subscriptionStatus` field ('active'|'suspended'|'deactivated')
+// was removed in Prompt 52. Subscription state is real and lives in
 // `src/api/subscription.ts` (`OwnerSubscriptionView`), never on BusinessDetails.
 
 /** Owner-controlled prepayment configuration (REQ-110 / REQ-111). */
@@ -190,16 +193,6 @@ export interface PrepaymentConfig {
 
 /** The fixed payment methods (REQ-112 / REQ-115). */
 export type PaymentMethodId = 'bank-transfer' | 'telebirr'
-
-export interface PaymentMethodInstruction {
-  id: PaymentMethodId
-  label: string
-  steps: readonly string[]
-}
-
-export interface BusinessPaymentInstructions {
-  methods: readonly PaymentMethodInstruction[]
-}
 
 export interface BusinessDetails {
   slug: string
@@ -221,7 +214,6 @@ export interface BusinessDetails {
   specialDays: Readonly<Record<DateString, SpecialDay>>
   pause: PauseState
   prepayment: PrepaymentConfig
-  paymentInstructions: BusinessPaymentInstructions
   currency: string
   /** How many days ahead (from today, inclusive) customers can book. */
   bookingWindowDays: number
@@ -230,10 +222,9 @@ export interface BusinessDetails {
    * side-channel). This does NOT gate customer notifications — those gate on
    * the per-customer connection (per business + phone).
    *
-   * MOCK-SEAM ONLY (Prompt 51): the real backend never carries this on the
-   * business projection — the owner connection state now comes from
-   * `GET /owner/businesses/:id/telegram/status`. Production hybridized pages
-   * therefore do NOT set it; only the mock seam pages do.
+   * Not carried by the real backend projection — the owner connection state
+   * comes from `GET /owner/businesses/:id/telegram/status`. Production
+   * hybridized pages therefore never set it.
    */
   telegramConnected?: boolean
   /**
@@ -372,7 +363,11 @@ export type CustomerNotificationType =
   | 'cancelled'
   | 'reschedule'
 
-/** Mock Telegram delivery state — a generated/simulated event, never a real send. */
+/**
+ * Telegram delivery state carried on the test-only notification model below.
+ * It is a generated fixture event, never a real send, and is not part of any
+ * production response.
+ */
 export type TelegramDeliveryState = 'generated'
 
 export interface TelegramChannelInfo {
@@ -381,13 +376,12 @@ export interface TelegramChannelInfo {
 }
 
 /**
- * A customer Telegram notification event recorded by the mock.
- *
- * Deliberately backend-replaceable: the shape mirrors an outbox row and carries
- * enough fields for deterministic UI/tests (event ID, booking ID, business
- * slug, customer phone, type, timestamp, message payload, channel, delivery
- * state). Internal identifiers (booking ID, business slug) are never projected
- * to the public customer UI — see CustomerTelegramNotificationView.
+ * A customer Telegram notification event. Part of the test-only fixture seam
+ * (`src/mock/*`): the shape mirrors an outbox row and carries enough fields for
+ * deterministic tests (event ID, booking ID, business slug, customer phone,
+ * type, timestamp, message payload, channel, delivery state). Production
+ * customer notifications come from the backend customer-status projection and
+ * `CustomerTelegramNotificationView`.
  */
 export interface CustomerTelegramNotification extends TelegramChannelInfo {
   id: string
@@ -476,11 +470,18 @@ export interface Booking {
   total: Money
   totalDurationMinutes: number
   deposit: Money
-  date: DateString
-  time: TimeOfDay
+  /**
+   * Appointment slot. `null` when the backend did not project a usable instant
+   * (a corrupt timestamp stays unknown — it is never defaulted to a made-up
+   * date such as the epoch).
+   */
+  date: DateString | null
+  time: TimeOfDay | null
   customer: CustomerDetails
-  paymentMethod: PaymentMethodId
-  proof: ProofFile
+  /** `null` when no payment is recorded, or its method code is not recognised. */
+  paymentMethod: PaymentMethodId | null
+  /** `null` when the booking has no payment proof on file. */
+  proof: ProofFile | null
   rejectionReason: string | null
   createdAt: Timestamp
   updatedAt: Timestamp

@@ -1,4 +1,5 @@
 import type {
+  Booking,
   BookingDraft,
   BusinessDetails,
   BusinessPage,
@@ -191,18 +192,25 @@ export const mockApi: BookingApi = {
     const page = readBusinessPage(businessSlug)
     if (!page) return []
     const telegramConnected = isCustomerTelegramConnected(businessSlug, phone)
-    return getBookingsByPhone(businessSlug, phone).map((booking) => ({
-      business: { slug: page.business.slug, name: page.business.name },
-      customerName: booking.customer.name,
-      lineItems: booking.lineItems,
-      date: booking.date,
-      time: booking.time,
-      bookingState: booking.state,
-      paymentState: booking.paymentState,
-      rejectionReason: booking.rejectionReason,
-      createdAt: booking.createdAt,
-      telegramConnected,
-      telegramNotifications: booking.telegramNotices.map((notice) => ({
+    // The customer-facing projection requires a slot, so a booking without one
+    // is not projectable and is skipped rather than shown with a made-up date.
+    return getBookingsByPhone(businessSlug, phone)
+      .filter(
+        (booking): booking is Booking & { date: DateString; time: TimeOfDay } =>
+          booking.date !== null && booking.time !== null,
+      )
+      .map((booking) => ({
+        business: { slug: page.business.slug, name: page.business.name },
+        customerName: booking.customer.name,
+        lineItems: booking.lineItems,
+        date: booking.date,
+        time: booking.time,
+        bookingState: booking.state,
+        paymentState: booking.paymentState,
+        rejectionReason: booking.rejectionReason,
+        createdAt: booking.createdAt,
+        telegramConnected,
+        telegramNotifications: booking.telegramNotices.map((notice) => ({
         type: notice.type,
         message: notice.message,
         date: notice.date,

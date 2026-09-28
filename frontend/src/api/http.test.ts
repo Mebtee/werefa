@@ -30,7 +30,13 @@ describe('resolveApiBaseUrl', () => {
   })
 
   it('throws when no base URL is configured for a production build', () => {
-    expect(() => resolveApiBaseUrl(undefined, false)).toThrow(
+    // Pass an explicit blank value rather than `undefined`: `undefined` selects
+    // the parameter default, which reads the real `VITE_API_BASE_URL` and would
+    // leak a developer's local .env.local into this assertion.
+    expect(() => resolveApiBaseUrl('', false)).toThrow(
+      /VITE_API_BASE_URL/,
+    )
+    expect(() => resolveApiBaseUrl('   ', false)).toThrow(
       /VITE_API_BASE_URL/,
     )
   })

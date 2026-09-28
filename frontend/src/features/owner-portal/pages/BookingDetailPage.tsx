@@ -26,7 +26,7 @@ import { Button } from '@/components/ui/Button'
 import { Field } from '@/components/ui/Field'
 import { formatDateLong, formatTimestamp } from '@/lib/time'
 import { formatBytes, formatMoney, formatTime } from '@/lib/format'
-import { PAYMENT_METHOD_FALLBACK } from '@/config/site'
+import { paymentMethodLabel } from '@/lib/paymentMethods'
 
 type ConfirmMode =
   | 'cancel-confirmed'
@@ -156,14 +156,11 @@ export function BookingDetailPage() {
     )
   }
 
-  const paymentLabel = business
-    ? (business.paymentInstructions.methods.find(
-        (method) => method.id === booking.paymentMethod,
-      )?.label ??
-      PAYMENT_METHOD_FALLBACK.find((method) => method.id === booking.paymentMethod)?.label ??
-      booking.paymentMethod)
-    : (PAYMENT_METHOD_FALLBACK.find((method) => method.id === booking.paymentMethod)?.label ??
-      booking.paymentMethod)
+  // A stored payment method is labelled from the real backend method code.
+  // The public API carries no owner-published payment instructions, so the code's
+  // own display label is the only thing shown. No placeholder details are ever
+  // rendered.
+  const paymentLabel = paymentMethodLabel(booking.paymentMethod) ?? booking.paymentMethod
 
   const reviewPaymentStatus = paymentReview.review?.paymentStatus ?? null
 
@@ -241,7 +238,9 @@ export function BookingDetailPage() {
             Appointment
           </h2>
           <p className="booking-value">
-            {formatDateLong(booking.date)} at {formatTime(booking.time)}
+            {booking.date && booking.time
+              ? `${formatDateLong(booking.date)} at ${formatTime(booking.time)}`
+              : 'Appointment time not available'}
           </p>
           <p className="card__subtitle">
             Total time {booking.totalDurationMinutes} minutes ·{' '}

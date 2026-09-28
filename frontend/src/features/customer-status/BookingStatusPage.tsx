@@ -9,7 +9,6 @@ import {
   telegramConnectedFromView,
 } from '@/api/booking.mapper'
 import { hybridizePublicBusiness } from '@/api/business.mapper'
-import { SITE_HOME_SLUG } from '@/config/site'
 import { isValidPhone } from '@/lib/validation'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
@@ -141,11 +140,6 @@ export function BookingStatusPage() {
               No business was found at this address. Check the link you were
               given, or ask the business for its correct booking link.
             </Alert>
-            <div style={{ marginTop: 'var(--space-4)' }}>
-              <Link className="btn btn--outline" to={`/p/${SITE_HOME_SLUG}`}>
-                Go to the demo business
-              </Link>
-            </div>
           </div>
         )}
 

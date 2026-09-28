@@ -9,11 +9,8 @@ import {
 import { categoryToCode } from '@/api/business.mapper'
 import { useOwnedBusiness } from '@/features/owner-portal/state/useOwnedBusiness'
 import { LoadState } from '@/features/owner-portal/components/LoadState'
-import { ImagePicker } from '@/features/owner-portal/components/ImagePicker'
-import { MockQrCode } from '@/features/owner-portal/components/MockQrCode'
 import { PauseCard } from '@/features/owner-portal/components/PauseCard'
 import { CATEGORY_LABEL } from '@/features/owner-portal/lib/labels'
-import { mockOwnerApi, type BrandingPatch } from '@/mock/ownerApi'
 import { mapUrl } from '@/lib/format'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
@@ -58,6 +55,32 @@ interface ParseErrors {
 /** Mirrors the backend ChangeSlugPayload rule (lowercase + single hyphens), 2–64 chars. */
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
+/**
+ * Read-only branding preview. It renders only what the backend projection
+ * holds (`branding.logoUrl` / `branding.coverUrl`); it never previews a locally
+ * selected file, because there is no upload endpoint to send one to.
+ */
+function BrandingPreview({
+  asset,
+  label,
+}: {
+  asset: ImageAsset | null
+  label: string
+}) {
+  return (
+    <div className="image-picker">
+      <p className="image-picker__label">{label}</p>
+      {asset ? (
+        <img className="image-picker__preview" src={asset.dataUrl} alt={asset.alt} />
+      ) : (
+        <div className="image-picker__placeholder" aria-hidden="true">
+          No image
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function BusinessProfilePage() {
   const { business, businessId, loading, error, reload } = useOwnedBusiness()
   const initialized = useRef(false)
@@ -75,36 +98,12 @@ export function BusinessProfilePage() {
   const [slugSuccess, setSlugSuccess] = useState(false)
   const [savingSlug, setSavingSlug] = useState(false)
 
-  // Branding (logo / cover photo) — still demo-only: the real business API has
-  // no file storage yet, so uploads stay in the in-memory mock store.
-  const [brandingBusy, setBrandingBusy] = useState(false)
-  const [brandingError, setBrandingError] = useState<string | null>(null)
-  const [brandingSuccess, setBrandingSuccess] = useState(false)
-  const [logo, setLogo] = useState<ImageAsset | null>(business?.logo ?? null)
-  const [coverPhoto, setCoverPhoto] = useState<ImageAsset | null>(
-    business?.coverPhoto ?? null,
-  )
-
-  const saveBranding = async (patch: BrandingPatch) => {
-    setBrandingBusy(true)
-    setBrandingError(null)
-    setBrandingSuccess(false)
-    try {
-      const result = await mockOwnerApi.saveBranding(patch)
-      if (!result.ok) {
-        setBrandingError(result.error)
-        return
-      }
-      if (patch.logo !== undefined) setLogo(patch.logo)
-      if (patch.coverPhoto !== undefined) setCoverPhoto(patch.coverPhoto)
-      setBrandingSuccess(true)
-      await reload()
-    } catch {
-      setBrandingError('Could not save the image. Please try again.')
-    } finally {
-      setBrandingBusy(false)
-    }
-  }
+  // Branding (logo / cover photo) is read-only here: the backend projects
+  // `logoUrl`/`coverUrl` (always null until the file-storage service lands)
+  // and exposes no upload endpoint, so nothing is uploaded or stored in the
+  // browser. The section reports the real backend state only.
+  const logo = business?.logo ?? null
+  const coverPhoto = business?.coverPhoto ?? null
 
   useEffect(() => {
     if (initialized.current || !business) return
@@ -396,38 +395,16 @@ export function BusinessProfilePage() {
         </div>
 
         <div style={{ marginBottom: 'var(--space-4)' }}>
-          <Alert tone="info" title="Demo-only previews">
-            Real image hosting is not part of this phase, so uploads stay in the
-            local demo store and are not sent to the backend.
+          <Alert tone="info" title="Image uploads are not available yet">
+            The backend stores your logo and cover photo, but this phase has no
+            image upload endpoint, so nothing can be uploaded or changed from
+            here. The images below are exactly what the backend holds.
           </Alert>
         </div>
 
-        {brandingError && (
-          <div style={{ marginBottom: 'var(--space-4)' }}>
-            <Alert tone="danger">{brandingError}</Alert>
-          </div>
-        )}
-        {brandingSuccess && (
-          <div style={{ marginBottom: 'var(--space-4)' }}>
-            <Alert tone="success" live="polite">
-              Branding updated. Your public page is up to date.
-            </Alert>
-          </div>
-        )}
-
         <div className="branding-section__pair">
-          <ImagePicker
-            current={logo}
-            onSaved={(asset) => void saveBranding({ logo: asset })}
-            label="Logo"
-            busy={brandingBusy}
-          />
-          <ImagePicker
-            current={coverPhoto}
-            onSaved={(asset) => void saveBranding({ coverPhoto: asset })}
-            label="Cover photo"
-            busy={brandingBusy}
-          />
+          <BrandingPreview asset={logo} label="Logo" />
+          <BrandingPreview asset={coverPhoto} label="Cover photo" />
         </div>
       </section>
 
@@ -506,14 +483,6 @@ export function BusinessProfilePage() {
               preview
             </a>
           </p>
-
-          <div className="public-url-card__qr">
-            <MockQrCode slug={business.slug} className="qr-svg" />
-            <p className="public-url-card__qr-hint">
-              QR code mock — encodes this real booking link and updates if the
-              link changes. A real QR encoder is added at integration time.
-            </p>
-          </div>
         </div>
       </section>
 

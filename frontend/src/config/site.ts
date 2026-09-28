@@ -1,15 +1,16 @@
 /**
  * Frontend site-level static configuration (Prompt 55).
  *
- * These values are presentational / navigation defaults only — never booking,
- * availability, service or payment data. The backend is the only authority for
- * a business's existence, profile, services, availability and deposits; this
- * file deliberately lives OUTSIDE `@/mock/*` so production routes never import
- * the in-memory demo seam.
+ * These values are presentational constants only — never booking, availability,
+ * service, payment or identity data. The backend is the only authority for a
+ * business's existence, profile, services, availability and deposits, so this
+ * file contains no business, slug, phone, price or schedule values.
+ *
+ * There is deliberately no demo/home business slug here: the product defines no
+ * marketing home page and no demo business (see
+ * docs/WEREFA-COMPLETE-SPECIFICATION.md). A business page is reachable only at
+ * the real `/p/:slug` the owner configured.
  */
-
-/** The demo/home business the generic `/` redirect and not-found links point to. */
-export const SITE_HOME_SLUG = 'addis-beauty-lounge'
 
 /**
  * How many days (from today, inclusive) the date strip offers. The backend
@@ -17,20 +18,3 @@ export const SITE_HOME_SLUG = 'addis-beauty-lounge'
  * simply disabled. This is a UI sizing constant, not an availability engine.
  */
 export const BOOKING_WINDOW_DAYS = 14
-
-/** Fallback presentational deposit instructions when a business is not paying.
- *  Used only inside the payment step when the backend reports a deposit due;
- *  the deposit AMOUNT itself always comes from the backend availability view.
- */
-export const PAYMENT_METHOD_FALLBACK = [
-  {
-    id: 'bank-transfer' as const,
-    label: 'Bank transfer',
-    steps: ['Transfer the deposit to the business bank account, then attach your proof of payment.'],
-  },
-  {
-    id: 'telebirr' as const,
-    label: 'Telebirr (mobile money)',
-    steps: ['Send the deposit to the business via Telebirr, then attach your proof of payment.'],
-  },
-]

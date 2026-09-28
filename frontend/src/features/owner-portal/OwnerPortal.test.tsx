@@ -469,93 +469,25 @@ describe('pause and resume', () => {
 })
 
 describe('business branding and public preview', () => {
-  function fakeImage(seed = 1): File {
-    const bytes = new Uint8Array(64)
-    for (let i = 0; i < bytes.length; i++) bytes[i] = (i * seed) % 256
-    return new File([bytes], 'image.png', { type: 'image/png' })
-  }
-
-  function pickImage(container: HTMLElement, picker: number, file: File) {
-    const input = container.querySelectorAll<HTMLInputElement>(
-      'input[type="file"]',
-    )[picker]
-    fireEvent.change(input, { target: { files: [file] } })
-  }
-
-  it('uploads a logo and cover photo and the public page renders both', async () => {
-    const { container, router } = renderAt('/owner/business')
+  it('shows branding as read-only, with no upload control and no invented image', async () => {
+    const { container } = renderAt('/owner/business')
 
     await screen.findByRole('heading', { name: 'Business profile' })
     await screen.findByRole('heading', { name: 'Branding', level: 2 })
 
-    pickImage(container, 0, fakeImage(1))
-    await user.click(await screen.findByRole('button', { name: 'Keep' }))
-    expect(await screen.findByText(/Branding updated/)).toBeInTheDocument()
+    // There is no image upload endpoint, so the page must not offer a picker.
+    expect(screen.getByText(/image uploads are not available yet/i)).toBeInTheDocument()
+    expect(container.querySelectorAll('input[type="file"]')).toHaveLength(0)
+    expect(screen.queryByRole('button', { name: /^Remove$/ })).not.toBeInTheDocument()
 
-    await waitFor(() => {
-      const stored = getBusiness(PRIMARY_BUSINESS_SLUG)!
-      expect(stored.logo?.dataUrl).toMatch(/^data:image\/png;base64/)
-    })
-
-    pickImage(container, 1, fakeImage(2))
-    await user.click(await screen.findByRole('button', { name: 'Keep' }))
-    await waitFor(() => {
-      const stored = getBusiness(PRIMARY_BUSINESS_SLUG)!
-      expect(stored.coverPhoto?.dataUrl).toMatch(/^data:image\/png;base64/)
-    })
-
-    router.navigate('/p/addis-beauty-lounge')
-    await screen.findByRole('heading', { name: 'Addis Beauty Lounge' })
-    const logoImg = container.querySelector('.hero__logo-img') as HTMLImageElement
-    expect(logoImg).not.toBeNull()
-    expect(logoImg.src).toMatch(/^data:image\/png;base64/)
-    const coverImg = container.querySelector('.hero__cover') as HTMLImageElement
-    expect(coverImg).not.toBeNull()
-    expect(coverImg.src).toMatch(/^data:image\/png;base64/)
-  })
-
-  it('keeps exactly one logo: replacing removes the old image (no gallery)', async () => {
-    const { container } = renderAt('/owner/business')
-
-    await screen.findByRole('heading', { name: 'Business profile' })
-
-    pickImage(container, 0, fakeImage(1))
-    await user.click(await screen.findByRole('button', { name: 'Keep' }))
-    await screen.findByText(/Branding updated/)
-
-    const firstDataUrl = getBusiness(PRIMARY_BUSINESS_SLUG)!.logo!.dataUrl
-    expect(firstDataUrl).toBeTruthy()
-    expect(container.querySelectorAll('.image-picker__preview')).toHaveLength(1)
-
-    pickImage(container, 0, fakeImage(2))
-    await user.click(await screen.findByRole('button', { name: 'Keep' }))
-    await waitFor(() => {
-      const stored = getBusiness(PRIMARY_BUSINESS_SLUG)!
-      expect(stored.logo).not.toBeNull()
-      expect(stored.logo!.dataUrl).not.toBe(firstDataUrl)
-    })
-
-    // No gallery surface: a single preview replaces the previous one.
-    expect(container.querySelectorAll('.image-picker__preview')).toHaveLength(1)
-  })
-
-  it('removing the logo falls back to initials on the public page', async () => {
-    const { container, router } = renderAt('/owner/business')
-
-    await screen.findByRole('heading', { name: 'Business profile' })
-
-    pickImage(container, 0, fakeImage(1))
-    await user.click(await screen.findByRole('button', { name: 'Keep' }))
-    await screen.findByText(/Branding updated/)
-
-    await user.click(screen.getByRole('button', { name: 'Remove' }))
-    expect(await screen.findByText(/Branding updated/)).toBeInTheDocument()
-    expect(getBusiness(PRIMARY_BUSINESS_SLUG)!.logo).toBeNull()
-
-    router.navigate('/p/addis-beauty-lounge')
-    await screen.findByRole('heading', { name: 'Addis Beauty Lounge' })
-    expect(container.querySelector('.hero__logo-img')).toBeNull()
-    expect(screen.getByText('AL')).toBeInTheDocument()
+    // Whatever the backend holds is shown verbatim, and nothing is invented.
+    const business = getBusiness(PRIMARY_BUSINESS_SLUG)!
+    const previews = container.querySelectorAll('.image-picker__preview')
+    const expectedImages = [business.logo, business.coverPhoto].filter(Boolean)
+    expect(previews).toHaveLength(expectedImages.length)
+    for (const preview of previews) {
+      expect((preview as HTMLImageElement).src).toMatch(/^data:image\//)
+    }
   })
 
   it('previews the public URL, opens the public page, and shows the map link', async () => {
@@ -580,14 +512,14 @@ describe('business branding and public preview', () => {
     ).toBeInTheDocument()
   })
 
-  it('regenerates the QR mock when the public link changes', async () => {
+  it('updates the real public link and never renders a generated QR image', async () => {
     renderAt('/owner/business')
 
     await screen.findByRole('heading', { name: 'Business profile' })
-    const first = screen
-      .getByRole('img', { name: 'QR code' })
-      .querySelector('g') as SVGElement
-    const firstInner = first.innerHTML
+
+    // A QR code was previously drawn in the browser from the link. Nothing
+    // generates one now: the link itself is the only artefact.
+    expect(screen.queryByRole('img', { name: 'QR code' })).not.toBeInTheDocument()
 
     const slugInput = screen.getByLabelText('Public booking link')
     await user.clear(slugInput)
@@ -595,34 +527,24 @@ describe('business branding and public preview', () => {
     await user.click(screen.getByRole('button', { name: 'Save link' }))
     expect(await screen.findByText('Public link updated.')).toBeInTheDocument()
 
-    await waitFor(() => {
-      const next = screen
-        .getByRole('img', { name: 'QR code' })
-        .querySelector('g') as SVGElement
-      expect(next.innerHTML).not.toBe(firstInner)
-    })
     expect(screen.getByTestId('public-page-link')).toHaveTextContent(
       'werefa.app/p/adie-urban-lounge',
     )
+    expect(screen.getByTestId('open-public-page')).toHaveAttribute(
+      'href',
+      '/p/adie-urban-lounge',
+    )
   })
 
-  it('serves the same public page regardless of which owner owns it; another business is untouched', async () => {
-    const { container, router } = renderAt('/owner/business')
+  it('serves the same public page regardless of which owner owns it', async () => {
+    const { router } = renderAt('/owner/business')
 
     await screen.findByRole('heading', { name: 'Business profile' })
-    pickImage(container, 0, fakeImage(3))
-    await user.click(await screen.findByRole('button', { name: 'Keep' }))
-    await screen.findByText(/Branding updated/)
-
-    const business = getBusiness(PRIMARY_BUSINESS_SLUG)!
-    expect(business.logo).not.toBeNull()
-
-    const others = [getBusiness('marathon-auto-care')!, getBusiness('riverside-dry-cleaning')!]
-    for (const other of others) expect(other.logo).toBeNull()
+    await screen.findByRole('heading', { name: 'Branding', level: 2 })
 
     router.navigate('/p/riverside-dry-cleaning')
     await screen.findByRole('heading', { name: 'Riverside Dry Cleaning' })
-    expect(container.querySelector('.hero__logo-img')).toBeNull()
+    expect(screen.getByRole('heading', { name: 'Riverside Dry Cleaning' })).toBeInTheDocument()
   })
 
   it('lets the owner pause bookings from the business profile page', async () => {

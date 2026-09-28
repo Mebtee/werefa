@@ -1,6 +1,5 @@
 import type { RouteObject } from 'react-router-dom'
-import { createBrowserRouter, Navigate } from 'react-router-dom'
-import { SITE_HOME_SLUG } from '@/config/site'
+import { createBrowserRouter } from 'react-router-dom'
 import { PublicBookingPage } from '@/pages/PublicBookingPage'
 import { BookingStatusPage } from '@/pages/BookingStatusPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
@@ -30,8 +29,10 @@ import SubscriptionPage from '@/features/owner-portal/pages/SubscriptionPage'
 /**
  * Route tree.
  *
- * Public surface (this phase): the business page lives at /p/:slug. Customers
- * remain unauthenticated (REQ-040).
+ * Public surface: the business page lives at /p/:slug and is reachable only
+ * through a real owner-configured link. There is no marketing home page and no
+ * demo business in the product, so `/` is handled by the not-found route below.
+ * Customers remain unauthenticated (REQ-040).
  * The owner surface (/owner/*) requires a real backend Owner session (Prompt
  * 44): unauthenticated visitors are redirected to /owner/login. The platform
  * administration surface (/admin/*, Prompt 53) requires a real Admin/Super
@@ -39,10 +40,6 @@ import SubscriptionPage from '@/features/owner-portal/pages/SubscriptionPage'
  * REQ-202/203/205, REQ-217/219/220, REQ-198–200).
  */
 export const appRoutes: RouteObject[] = [
-  {
-    path: '/',
-    element: <Navigate to={`/p/${SITE_HOME_SLUG}`} replace />,
-  },
   {
     path: '/p/:slug',
     element: <PublicBookingPage />,

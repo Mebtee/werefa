@@ -218,7 +218,7 @@ describe('terminal-state guards and idempotency (REQ-102/103/104/123, T9/T10)', 
       expect(result.value.state).toBe('payment-pending')
       expect(result.value.paymentState).toBe('pending')
       expect(result.value.rejectionReason).toBeNull()
-      expect(result.value.proof.fileName).toBe('fresh.png')
+      expect(result.value.proof!.fileName).toBe('fresh.png')
       expect(result.value.history.at(-1)).toMatchObject({
         previous: 'rejected',
         state: 'payment-pending',
@@ -367,7 +367,7 @@ describe('idempotent double actions and tenant mutation guard rails (Prompt 38)'
     })
     expect(again.ok).toBe(false)
     expect(created.booking.state).toBe('payment-pending')
-    expect(created.booking.proof.fileName).toBe('a.png')
+    expect(created.booking.proof!.fileName).toBe('a.png')
     expect(created.booking.history).toHaveLength(len)
     expect(created.booking.telegramNotices).toHaveLength(notices)
     // Two proof-received events are legitimate: creation and the first resubmit.

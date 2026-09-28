@@ -38,7 +38,7 @@ describe('seeded bookings', () => {
   it('getOccupiedBlocks excludes slot-released bookings', () => {
     const pending = listBookings(PRIMARY_BUSINESS_SLUG).find((b) => b.state === 'payment-pending')
     expect(pending).toBeDefined()
-    const blocksBefore = getOccupiedBlocks(PRIMARY_BUSINESS_SLUG, pending!.date)
+    const blocksBefore = getOccupiedBlocks(PRIMARY_BUSINESS_SLUG, pending!.date!)
     expect(blocksBefore.some((b) => b.start === pending!.time)).toBe(true)
   })
 })

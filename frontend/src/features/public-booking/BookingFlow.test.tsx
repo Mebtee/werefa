@@ -218,9 +218,14 @@ describe('public booking flow', () => {
     expect(screen.getByText(/deposit to pay/i)).toBeInTheDocument()
 
     await user.click(screen.getByRole('radio', { name: /bank transfer/i }))
+    // The API carries no owner-published payment instructions, so the step must
+    // say so instead of rendering a fabricated account.
     expect(
-      within(screen.getByRole('radiogroup')).getByText(/transfer the deposit/i),
+      within(screen.getByRole('radiogroup')).getByText(/bank transfer/i),
     ).toBeInTheDocument()
+    expect(screen.getByText(/payment details are not published online/i)).toBeInTheDocument()
+    expect(screen.queryByText(/demo bank/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/account number/i)).not.toBeInTheDocument()
 
     const proofInput = container.querySelector<HTMLInputElement>('#proof-upload')
     if (!proofInput) throw new Error('proof upload input missing')
@@ -569,7 +574,7 @@ describe('date & time step navigation', () => {
 })
 
 describe('public business page states (Prompt 55)', () => {
-  it('shows Business not found for an invalid slug, with a way back to the demo business', async () => {
+  it('shows Business not found for an invalid slug, with no demo fallback', async () => {
     renderPage('/p/this-business-does-not-exist')
 
     expect(
@@ -577,9 +582,10 @@ describe('public business page states (Prompt 55)', () => {
     ).toBeInTheDocument()
     expect(screen.getByText(/no business was found at this address/i)).toBeInTheDocument()
 
-    const homeLink = screen.getByRole('link', { name: /go to the demo business/i })
-    expect(homeLink).toHaveAttribute('href', '/p/addis-beauty-lounge')
-
+    // A missing business stays missing: no demo business is offered, and no
+    // link to any hard-coded business identity is rendered.
+    expect(screen.queryByRole('link', { name: /demo/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /addis beauty lounge/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Addis Beauty Lounge' })).not.toBeInTheDocument()
   })
 

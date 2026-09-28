@@ -6,6 +6,30 @@ afterEach(() => {
   cleanup()
 })
 
+/**
+ * No test may reach the real network.
+ *
+ * The suite layers stubs by replacing `globalThis.fetch` and delegating to
+ * whatever was installed before them, so the bottom of that chain must fail
+ * loudly rather than hit a real host. Without this, a developer's running
+ * backend on :3000 answers unstubbed routes (for example a 401 for an
+ * unauthenticated owner call), and the same commit passes or fails depending on
+ * whether that server happens to be up.
+ */
+const realFetch = globalThis.fetch
+globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+  const url = input instanceof URL ? input.href : String(input)
+  const method = (init?.method ?? 'GET').toUpperCase()
+  return Promise.reject(
+    new Error(
+      `Unstubbed network request in a frontend test: ${method} ${url}. ` +
+        'Install a stub (installFetchStub / installBusinessApiStub) or model ' +
+        'the route in the double.',
+    ),
+  )
+}) as typeof fetch
+;(globalThis as Record<string, unknown>).__realFetch = realFetch
+
 // jsdom does not implement fetch, so the global Request is Node's undici
 // implementation, which requires the AbortSignal passed to it to be an
 // instance of Node's own AbortSignal. jsdom installs its own AbortController,

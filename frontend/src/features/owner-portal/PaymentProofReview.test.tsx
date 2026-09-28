@@ -48,7 +48,7 @@ describe('owner payment-proof review — real API', () => {
     const { stub } = renderAppAt(`/owner/bookings/${pending.id}`)
     await screen.findByRole('heading', { name: pending.customer.name })
 
-    expect(await screen.findByText(pending.proof.fileName)).toBeInTheDocument()
+    expect(await screen.findByText(pending.proof!.fileName)).toBeInTheDocument()
     expect(
       stub.calls.some(
         (call) => call.url.endsWith(bookingEndpoint(pending.id)) && call.method === 'GET',
@@ -150,7 +150,7 @@ describe('owner payment-proof review — error handling', () => {
     // failed load yields the safe not-found state, never mock data.
     expect(await screen.findByText(/Booking not found/i)).toBeInTheDocument()
     expect(screen.queryByText(pending.customer.name)).not.toBeInTheDocument()
-    expect(screen.queryByText(pending.proof.fileName)).not.toBeInTheDocument()
+    expect(screen.queryByText(pending.proof!.fileName)).not.toBeInTheDocument()
     expect(
       screen.queryByRole('button', { name: 'Download proof' }),
     ).not.toBeInTheDocument()
@@ -188,7 +188,7 @@ describe('owner payment-proof review — error handling', () => {
     })
 
     expect(await screen.findByText(/Booking not found/i)).toBeInTheDocument()
-    expect(screen.queryByText(pending.proof.fileName)).not.toBeInTheDocument()
+    expect(screen.queryByText(pending.proof!.fileName)).not.toBeInTheDocument()
     expect(
       screen.queryByRole('button', { name: 'Download proof' }),
     ).not.toBeInTheDocument()

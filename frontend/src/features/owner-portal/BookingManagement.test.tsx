@@ -184,7 +184,7 @@ describe('booking detail information (REQ-174)', () => {
 
     // Appointment with the exact date/time, duration and line items.
     expect(
-      screen.getByText(`${formatDateLong(b.date)} at ${b.time}`),
+      screen.getByText(`${formatDateLong(b.date!)} at ${b.time!}`),
     ).toBeInTheDocument()
     expect(screen.getByText(/Total time \d+ minutes/)).toBeInTheDocument()
     expect(screen.getByText(b.lineItems[0].name)).toBeInTheDocument()
@@ -194,9 +194,9 @@ describe('booking detail information (REQ-174)', () => {
 
     // Payment: method label, proof metadata.
     expect(screen.getByText('Bank transfer')).toBeInTheDocument()
-    expect(screen.getByText(b.proof.fileName)).toBeInTheDocument()
+    expect(screen.getByText(b.proof!.fileName)).toBeInTheDocument()
     expect(
-      screen.getByText(`(${formatBytes(b.proof.sizeBytes)} · ${b.proof.mimeType})`),
+      screen.getByText(`(${formatBytes(b.proof!.sizeBytes)} · ${b.proof!.mimeType})`),
     ).toBeInTheDocument()
 
     // State history carries the current marker and the actor trail. The last
@@ -235,7 +235,7 @@ describe('payment-pending actions: cancel (SM-08)', () => {
     expect(changed.slotReleased).toBe(false)
     expect(changed.telegramNotices).toHaveLength(0)
     expect(
-      getOccupiedBlocks(PRIMARY_BUSINESS_SLUG, pending.date).some(
+      getOccupiedBlocks(PRIMARY_BUSINESS_SLUG, pending.date!).some(
         (block) => block.start === pending.time,
       ),
     ).toBe(true)

@@ -56,13 +56,24 @@ function compareText(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0
 }
 
+/** Unknown values sort last in ascending order, first in descending order. */
+function compareNullableText(a: string | null, b: string | null): number {
+  if (a === b) return 0
+  if (a === null) return 1
+  if (b === null) return -1
+  return compareText(a, b)
+}
+
 function compareDateTime(a: Booking, b: Booking): number {
-  return compareText(a.date, b.date) || compareText(a.time, b.time)
+  return (
+    compareNullableText(a.date, b.date) || compareNullableText(a.time, b.time)
+  )
 }
 
 /**
- * Booking ID ordering is numeric/chronological (REQ-190 AC1). The mock IDs are
- * random strings, so creation time stands in for the issuance sequence.
+ * The backend booking id is a numeric surrogate whose issuance order is
+ * chronological, and the real wire id is what the owner list carries, so the
+ * creation instant stands in for that sequence (REQ-190 AC1).
  */
 function compareBookingId(a: Booking, b: Booking): number {
   return compareText(a.createdAt, b.createdAt)
@@ -135,8 +146,8 @@ export function filterBookings(
     if (filters.statuses.size > 0 && !filters.statuses.has(booking.state)) {
       return false
     }
-    if (filters.dateFrom && booking.date < filters.dateFrom) return false
-    if (filters.dateTo && booking.date > filters.dateTo) return false
+    if (filters.dateFrom && booking.date && booking.date < filters.dateFrom) return false
+    if (filters.dateTo && booking.date && booking.date > filters.dateTo) return false
     if (query) {
       const name = booking.customer.name.toLocaleLowerCase()
       const phone = booking.customer.phone.toLocaleLowerCase()

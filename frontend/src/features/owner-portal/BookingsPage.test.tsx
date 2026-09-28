@@ -236,7 +236,7 @@ describe('date range filter', () => {
     renderAt('/owner/bookings')
     await waitForBookings()
     await setDate('To date', '2030-03-04')
-    const expected = allBookings().filter((b) => b.date <= '2030-03-04').length
+    const expected = allBookings().filter((b) => b.date! <= '2030-03-04').length
     const status = await screen.findByRole('status')
     expect(status.textContent).toContain(`Showing ${expected} of ${allBookings().length}`)
     expect(screen.getByText('Alpha')).toBeInTheDocument()

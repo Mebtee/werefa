@@ -428,6 +428,9 @@ function conflictReasonFor(
   snapshot: ScheduleSnapshot,
   booking: Booking,
 ): string | null {
+  // A booking with no usable slot cannot be checked against the schedule; the
+  // mock store never creates one, so this is a defensive branch only.
+  if (booking.date === null || booking.time === null) return null
   const start = minutesOf(booking.time)
   const end = start + booking.totalDurationMinutes
   const periods = periodsForSchedule(snapshot, booking.date)
@@ -646,7 +649,8 @@ function bookingBlock(booking: Booking): {
   date: DateString
   start: TimeOfDay
   end: TimeOfDay
-} {
+} | null {
+  if (booking.date === null || booking.time === null) return null
   return {
     date: booking.date,
     start: booking.time,
@@ -662,6 +666,7 @@ export function getOccupiedBlocks(
   return bookings
     .filter((b) => b.businessSlug === slug && !b.slotReleased && b.date === date)
     .map(bookingBlock)
+    .filter((block): block is NonNullable<typeof block> => block !== null)
 }
 
 /** All bookings of a business, newest first (owner queue, REQ-175). */
@@ -995,6 +1000,7 @@ export function completeDueBookings(
     (b) =>
       b.businessSlug === slug &&
       b.state === 'confirmed' &&
+      b.time !== null &&
       shiftTime(b.time, b.totalDurationMinutes) <= at,
   )
   for (const booking of due) {

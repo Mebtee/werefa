@@ -36,7 +36,6 @@ function makeBusiness(overrides: Partial<BusinessDetails> = {}): BusinessDetails
     },
     pause: null,
     prepayment: { mode: 'none' },
-    paymentInstructions: { methods: [] },
     currency: 'ETB',
     bookingWindowDays: 30,
     telegramConnected: false,

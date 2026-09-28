@@ -7,7 +7,10 @@ import type {
 } from '@/types/models'
 import { formatBytes, formatMoney } from '@/lib/format'
 import { validateProofFile } from '@/lib/validation'
-import { PAYMENT_METHOD_FALLBACK } from '@/config/site'
+import {
+  PAYMENT_METHOD_IDS as PUBLISHABLE_METHOD_IDS,
+  PAYMENT_METHOD_LABEL,
+} from '@/lib/paymentMethods'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/cn'
@@ -38,13 +41,14 @@ export function PaymentStep({
   const [proofError, setProofError] = useState<string | null>(null)
   const [touched, setTouched] = useState(false)
 
-  // The backend does not yet project per-business payment instructions, so the
-  // payment step uses generic presentational steps. The deposit AMOUNT shown
-  // above is always the backend-computed value from the availability view.
-  const methods =
-    business.paymentInstructions.methods.length > 0
-      ? business.paymentInstructions.methods
-      : PAYMENT_METHOD_FALLBACK
+  // The public business API (PublicBusinessView) carries no owner-published
+  // payment instructions — there is no such field to read. So nothing is
+  // invented here: the deposit AMOUNT is the backend-computed value from the
+  // availability view, and the only choices offered are the two method codes the
+  // booking API actually accepts. The customer is told plainly that the
+  // destination account is not published online, instead of being shown
+  // fabricated bank or mobile-money details.
+  const methods = PUBLISHABLE_METHOD_IDS.map((id) => ({ id, label: PAYMENT_METHOD_LABEL[id] }))
 
   const handleProofChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] ?? null
@@ -87,6 +91,11 @@ export function PaymentStep({
       </Alert>
 
       <h3 className="option-group__title">Payment method</h3>
+      <Alert tone="warning" title="Payment details are not published online">
+        This business requires a deposit, but its booking page does not publish
+        a bank account or mobile-money number. Ask the business where to send the
+        deposit, then choose how you paid and attach your proof.
+      </Alert>
       <div className="payment-methods" role="radiogroup" aria-label="Payment method">
         {methods.map((method) => {
           const active = method.id === paymentMethod
@@ -104,13 +113,6 @@ export function PaymentStep({
               />
               <span>
                 <span className="payment-option__label">{method.label}</span>
-                {active && (
-                  <ul className="instructions">
-                    {method.steps.map((step, i) => (
-                      <li key={i}>{step}</li>
-                    ))}
-                  </ul>
-                )}
               </span>
             </label>
           )

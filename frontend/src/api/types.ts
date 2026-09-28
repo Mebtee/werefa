@@ -221,10 +221,8 @@ export interface UpdateBusinessSettingsInput {
 // projections; the backend remains authoritative. Weekdays are ISO
 // 1 (Monday) … 7 (Sunday) — matching the backend contract.
 //
-// Staged-slice note (Prompt 47): the bookings vertical is NOT migrated, so the
-// conflict/exception views carry the mock booking-seam id (`bookingId` as a
-// string). When the bookings integration lands this becomes the backend
-// numeric booking id and the UI maps it through unchanged.
+// The conflict/exception views carry the backend booking id (`bookingId` as a
+// string on the wire, converted to a number by the backend param DTO).
 // ---------------------------------------------------------------------------
 
 export interface WorkingPeriodView {

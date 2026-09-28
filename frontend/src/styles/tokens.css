@@ -8,7 +8,7 @@
   --color-border: #e3ddd5;
   --color-border-strong: #c9c0b5;
 
-  /* Brand accent — overridden per business (mock) on .page-root */
+  /* Brand accent — overridden per business on .page-root */
   --accent: #b4457f;
   --accent-strong: #9a3868;
   --accent-soft: color-mix(in srgb, var(--accent) 12%, #ffffff);

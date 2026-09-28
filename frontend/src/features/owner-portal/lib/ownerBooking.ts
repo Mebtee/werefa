@@ -22,8 +22,10 @@ import {
  * in UTC — tests round-trip in any machine timezone.
  *
  * The owner projection carries no Telegram state, no per-booking schedule
- * exception and no slot-release flag, so those mock-only fields map to stable
- * defaults (the UI no longer renders them). List rows have no history/proofs —
+ * exception and no slot-release flag, so those legacy model fields map to
+ * stable defaults (the UI does not render them). A slot, payment method or
+ * proof the backend did not report stays `null` — it is never replaced with a
+ * placeholder date, time, method or file. List rows have no history/proofs —
  * they get a single synthetic history entry from `actorType` so the owner actor
  * sort (REQ-188/190) keeps working client-side.
  */
@@ -119,6 +121,8 @@ export function ownerBookingFromWire(view: OwnerBookingView): Booking {
     id: String(view.bookingId),
     businessSlug: '',
     state,
+    // 'pending' is the real "no payment decision recorded yet" state, not a
+    // substituted value: the backend owns every accepted/rejected transition.
     paymentState: ownerPaymentStateFromWire(view.payment?.status) ?? 'pending',
     lineItems: view.components.map((c) => ({
       name: c.name,
@@ -128,22 +132,21 @@ export function ownerBookingFromWire(view: OwnerBookingView): Booking {
     total: view.totalPriceMinor,
     totalDurationMinutes: view.components.reduce((sum, c) => sum + c.durationMinutes, 0),
     deposit: view.payment?.prepaidMinor ?? 0,
-    date: slot?.date ?? '1970-01-01',
-    time: slot?.time ?? '00:00',
+    date: slot?.date ?? null,
+    time: slot?.time ?? null,
     customer: {
       name: view.customerName,
       phone: view.customerPhone,
       note: view.note ?? '',
     },
-    paymentMethod:
-      (view.payment && PAYMENT_METHOD_FROM_WIRE[view.payment.method]) ?? 'bank-transfer',
+    paymentMethod: PAYMENT_METHOD_FROM_WIRE[view.payment?.method ?? ''] ?? null,
     proof: latestProof
       ? {
           fileName: latestProof.fileName,
           sizeBytes: latestProof.sizeBytes,
           mimeType: latestProof.mimeType,
         }
-      : { fileName: '', sizeBytes: 0, mimeType: 'image/png' },
+      : null,
     rejectionReason:
       historyWire
         .filter((entry) => entry.toStatus === 'REJECTED')

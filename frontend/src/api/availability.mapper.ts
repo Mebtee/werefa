@@ -10,9 +10,9 @@ import type { PublicAvailabilityView } from './types'
  * renders 24-hour local times (REQ-225) and "HH:MM" date keys (REQ-224), so
  * this mapper converts ISO → local wall clock. It also applies the front-end
  * *presentation* rule that already-today slots in the past are not offered —
- * the backend has no past-time rule yet (spec §46 item 2), and the still-mock
- * booking submission re-checks the chosen time with the same `isPastSlot`
- * rule, so offering them would make the submit fail.
+ * the backend has no past-time rule yet (spec §46 item 2), and the booking
+ * submission re-checks the chosen time with the same `isPastSlot` rule, so
+ * offering them would make the submit fail.
  */
 
 export interface BookingDate {

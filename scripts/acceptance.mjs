@@ -100,11 +100,30 @@ const BACKEND_SECRET_VARS = ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_BOT_WEBHOOK_SECRET'
 const VITE_BUILTIN_ENV = new Set(['DEV', 'PROD', 'SSR', 'MODE', 'BASE_URL']);
 
 /**
- * The single accepted demo-only mock seam (branding logo/cover editor, pending
- * an image-storage decision). Any *other* production frontend source importing
- * `@/mock/*` fails the gate.
+ * Production frontend source may never import the test-only `@/mock/*` seam.
+ *
+ * There is no accepted exception: the branding logo/cover editor that used to
+ * be the single seam now renders the backend's projected `logoUrl`/`coverUrl`
+ * read-only, because the API exposes no image-upload endpoint. The mock store
+ * remains a *test-only* fixture library under `frontend/src/mock/` and
+ * `frontend/src/test/`, which are excluded below.
  */
-const ACCEPTED_MOCK_SEAMS = ['src/features/owner-portal/pages/BusinessProfilePage.tsx'];
+/** The only trees allowed to reference the mock seam. */
+const MOCK_SEAM_PREFIXES = ['frontend/src/mock/', 'frontend/src/test/'];
+
+/**
+ * Business identities that existed only to back the demo UI. No production
+ * source may hard-code one, because a public page must resolve its business
+ * from the real database (an unknown slug is a 404, not a demo).
+ */
+const DEMO_BUSINESS_SLUGS = [
+  'addis-beauty-lounge',
+  'marathon-auto-care',
+  'riverside-dry-cleaning',
+];
+
+/** Configuration keys that used to carry a fabricated demo business. */
+const DEMO_CONFIG_KEYS = ['SITE_HOME_SLUG', 'PAYMENT_METHOD_FALLBACK'];
 
 /** Exactly these two in-process workers may exist — no second scheduler. */
 const EXPECTED_WORKERS = [
@@ -569,28 +588,60 @@ check('provider-safety', 'Mock / test provider safety', (ctx) => {
     fix: 'production must not be able to select a mock provider',
   });
 
-  // The accepted demo-only seam stays; every other production mock import fails.
+  // No production frontend source may import the test-only mock seam.
   const mockImporters = sourceFiles('frontend/src', ['.ts', '.tsx'])
-    .filter((file) => !file.startsWith('frontend/src/mock/') && !file.startsWith('frontend/src/test/'))
+    .filter((file) => !MOCK_SEAM_PREFIXES.some((prefix) => file.startsWith(prefix)))
     .filter((file) => !isTestFile(file))
-    .map((file) => file.replace(/^frontend\//, ''))
-    .filter((file) => /from\s+['"]@\/mock\//.test(readText(`frontend/${file}`)));
-  const unexpected = mockImporters.filter((file) => !ACCEPTED_MOCK_SEAMS.includes(file)).sort();
-  ctx.expect(unexpected.length === 0, {
-    expected: `only the documented branding demo seam imports @/mock/* (${ACCEPTED_MOCK_SEAMS.join(', ')})`,
-    observed: unexpected.length === 0 ? 'as expected' : unexpected.join(', '),
-    fix: 'route the surface through the real API client; the branding seam is the only accepted exception',
+    .filter((file) => /from\s+['"]@\/mock\//.test(readText(file)));
+  ctx.expect(mockImporters.length === 0, {
+    expected: 'no production frontend source imports @/mock/* (no accepted seam)',
+    observed: mockImporters.length === 0 ? 'none' : mockImporters.sort().join(', '),
+    fix: 'route the surface through the real API client; the mock store is test-only',
   });
 
-  const seam = 'frontend/src/features/owner-portal/pages/BusinessProfilePage.tsx';
-  if (ctx.expect(exists(seam), { expected: seam, observed: 'missing', fix: 'restore the branding editor' })) {
-    const source = readText(seam);
-    ctx.expect(/saveBranding/.test(source) && /Branding/.test(source), {
-      expected: 'the accepted seam stays limited to the branding (logo/cover) editor',
-      observed: 'the mock seam is present but not confined to branding',
-      fix: 'keep the mock seam confined to branding previews',
+  // No production source may hard-code a demo business identity.
+  const demoSlugImporters = sourceFiles('frontend/src', ['.ts', '.tsx'])
+    .filter((file) => !MOCK_SEAM_PREFIXES.some((prefix) => file.startsWith(prefix)))
+    .filter((file) => !isTestFile(file))
+    .filter((file) => DEMO_BUSINESS_SLUGS.some((slug) => readText(file).includes(slug)));
+  ctx.expect(demoSlugImporters.length === 0, {
+    expected: 'no production frontend source hard-codes a demo business slug',
+    observed: demoSlugImporters.length === 0 ? 'none' : demoSlugImporters.sort().join(', '),
+    fix: 'resolve the business from the real API; a demo slug must 404, not render',
+  });
+
+  // The fabricated demo configuration keys must be gone for good.
+  const demoConfigFiles = sourceFiles('frontend/src', ['.ts', '.tsx'])
+    .filter((file) => !MOCK_SEAM_PREFIXES.some((prefix) => file.startsWith(prefix)))
+    .filter((file) => !isTestFile(file))
+    .filter((file) => DEMO_CONFIG_KEYS.some((key) => new RegExp(`\\b${key}\\b`).test(readText(file))));
+  ctx.expect(demoConfigFiles.length === 0, {
+    expected: `no production source declares ${DEMO_CONFIG_KEYS.join(' / ')}`,
+    observed: demoConfigFiles.length === 0 ? 'none' : demoConfigFiles.sort().join(', '),
+    fix: 'delete the demo home slug and the fabricated payment-instruction fallback',
+  });
+
+  // The branding surface must stay read-only: the API has no upload endpoint.
+  const brandingSeam = 'frontend/src/features/owner-portal/pages/BusinessProfilePage.tsx';
+  if (ctx.expect(exists(brandingSeam), { expected: brandingSeam, observed: 'missing', fix: 'restore the business profile page' })) {
+    const source = readText(brandingSeam);
+    ctx.expect(!/@\/mock\//.test(source) && !/saveBranding|ImagePicker/.test(source), {
+      expected: 'branding renders the backend projection with no mock upload editor',
+      observed: 'the branding page still wires a mock upload editor',
+      fix: 'render branding.logoUrl/coverUrl read-only; do not invent an upload surface',
     });
   }
+
+  // The QR code was previously drawn in the browser from the public link.
+  const qrSources = sourceFiles('frontend/src', ['.ts', '.tsx'])
+    .filter((file) => !MOCK_SEAM_PREFIXES.some((prefix) => file.startsWith(prefix)))
+    .filter((file) => !isTestFile(file))
+    .filter((file) => /MockQrCode|QRCode\.toDataURL|qrcode/i.test(readText(file)));
+  ctx.expect(qrSources.length === 0, {
+    expected: 'no generated QR image in production source (the backend serves no QR asset)',
+    observed: qrSources.length === 0 ? 'none' : qrSources.sort().join(', '),
+    fix: 'show the real public link; do not synthesise a QR code client-side',
+  });
 });
 
 /* ------------------------------------------------------------------------- *
@@ -718,6 +769,70 @@ check('db-safety', 'Database release safety', (ctx) => {
       observed: 'the migration wrapper does not pin DATABASE_URL to the migrator role',
       fix: 'restore the migrator-role pinning',
     });
+  }
+
+  // Prompt 67: business.category_code is a RESTRICT foreign key into
+  // business_category(code). A fresh database must receive the two canonical
+  // reference rows from the migration history, or the first real business setup
+  // fails with Prisma P2003 and surfaces to the owner as HTTP 500.
+  if (ctx.expect(exists(migrationsDir), { expected: migrationsDir, observed: 'missing', fix: 'restore the migrations' })) {
+    const allMigrations = readdirSync(abs(migrationsDir), { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name);
+    const categorySeed = allMigrations.find((name) => /seed_business_category/.test(name));
+    if (ctx.expect(Boolean(categorySeed), {
+      expected: 'a committed migration provisions the business_category reference rows',
+      observed: 'no migration seeds business_category; a fresh database cannot create its first business (P2003)',
+      fix: 'restore the reference-data migration instead of seeding rows by hand',
+    })) {
+      const seedSql = readText(join(migrationsDir, categorySeed, 'migration.sql'));
+      // Strip SQL line comments first: a guard must be satisfied by executable
+      // SQL, never by prose that merely mentions the same tokens.
+      const seedStatements = seedSql
+        .split(/\r?\n/)
+        .map((line) => line.replace(/--.*$/, ''))
+        .join('\n');
+      ctx.expect(/INSERT INTO "business_category"/.test(seedStatements), {
+        expected: 'the reference-data migration inserts into business_category',
+        observed: `${categorySeed}/migration.sql has no executable INSERT into business_category`,
+        fix: 'restore the reference-data INSERT',
+      });
+      // Idempotent: re-running a deployment must never duplicate reference rows.
+      ctx.expect(/ON CONFLICT[^;]*DO NOTHING/i.test(seedStatements), {
+        expected: 'the reference-data migration is idempotent (ON CONFLICT ... DO NOTHING)',
+        observed: `${categorySeed}/migration.sql has no ON CONFLICT guard, so repeated provisioning can duplicate rows`,
+        fix: 'guard the reference-data INSERT with ON CONFLICT ... DO NOTHING',
+      });
+      for (const code of ['SALON_AND_BARBER', 'OTHER']) {
+        ctx.expect(seedStatements.includes(`'${code}'`), {
+          expected: `the reference-data migration provisions the canonical ${code} category`,
+          observed: `${categorySeed}/migration.sql does not insert ${code}`,
+          fix: `restore the ${code} reference row`,
+        });
+      }
+    }
+  }
+
+  // A fresh environment must be able to provision BOTH local databases from the
+  // documented commands alone; db:provision/db:reset previously left them empty.
+  const dbMigrateScript = 'backend/scripts/db-migrate.mjs';
+  if (ctx.expect(exists(dbMigrateScript), { expected: dbMigrateScript, observed: 'missing', fix: 'restore the database migration helper' })) {
+    const dbMigrate = readText(dbMigrateScript);
+    ctx.expect(/werefa_test/.test(dbMigrate) && /werefa_dev/.test(dbMigrate), {
+      expected: 'the database migration helper migrates both werefa_dev and werefa_test',
+      observed: 'the helper does not target both local databases',
+      fix: 'restore migration of both databases so a fresh environment needs no manual step',
+    });
+  }
+  for (const provisionScript of ['db-provision.mjs', 'db-reset.mjs']) {
+    const path = `backend/scripts/${provisionScript}`;
+    if (ctx.expect(exists(path), { expected: path, observed: 'missing', fix: `restore ${provisionScript}` })) {
+      ctx.expect(/db-migrate\.mjs/.test(readText(path)), {
+        expected: `${provisionScript} applies migrations after creating the databases`,
+        observed: `${provisionScript} leaves the databases unmigrated (0 tables), so test:db cannot run on a fresh environment`,
+        fix: `have ${provisionScript} run scripts/db-migrate.mjs`,
+      });
+    }
   }
 
   // Ordinary application startup must not replace the migration process.

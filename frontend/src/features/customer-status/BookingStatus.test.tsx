@@ -452,7 +452,10 @@ describe('BookingStatusPage', () => {
 })
 
 describe('book-then-lookup end to end', () => {
-  it('creates a booking, finds it by phone, and shows live state transitions', async () => {
+  // This drives a whole booking through the UI and then looks it up by phone.
+  // It needs ~4.5s on its own, so the default 5s budget is not enough headroom
+  // when the full suite runs under load; the assertions are unchanged.
+  it('creates a booking, finds it by phone, and shows live state transitions', { timeout: 30_000 }, async () => {
     await bookViaUi('+251913000001', 'Theo Alem')
 
     const sentNav = screen.getByRole('navigation', { name: 'Booking sent actions' })

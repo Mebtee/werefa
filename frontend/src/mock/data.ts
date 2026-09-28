@@ -211,31 +211,9 @@ export function buildPages(): readonly BusinessPage[] {
           [addDays(today, 6)]: { kind: 'closed' },
           [addDays(today, 7)]: { kind: 'hours', periods: [{ start: '10:00', end: '14:00' }] },
         },
-        pause: null,
+        pause: null,
+
         prepayment: { mode: 'percentage', value: 20 },
-        paymentInstructions: {
-          methods: [
-            {
-              id: 'bank-transfer',
-              label: 'Bank transfer',
-              steps: [
-                'Transfer the deposit to the account below. Use your phone number as the payment reference so we can match it to your booking.',
-                'Bank: Demo Bank (placeholder)',
-                'Account name: Addis Beauty Lounge',
-                'Account number: 1000 0000 0000',
-              ],
-            },
-            {
-              id: 'telebirr',
-              label: 'Telebirr (mobile money)',
-              steps: [
-                'Send the deposit to the number below. Your phone number will be attached automatically.',
-                'Telebirr number: 09XX XXX XXXX (placeholder)',
-                'Account name: Addis Beauty Lounge',
-              ],
-            },
-          ],
-        },
         currency: 'ETB',
         bookingWindowDays: 14,
         telegramConnected: true,
@@ -263,29 +241,9 @@ export function buildPages(): readonly BusinessPage[] {
         blockedDays: [],
         blockedPeriods: [],
         specialDays: {},
-        pause: null,
+        pause: null,
+
         prepayment: { mode: 'none' },
-        paymentInstructions: {
-          methods: [
-            {
-              id: 'bank-transfer',
-              label: 'Bank transfer',
-              steps: [
-                'Pay when you collect. If a deposit is ever required we will tell you first.',
-                'Bank: Demo Bank (placeholder)',
-                'Account number: 2000 0000 0000',
-              ],
-            },
-            {
-              id: 'telebirr',
-              label: 'Telebirr (mobile money)',
-              steps: [
-                'Pay at pick-up via Telebirr.',
-                'Telebirr number: 09XY XXX XXX (placeholder)',
-              ],
-            },
-          ],
-        },
         currency: 'ETB',
         bookingWindowDays: 14,
         telegramConnected: false,
@@ -318,19 +276,9 @@ export function buildPages(): readonly BusinessPage[] {
           reopenDate: addDays(today, 21),
           message:
             'We are closed for end-of-season cleaning. New bookings open on the listed date.',
-        },
-        prepayment: { mode: 'percentage', value: 20 },
-        paymentInstructions: {
-          methods: [
-            {
-              id: 'telebirr',
-              label: 'Telebirr (mobile money)',
-              steps: [
-                'Send the deposit to 09XZ XXX XXX. Your phone number is attached automatically.',
-              ],
-            },
-          ],
         },
+
+        prepayment: { mode: 'percentage', value: 20 },
         currency: 'ETB',
         bookingWindowDays: 14,
         telegramConnected: false,
