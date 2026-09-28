@@ -50,20 +50,12 @@ const DELETE_ORDER = [
   'business_owner',
   'business',
   'user',
-  'business_category',
 ];
 
 async function resetDatabase(): Promise<void> {
   for (const table of DELETE_ORDER) {
     await prisma.$executeRawUnsafe(`DELETE FROM "${table}"`);
   }
-  await seedCategories();
-}
-
-async function seedCategories(): Promise<void> {
-  await prisma.$executeRawUnsafe(
-    `INSERT INTO "business_category" ("code", "label") VALUES ('SALON_AND_BARBER', 'Salon & Barber'), ('OTHER', 'Other') ON CONFLICT DO NOTHING`,
-  );
 }
 
 async function createUser(email: string): Promise<string> {

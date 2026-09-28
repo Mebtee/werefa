@@ -27,6 +27,7 @@
     "db:down": "docker compose -f docker-compose.dev.yml down",
     "db:provision": "node scripts/db-provision.mjs",
     "db:reset": "node scripts/db-reset.mjs",
+    "db:migrate": "node scripts/db-migrate.mjs",
     "postinstall": "prisma generate"
   },
   "dependencies": {

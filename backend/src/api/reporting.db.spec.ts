@@ -69,16 +69,12 @@ describe.skipIf(!RUN)('reporting / exports HTTP (real DB)', () => {
     'session',
     'emergency_recovery',
     'user',
-    'business_category',
   ];
 
   async function resetDatabase(): Promise<void> {
     for (const table of DELETE_ORDER) {
       await prisma.$executeRawUnsafe(`DELETE FROM "${table}"`);
     }
-    await prisma.$executeRawUnsafe(
-      `INSERT INTO "business_category" ("code", "label") VALUES ('SALON_AND_BARBER', 'Salon & Barber'), ('OTHER', 'Other') ON CONFLICT DO NOTHING`,
-    );
   }
 
   async function makeBooking(businessId: string, customerName: string): Promise<number> {
@@ -132,9 +128,6 @@ describe.skipIf(!RUN)('reporting / exports HTTP (real DB)', () => {
         { id: OWNER_B, email: 'owner-b-report@example.com', passwordHash: 'x'.repeat(60), role: 'OWNER', isEmailVerified: true },
       ],
     });
-    await prisma.$executeRawUnsafe(
-      `INSERT INTO "business_category" ("code", "label") VALUES ('SALON_AND_BARBER', 'Salon & Barber'), ('OTHER', 'Other') ON CONFLICT DO NOTHING`,
-    );
 
     const bizA = await prisma.business.create({
       data: { publicSlug: 'report-alpha', categoryCode: 'SALON_AND_BARBER', name: 'Alpha Salon' },

@@ -42,11 +42,24 @@ cd backend
 cp .env.example .env          # then adjust values for your machine
 npm install                   # runs `prisma generate`
 npm run db:up                 # start + wait for healthy
-npm run db:provision          # create roles werefa_app/werefa_migrator + dev/test DBs
-npm run prisma:dev            # apply migrations (dev)
+npm run db:provision          # roles werefa_app/werefa_migrator + dev/test DBs + migrations
 ```
 
-`db:reset` drops and recreates the local dev/test databases — **development only**.
+`db:provision` creates the roles and databases **and applies the migration
+history to both** (`werefa_dev` and `werefa_test`), so a fresh environment needs
+no further manual database step. To migrate an already-provisioned pair of
+databases on their own, run `npm run db:migrate`.
+
+Migrations are the only source of the `business_category` reference rows
+(`SALON_AND_BARBER`, `OTHER`). They are applied by
+`prisma/migrations/20260927120000_seed_business_category_reference_data`, so every
+fresh database can create its first business without any hand-inserted data.
+
+`db:reset` drops, recreates and re-migrates the local dev/test databases —
+**development only**. It destroys all local data.
+
+`npm run prisma:dev` applies migrations to the dev database during schema
+development; `npm run prisma:deploy` applies committed migrations only.
 
 ### 2. Backend
 
@@ -167,7 +180,7 @@ npm run acceptance:static # static invariants only (fast)
 # Backend
 cd backend
 npm run typecheck && npm run lint && npm test
-npm run test:db          # requires the provisioned werefa_test DB; run twice
+npm run test:db          # requires a migrated werefa_test (npm run db:provision); run twice
 npm run build
 
 # Frontend

@@ -61,6 +61,15 @@ const ok = run(['docker', 'compose', '-f', composeFile, 'exec', '-T', 'db', 'psq
 
 if (!ok) {
   process.exitCode = 1;
+  process.exit();
 } else {
   console.log('provisioned roles werefa_app/werefa_migrator and databases werefa_dev/werefa_test');
+}
+
+// Apply the migration history to BOTH databases. Without this, `db:provision`
+// leaves werefa_dev and werefa_test EMPTY (0 tables) and a fresh environment
+// cannot run the app or the DB test suite. Prompt 67 §11.
+const migrate = spawnSync('node', ['scripts/db-migrate.mjs'], { stdio: 'inherit', cwd: process.cwd(), shell: true });
+if (migrate.error || migrate.status !== 0) {
+  process.exitCode = 1;
 }

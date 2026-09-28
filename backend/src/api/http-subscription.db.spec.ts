@@ -47,7 +47,6 @@ describe.skipIf(!RUN)('Subscription & billing workflow (real DB)', () => {
         { id: ADMIN_2, email: 'sub-admin-2@example.com', passwordHash: 'x'.repeat(60), role: 'ADMIN' },
       ],
     });
-    await prisma.$executeRawUnsafe(`INSERT INTO "business_category" ("code", "label") VALUES ('OTHER', 'Other') ON CONFLICT DO NOTHING`);
 
     proofStorageDir = await mkdtemp(join(tmpdir(), 'werefa-sub-proofs-'));
     const built = await createTestApp({
@@ -415,7 +414,6 @@ const DELETE_ORDER = [
   'business_owner',
   'business',
   'user',
-  'business_category',
 ];
 
 async function resetDatabase(): Promise<void> {

@@ -20,4 +20,12 @@ const args = ['docker', 'compose', '-f', composeFile, 'exec', '-T', 'db', 'psql'
 const result = spawnSync(args[0], args.slice(1), { stdio: ['pipe', 'inherit', 'inherit'], input: sql });
 if (result.status !== 0 || result.error) {
   process.exitCode = 1;
+  process.exit();
+}
+
+// Re-apply the migration history to both recreated databases, otherwise they are
+// left EMPTY (0 tables). Prompt 67 §11.
+const migrate = spawnSync('node', ['scripts/db-migrate.mjs'], { stdio: 'inherit', cwd: process.cwd(), shell: true });
+if (migrate.error || migrate.status !== 0) {
+  process.exitCode = 1;
 }

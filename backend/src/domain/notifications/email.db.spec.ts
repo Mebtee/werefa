@@ -85,7 +85,6 @@ const DELETE_ORDER = [
   'business_owner',
   'business',
   'user',
-  'business_category',
 ];
 
 function resetDatabase(prisma: PrismaClient): Promise<void> {
@@ -93,9 +92,6 @@ function resetDatabase(prisma: PrismaClient): Promise<void> {
     for (const table of DELETE_ORDER) {
       await tx.$executeRawUnsafe(`DELETE FROM "${table}"`);
     }
-    await tx.$executeRawUnsafe(
-      `INSERT INTO "business_category" ("code", "label") VALUES ('SALON_AND_BARBER', 'Salon & Barber'), ('OTHER', 'Other') ON CONFLICT DO NOTHING`,
-    );
   });
 }
 

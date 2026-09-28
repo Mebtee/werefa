@@ -62,7 +62,6 @@ describe.skipIf(!RUN)('HTTP API end-to-end (real DB)', () => {
         { id: OWNER_B, email: 'owner-b@example.com', passwordHash: 'x'.repeat(60), role: 'OWNER' },
       ],
     });
-    await prisma.$executeRawUnsafe(`INSERT INTO "business_category" ("code", "label") VALUES ('SALON_AND_BARBER', 'Salon & Barber'), ('OTHER', 'Other') ON CONFLICT DO NOTHING`);
 
     // Proof objects land in a throwaway dir (never the repo's ./storage).
     proofStorageDir = await mkdtemp(join(tmpdir(), 'werefa-http-proofs-'));
@@ -1123,7 +1122,6 @@ const DELETE_ORDER = [
   'business_owner',
   'business',
   'user',
-  'business_category',
 ];
 
 async function resetDatabase(): Promise<void> {

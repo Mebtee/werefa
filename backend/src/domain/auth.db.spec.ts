@@ -55,7 +55,6 @@ const DELETE_ORDER = [
   'session',
   'emergency_recovery',
   'user',
-  'business_category',
 ];
 
 describe.skipIf(!RUN)('auth repositories + schema invariants (live PostgreSQL)', () => {
@@ -70,9 +69,6 @@ describe.skipIf(!RUN)('auth repositories + schema invariants (live PostgreSQL)',
     for (const table of DELETE_ORDER) {
       await prisma.$executeRawUnsafe(`DELETE FROM "${table}"`);
     }
-    await prisma.$executeRawUnsafe(
-      `INSERT INTO "business_category" ("code", "label") VALUES ('SALON_AND_BARBER', 'Salon & Barber'), ('OTHER', 'Other') ON CONFLICT DO NOTHING`,
-    );
   }
 
   beforeAll(async () => {
