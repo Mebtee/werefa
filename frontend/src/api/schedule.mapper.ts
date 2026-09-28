@@ -104,6 +104,25 @@ export function scheduleFormFromApi(view: OwnerScheduleView, intervalMinutes: nu
   }
 }
 
+/**
+ * The editor state for a business that has never published a schedule version.
+ *
+ * `GET /owner/businesses/:id/schedule/current` answers 404 ("No active schedule
+ * version") until the first version is saved, and a brand-new business has none.
+ * That is an empty state rather than an error: the owner still has to reach the
+ * editor to define working hours, so start from a blank seven-day grid carrying
+ * the business's current booking interval. Saving creates version 1.
+ */
+export function emptyScheduleForm(intervalMinutes: number): ScheduleForm {
+  return {
+    hours: [[], [], [], [], [], [], []],
+    interval: String(intervalMinutes),
+    specialDays: [],
+    blockedPeriods: [],
+    reason: '',
+  }
+}
+
 // --- form → wire ----------------------------------------------------------------
 export function toSchedulePayload(form: ScheduleForm): SaveSchedulePayload {
   const workingPeriods: SaveWorkingPeriodInput[] = []
@@ -205,10 +224,10 @@ export function conflictsFromApi(views: readonly OwnerScheduleConflictView[]): S
   }))
 }
 
-// --- canonical schedule → mock availability fixture --------------------------------
+// --- canonical schedule → BusinessDetails schedule fields ---------------------------
 // The public booking page consumes the real public-schedule projection (Prompt
-// 47 §18) but the still-mock availability engine reads the legacy BusinessDetails
-// schedule fields. This pure derivation converts the canonical view (weekly
+// 47 §18) but the UI model reads the legacy BusinessDetails schedule fields.
+// This pure derivation converts the canonical view (weekly
 // periods, weekly blocked periods, single-window special dates) into those fields:
 // - working periods → `workingHours` (sorted per day)
 // - CLOSED special  → `specialDays[date] = { kind: 'closed' }` AND `blockedDays`

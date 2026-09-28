@@ -1,3 +1,4 @@
+import { StrictMode } from 'react'
 import { render, type RenderResult } from '@testing-library/react'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { afterEach } from 'vitest'
@@ -61,6 +62,17 @@ export interface RenderAppOptions {
   /** Extra behavior for the stateful business API test double. */
   businessApi?: BusinessApiStubOptions
   initialSelectedBusinessId?: string
+  /**
+   * Renders under `<StrictMode>`, as the real entry point does (`main.tsx`
+   * wraps `<App />` in it). Off by default so existing tests are unchanged.
+   *
+   * This matters for effect lifecycles: StrictMode double-invokes effects
+   * (mount, cleanup, mount), so a one-shot "already initialised" latch combined
+   * with a `cancelled` cleanup guard discards the only request it ever issues
+   * and pins the page on its loading state. A test that omits StrictMode cannot
+   * see that class of defect at all.
+   */
+  strict?: boolean
 }
 
 const cleanupStubs: Array<() => void> = []
@@ -96,10 +108,11 @@ export function renderAppAt(
     )
   }
   const router = createMemoryRouter(appRoutes, { initialEntries: [path] })
-  const result = render(
+  const tree = (
     <AuthProvider initialState={auth}>
       <RouterProvider router={router} />
-    </AuthProvider>,
+    </AuthProvider>
   )
+  const result = render(options.strict ? <StrictMode>{tree}</StrictMode> : tree)
   return { router, stub, ...result }
 }

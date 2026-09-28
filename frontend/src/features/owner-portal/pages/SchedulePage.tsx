@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { TimeOfDay } from '@/types/models'
-import { useOwnedBusiness } from '@/features/owner-portal/state/useOwnedBusiness'
+import { useSelectedOwnedBusiness } from '@/features/owner-portal/state/useSelectedOwnedBusiness'
 import { LoadState } from '@/features/owner-portal/components/LoadState'
 import { ScheduleConflicts } from '@/features/owner-portal/components/ScheduleConflicts'
 import { ScheduleHistory } from '@/features/owner-portal/components/ScheduleHistory'
 import { toUserMessage } from '@/api/errors'
+import { isNotFoundError } from '@/api/business'
 import { downloadScheduleHistoryPdf } from '@/api/reports'
 import { saveBlob } from '@/lib/download'
 import {
@@ -23,6 +24,7 @@ import type {
 } from '@/api/schedule.mapper'
 import {
   conflictsFromApi,
+  emptyScheduleForm,
   scheduleFormFromApi,
   toSchedulePayload,
   versionHistoryEntry,
@@ -54,8 +56,19 @@ function dayLabel(day: number | null): string {
 const EMPTY_SPECIAL: SpecialDayEntry = { date: '', kind: 'custom', start: null, end: null }
 
 export function SchedulePage() {
-  const { business, businessId, loading, error, reload } = useOwnedBusiness()
-  const initialized = useRef(false)
+  // The working-hours editor needs only the business itself, so it deliberately
+  // avoids `useOwnedBusiness`, whose `loading` also waits on the service catalog
+  // and booking list that this page never reads.
+  const { business, businessId, loading, error, reload } = useSelectedOwnedBusiness()
+  const loadedBusinessId = useRef<string | null>(null)
+  /**
+   * True only while the schedule request is genuinely in flight. It must not be
+   * derived from `form === null`, because `form` is also null when the request
+   * failed: `LoadState` renders its spinner whenever `loading` is true, so
+   * deriving it from `form` masked every schedule error behind an endless
+   * spinner with no message and no retry.
+   */
+  const [scheduleLoading, setScheduleLoading] = useState(true)
 
   const [form, setForm] = useState<ScheduleForm | null>(null)
   const [saved, setSaved] = useState<ScheduleForm | null>(null)
@@ -96,10 +109,24 @@ export function SchedulePage() {
   }, [])
 
   useEffect(() => {
-    if (initialized.current || !business || !businessId) return
-    initialized.current = true
+    if (!business || !businessId) return
     const id = businessId
+    // Switching business needs that business's own schedule, so drop the
+    // previous editor state before loading. Keyed off the id rather than a
+    // one-shot `initialized` latch: a latch is set before the request resolves,
+    // so under StrictMode's mount/cleanup/mount the first request is cancelled by
+    // its own cleanup while the second run skips the work entirely. The only
+    // request ever issued was then discarded by `cancelled` and `form` stayed
+    // null, which pinned this page on "Loading your business" forever.
+    if (loadedBusinessId.current !== id) {
+      loadedBusinessId.current = id
+      setForm(null)
+      setSaved(null)
+      setCurrentSchedule(null)
+      setSaveError(null)
+    }
     let cancelled = false
+    setScheduleLoading(true)
     void (async () => {
       try {
         const current = await getOwnerSchedule(id)
@@ -112,7 +139,25 @@ export function SchedulePage() {
           previous === null ? scheduleFormFromApi(current, business.bookingIntervalMinutes) : previous,
         )
       } catch (err) {
-        if (!cancelled) setSaveError(toUserMessage(err))
+        if (cancelled) return
+        if (isNotFoundError(err)) {
+          // No schedule version yet. This is the normal state of a brand-new
+          // business, not a failure — start from a blank week so the owner can
+          // define working hours and create the first version. Treating this as
+          // a load error made the page unreachable, so a brand-new business could
+          // never be given a schedule at all.
+          const blank = emptyScheduleForm(business.bookingIntervalMinutes)
+          setForm((previous) => previous ?? blank)
+          setSaved((previous) => previous ?? blank)
+        } else {
+          setSaveError(toUserMessage(err))
+        }
+      } finally {
+        // Every outcome — success, "no version yet", and failure alike — has to
+        // end the request. `LoadState` shows its spinner while `loading` is
+        // true, so a request that resolved into an error without clearing this
+        // flag leaves the page spinning forever and hides the error and retry.
+        if (!cancelled) setScheduleLoading(false)
       }
       void loadHistory(id)
       void loadConflicts(id)
@@ -125,7 +170,7 @@ export function SchedulePage() {
   if (!business || !businessId || !form || !saved) {
     return (
       <LoadState
-        loading={loading || form === null}
+        loading={loading || scheduleLoading}
         error={saveError !== null || error}
         onRetry={reload}
       >

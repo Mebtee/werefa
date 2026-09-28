@@ -37,10 +37,19 @@ export function OwnerBusinessProvider({ children }: { children: ReactNode }) {
   const selectedIdRef = useRef<string | null>(null)
   const ownerIdRef = useRef<string | null>(null)
   const activeRequestRef = useRef<AbortController | null>(null)
+  const mountedRef = useRef(true)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   const commitSelection = useCallback(
     (businessId: string | null) => {
       selectedIdRef.current = businessId
+      if (!mountedRef.current) return
       setSelectedId(businessId)
       if (ownerId) writeSelectedBusinessId(ownerId, businessId)
     },
@@ -54,7 +63,6 @@ export function OwnerBusinessProvider({ children }: { children: ReactNode }) {
       setLoading(false)
       return null
     }
-
     if (ownerIdRef.current !== ownerId) {
       ownerIdRef.current = ownerId
       selectedIdRef.current = null

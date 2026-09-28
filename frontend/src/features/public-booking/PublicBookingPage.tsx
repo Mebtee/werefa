@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import type { BusinessPage } from '@/types/models'
 import { getPublicBusiness, isNotFoundError } from '@/api/business'
 import { getPublicServices } from '@/api/catalog'
 import { getPublicSchedule } from '@/api/schedule'
+import type { PublicScheduleView } from '@/api/types'
 import { availabilityScheduleFromView } from '@/api/schedule.mapper'
 import { hybridizePublicBusiness } from '@/api/business.mapper'
-import { SITE_HOME_SLUG } from '@/config/site'
 import { Alert } from '@/components/ui/Alert'
 import { Spinner } from '@/components/ui/Spinner'
 import { BusinessHero } from '@/features/public-booking/components/BusinessHero'
@@ -19,6 +19,22 @@ type LoadState =
   | { status: 'ready'; page: BusinessPage }
   | { status: 'notfound' }
   | { status: 'error' }
+
+/**
+ * A business that has never published a schedule answers 404 on
+ * `/public/businesses/:slug/schedule` ("No active schedule version"). That is a
+ * legitimate empty state — a brand-new business has no working hours yet — and
+ * NOT a missing business. Mapping it to the "Business not found" page sent every
+ * owner whose business had no schedule to a dead end, because the whole request
+ * batch used to reject on the schedule 404 even though the business itself had
+ * been found. The public page therefore renders the real business with no
+ * bookable slots until the owner saves a schedule.
+ */
+const NO_SCHEDULE_YET: PublicScheduleView = {
+  workingPeriods: [],
+  blockedPeriods: [],
+  specialDates: [],
+}
 
 export function PublicBookingPage() {
   const { slug } = useParams<{ slug: string }>()
@@ -33,10 +49,15 @@ export function PublicBookingPage() {
       // services). Availability is fetched per date by the wizard's real
       // availability clients; the public schedule feeds the page frame.
       try {
-        const [view, servicesView, scheduleView] = await Promise.all([
-          getPublicBusiness(slug ?? ''),
+        // The business lookup alone decides whether this address exists, so it
+        // runs first and on its own: only its 404 means "Business not found".
+        const view = await getPublicBusiness(slug ?? '')
+        const [servicesView, scheduleView] = await Promise.all([
           getPublicServices(slug ?? ''),
-          getPublicSchedule(slug ?? ''),
+          // Tolerate a missing schedule only; any other failure still surfaces.
+          getPublicSchedule(slug ?? '').catch((error) =>
+            isNotFoundError(error) ? NO_SCHEDULE_YET : Promise.reject(error),
+          ),
         ])
         if (cancelled) return
         const business = hybridizePublicBusiness(view)
@@ -103,11 +124,6 @@ export function PublicBookingPage() {
               No business was found at this address. Check the link you were
               given, or ask the business for its correct booking link.
             </Alert>
-            <div style={{ marginTop: 'var(--space-4)' }}>
-              <Link className="btn btn--outline" to={`/p/${SITE_HOME_SLUG}`}>
-                Go to the demo business
-              </Link>
-            </div>
           </div>
         )}
 

@@ -46,11 +46,33 @@ import { mockRaceSlot } from '@/mock/data'
 import { buildLineItems, prepaymentAmount, totalDurationMinutes, totalPrice } from '@/lib/format'
 import type {
   Booking,
+  DateString,
+  ProofFile,
   ScheduleConflict,
   ScheduleSnapshot,
   ScheduleVersion,
   Service,
+  TimeOfDay,
 } from '@/types/models'
+
+/**
+ * Store bookings always carry an appointment slot, but the shared `Booking`
+ * model types it as nullable so no projection ever has to invent one. These
+ * accessors fail loudly rather than substituting a placeholder date/time.
+ */
+function slotOf(booking: Booking): { date: DateString; time: TimeOfDay } {
+  if (booking.date === null || booking.time === null) {
+    throw new Error(`stub booking ${booking.id} has no appointment slot`)
+  }
+  return { date: booking.date, time: booking.time }
+}
+
+function proofOf(booking: Booking): ProofFile {
+  if (booking.proof === null) {
+    throw new Error(`stub booking ${booking.id} has no payment proof`)
+  }
+  return booking.proof
+}
 import { MOCK_BUSINESS_PAGES, PRIMARY_BUSINESS_SLUG } from '@/mock/data'
 import { MOCK_OWNER_ACTOR_NAME } from '@/mock/ownedBusinessFixture'
 import { isoWeekdayOf, minutesOf, minutesToTime, nowTimestamp } from '@/lib/time'
@@ -148,6 +170,27 @@ export interface BusinessApiStubOptions {
   subscriptionsByBusinessId?: Readonly<Record<string, OwnerSubscriptionView>>
   /** Seeded public/owned business trading state (Prompt 55 page-level tests). */
   seed?: BusinessApiSeedState
+  /**
+   * Models a business that has never published a schedule version, which is the
+   * state of every freshly created business.
+   *
+   * The real backend answers 404 for `GET /owner/businesses/:id/schedule/current`
+   * and `GET /public/businesses/:slug/schedule` until the first version is saved
+   * ("No active schedule version"), and `PUT /owner/businesses/:id/schedule`
+   * creates version 1. This double otherwise invents an initial version out of
+   * the seeded business, so without this flag the "no schedule yet" contract
+   * cannot be exercised at all.
+   */
+  noScheduleVersionYet?: boolean
+  /**
+   * Consulted for every `/owner/businesses...` request, including the collection
+   * and the `schedule` sub-routes. Return a `Response` to force a failure for a
+   * specific method/path, or null to let the double handle it. Unlike
+   * `failOwnerBookingRequest` (bookings routes only) this also covers
+   * `GET /owner/businesses` and `GET /owner/businesses/:id/schedule/current`,
+   * which is what the schedule page's loading/error states depend on.
+   */
+  failOwnerBusinessRequest?: (request: { method: string; path: string }) => Response | null
 }
 
 export const OWNER_ID = '00000000-0000-4000-8000-0000000000a'
@@ -464,7 +507,7 @@ function conflictViewOf(conflict: ScheduleConflict): OwnerScheduleConflictView {
     ? `${booking.date}T${booking.time}:00.000Z`
     : conflict.at
   const endAt = booking
-    ? `${booking.date}T${minutesToTime(minutesOf(booking.time) + booking.totalDurationMinutes)}:00.000Z`
+    ? `${slotOf(booking).date}T${minutesToTime(minutesOf(slotOf(booking).time) + booking.totalDurationMinutes)}:00.000Z`
     : conflict.at
   return {
     bookingId: conflict.bookingId,
@@ -647,8 +690,9 @@ function slotInstants(date: string, time: string, durationMinutes: number) {
 
 /** Customer-safe projection of a store booking (mirrors `CustomerBookingView`). */
 function customerBookingViewOf(booking: Booking, slug: string) {
-  const [y, mo, d] = booking.date.split('-').map(Number)
-  const [hh, mm] = booking.time.split(':').map(Number)
+  const { date: bookingDate, time: bookingTime } = slotOf(booking)
+  const [y, mo, d] = bookingDate.split('-').map(Number)
+  const [hh, mm] = bookingTime.split(':').map(Number)
   const start = new Date(y, mo - 1, d, hh, mm)
   return {
     status: booking.state === 'payment-pending' ? 'awaiting-verification' : booking.state,
@@ -700,9 +744,9 @@ function ownerProofViewOf(booking: Booking) {
   return {
     proofId: ownerProofId(booking),
     submittedAt: booking.updatedAt,
-    fileName: booking.proof.fileName,
-    mimeType: booking.proof.mimeType,
-    sizeBytes: booking.proof.sizeBytes,
+    fileName: proofOf(booking).fileName,
+    mimeType: proofOf(booking).mimeType,
+    sizeBytes: proofOf(booking).sizeBytes,
     replaced: false,
   }
 }
@@ -731,7 +775,8 @@ function bookedInstant(date: string, time: string): string {
 
 /** Serializes the persistent booking fields shared by list and detail views. */
 function ownerBookingViewOf(booking: Booking): OwnerBookingView {
-  const startAt = bookedInstant(booking.date, booking.time)
+  const { date: bookingDate, time: bookingTime } = slotOf(booking)
+  const startAt = bookedInstant(bookingDate, bookingTime)
   const surrogate = storeBookingSurrogates(booking.businessSlug).get(booking.id) ?? 0
   return {
     bookingId: surrogate,
@@ -741,8 +786,8 @@ function ownerBookingViewOf(booking: Booking): OwnerBookingView {
     note: booking.customer.note || null,
     startAt,
     endAt: bookedInstant(
-      booking.date,
-      minutesToTime(minutesOf(booking.time) + booking.totalDurationMinutes),
+      bookingDate,
+      minutesToTime(minutesOf(bookingTime) + booking.totalDurationMinutes),
     ),
     createdAt: naiveInstantFromMinuteString(booking.createdAt),
     updatedAt: naiveInstantFromMinuteString(booking.updatedAt),
@@ -820,12 +865,13 @@ function resolveStoreBookingId(
 
 /** A binary proof response, mirroring the streaming download route. */
 function ownerProofBinaryResponse(booking: Booking): Response {
-  const mimeType = booking.proof.mimeType || 'application/octet-stream'
+  const proof = proofOf(booking)
+  const mimeType = proof.mimeType || 'application/octet-stream'
   return new Response(new Blob([`proof-bytes:${booking.id}`], { type: mimeType }), {
     status: 200,
     headers: {
       'content-type': mimeType,
-      'content-disposition': `attachment; filename="${booking.proof.fileName}"`,
+      'content-disposition': `attachment; filename="${proof.fileName}"`,
       'x-request-id': 'stub-owner-proof',
     },
   })
@@ -970,6 +1016,11 @@ export function installBusinessApiStub(
     if (segments.length >= 3 && segments[0] === 'api' && segments[1] === 'v1') {
       const rest = segments.slice(2)
       if (rest[0] === 'owner' && rest[1] === 'businesses') {
+        // Consulted for every owner business route, including the collection and
+        // the schedule sub-routes, so a page's own loading/error handling can be
+        // driven independently of the booking-specific hook below.
+        const forcedAny = options.failOwnerBusinessRequest?.({ method, path: pathname })
+        if (forcedAny) return forcedAny
         if (!rest[2]) {
           if (method === 'GET') return json(ownedBusinessStates.map(cloneOwnerBusiness))
           if (method === 'POST') {
@@ -1361,6 +1412,9 @@ export function installBusinessApiStub(
           }
           const sub = rest[4]
           if (sub === 'current' && method === 'GET') {
+            if (options.noScheduleVersionYet) {
+              return envelope(404, 'NOT_FOUND', 'Not found', 'No active schedule version.')
+            }
             return json(currentScheduleView(storeSlug))
           }
           if (sub === 'versions' && method === 'GET') {
@@ -1603,8 +1657,9 @@ export function installBusinessApiStub(
           return json({
             bookings: storeBookings.map((booking) => {
               const start = new Date()
-              const [yy, moo, dd] = booking.date.split('-').map(Number)
-              const [hhh, mmm] = booking.time.split(':').map(Number)
+              const { date: listDate, time: listTime } = slotOf(booking)
+              const [yy, moo, dd] = listDate.split('-').map(Number)
+              const [hhh, mmm] = listTime.split(':').map(Number)
               start.setFullYear(yy, moo - 1, dd)
               start.setHours(hhh, mmm, 0, 0)
               return {
@@ -1701,6 +1756,10 @@ export function installBusinessApiStub(
       if (rest[0] === 'public' && rest[1] === 'businesses' && rest[2]) {
         if (method === 'GET') {
           if (rest[3] === 'schedule') {
+            // No published version yet, for the owned business or a store page.
+            if (options.noScheduleVersionYet && (state.slug === rest[2] || Boolean(getBusiness(rest[2])))) {
+              return envelope(404, 'NOT_FOUND', 'Not found', 'No active schedule version.')
+            }
             if (state.slug === rest[2]) return json(publicScheduleViewFor(storeSlug))
             // A renamed owner business has no store page under its old slug.
             const exists =
