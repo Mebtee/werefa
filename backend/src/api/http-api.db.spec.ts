@@ -247,7 +247,10 @@ describe.skipIf(!RUN)('HTTP API end-to-end (real DB)', () => {
     expect(res.body.status).toBe('awaiting-verification');
     expect(res.body.businessSlug).toBe('happy-salons-test-1');
     expect(res.body.totalPriceMinor).toBe(13500);
-    expect(res.body.paymentMethod).toBe('BANK_TRANSFER');
+    // This business requires no deposit, so the customer is never reported as
+    // having paid by a method they never chose.
+    expect(res.body.prepaidMinor).toBe(0);
+    expect(res.body.paymentMethod).toBeNull();
     expect(res.body.serviceNames).toContain('Haircut');
     expect(res.body.bookingId).toBeUndefined();
     expect(res.body.customerPhone).toBeUndefined();
@@ -938,6 +941,233 @@ const request = await http()
       } finally {
         await setPrepaidFixed(false);
       }
+    });
+
+    it('the owner view reports the configured deposit back, so the panel can render real data', async () => {
+      await setupWorld();
+      const none = await http()
+        .get(`/api/v1/owner/businesses/${businessId}`)
+        .set(owner(OWNER_A))
+        .expect(200);
+      expect(none.body.prepaymentMode).toBe('NONE');
+
+      await setPrepaidFixed(true);
+      try {
+        const fixed = await http()
+          .get(`/api/v1/owner/businesses/${businessId}`)
+          .set(owner(OWNER_A))
+          .expect(200);
+        expect(fixed.body.prepaymentMode).toBe('FIXED');
+        expect(fixed.body.prepaymentFixedMinor).toBe(5000);
+      } finally {
+        await setPrepaidFixed(false);
+      }
+    });
+
+    it('a percentage deposit is computed from the real booking total and enforced on booking (REQ-110/111)', async () => {
+      await setupWorld();
+      const availability = () =>
+        http()
+          .post('/api/v1/public/businesses/happy-salons-test-1/availability')
+          .send({ date: DATE, selections: [{ serviceId, variationId }] })
+          .expect(200);
+
+      const baseline = await availability();
+      const total = baseline.body.computedTotalPriceMinor as number;
+      const expected = Math.floor((total * 30) / 100);
+
+      await http()
+        .patch(`/api/v1/owner/businesses/${businessId}/settings`)
+        .set(owner(OWNER_A))
+        .send({ prepaymentMode: 'PERCENTAGE', prepaymentPercent: 30, prepaymentFixedMinor: null })
+        .expect(200);
+      try {
+        const priced = await availability();
+        expect(priced.body.requiredPrepaidMinor).toBe(expected);
+
+        // The disclosed amount is the enforced amount: no proof, no booking.
+        const without = await http()
+          .post('/api/v1/customer/bookings')
+          .field(
+            'payload',
+            JSON.stringify({
+              ...CREATE_BODY,
+              selections: selection({ variationId }),
+              startAt: '2026-11-29T10:00:00.000Z',
+              submissionKey: 'invoice-20261129-0010',
+            }),
+          )
+          .expect(400);
+        expect(without.body.error.code).toBe('VALIDATION_ERROR');
+        expect(without.body.error.fields.proof).toMatch(/required/i);
+
+        const withProof = await postBookingForm({
+          ...CREATE_BODY,
+          selections: selection({ variationId }),
+          startAt: '2026-11-29T10:00:00.000Z',
+          submissionKey: 'invoice-20261129-0010',
+        }).expect(201);
+        expect(withProof.body.status).toBe('awaiting-verification');
+      } finally {
+        await setPrepaidFixed(false);
+      }
+    });
+
+    it('switching between the two deposit forms always clears the value that no longer applies (REQ-111 AC1)', async () => {
+      await setupWorld();
+      const patch = (body: Record<string, unknown>) =>
+        http()
+          .patch(`/api/v1/owner/businesses/${businessId}/settings`)
+          .set(owner(OWNER_A))
+          .send(body)
+          .expect(200);
+      const read = async () => {
+        const res = await http()
+          .get(`/api/v1/owner/businesses/${businessId}`)
+          .set(owner(OWNER_A))
+          .expect(200);
+        return {
+          mode: res.body.prepaymentMode,
+          percent: res.body.prepaymentPercent,
+          fixed: res.body.prepaymentFixedMinor,
+        };
+      };
+
+      // PERCENTAGE -> FIXED: the percentage is cleared, never left behind.
+      await patch({ prepaymentMode: 'PERCENTAGE', prepaymentPercent: 30 });
+      expect(await read()).toEqual({ mode: 'PERCENTAGE', percent: 30, fixed: null });
+
+      await patch({ prepaymentMode: 'FIXED', prepaymentFixedMinor: 5000 });
+      expect(await read()).toEqual({ mode: 'FIXED', percent: null, fixed: 5000 });
+
+      // FIXED -> PERCENTAGE: the fixed amount is cleared.
+      await patch({ prepaymentMode: 'PERCENTAGE', prepaymentPercent: 40 });
+      expect(await read()).toEqual({ mode: 'PERCENTAGE', percent: 40, fixed: null });
+
+      // PERCENTAGE -> NONE: both columns are cleared, so the row satisfies the
+      // business_settings_prepayment_mode CHECK constraint instead of 500ing.
+      await patch({ prepaymentMode: 'NONE' });
+      expect(await read()).toEqual({ mode: 'NONE', percent: null, fixed: null });
+
+      const availability = await http()
+        .post('/api/v1/public/businesses/happy-salons-test-1/availability')
+        .send({ date: DATE, selections: [{ serviceId, variationId }] })
+        .expect(200);
+      expect(availability.body.requiredPrepaidMinor).toBe(0);
+    });
+
+    it('rejects mixing a percentage with a fixed amount, and a value with no deposit (REQ-111 AC1)', async () => {
+      await setupWorld();
+
+      const mixedPercentage = await http()
+        .patch(`/api/v1/owner/businesses/${businessId}/settings`)
+        .set(owner(OWNER_A))
+        .send({ prepaymentMode: 'PERCENTAGE', prepaymentPercent: 30, prepaymentFixedMinor: 5000 })
+        .expect(400);
+      expect(mixedPercentage.body.error.code).toBe('VALIDATION_ERROR');
+      expect(mixedPercentage.body.error.fields.prepaymentFixedMinor).toMatch(/not both/i);
+
+      const mixedFixed = await http()
+        .patch(`/api/v1/owner/businesses/${businessId}/settings`)
+        .set(owner(OWNER_A))
+        .send({ prepaymentMode: 'FIXED', prepaymentPercent: 30, prepaymentFixedMinor: 5000 })
+        .expect(400);
+      expect(mixedFixed.body.error.code).toBe('VALIDATION_ERROR');
+      expect(mixedFixed.body.error.fields.prepaymentPercent).toMatch(/not both/i);
+
+      const noneWithValue = await http()
+        .patch(`/api/v1/owner/businesses/${businessId}/settings`)
+        .set(owner(OWNER_A))
+        .send({ prepaymentMode: 'NONE', prepaymentFixedMinor: 5000 })
+        .expect(400);
+      expect(noneWithValue.body.error.code).toBe('VALIDATION_ERROR');
+      expect(noneWithValue.body.error.fields.prepaymentMode).toMatch(/no deposit/i);
+
+      // Nothing was written: the business still requires no deposit.
+      const after = await http()
+        .get(`/api/v1/owner/businesses/${businessId}`)
+        .set(owner(OWNER_A))
+        .expect(200);
+      expect(after.body.prepaymentMode).toBe('NONE');
+      expect(after.body.prepaymentFixedMinor).toBeNull();
+    });
+
+    it('rejects an out-of-range percentage before anything is stored (REQ-111)', async () => {
+      await setupWorld();
+      for (const bad of [0, 101]) {
+        const res = await http()
+          .patch(`/api/v1/owner/businesses/${businessId}/settings`)
+          .set(owner(OWNER_A))
+          .send({ prepaymentMode: 'PERCENTAGE', prepaymentPercent: bad, prepaymentFixedMinor: null })
+          .expect(400);
+        expect(res.body.error.code).toBe('VALIDATION_ERROR');
+      }
+      const after = await http()
+        .get(`/api/v1/owner/businesses/${businessId}`)
+        .set(owner(OWNER_A))
+        .expect(200);
+      expect(after.body.prepaymentMode).toBe('NONE');
+    });
+
+    it('a business with no deposit books directly and never asks for a receipt (REQ-110 negative case)', async () => {
+      await setupWorld();
+      // A day of its own: the shared fixture date's hours are claimed by the
+      // neighbouring tests, and a 70-minute service makes adjacent hours overlap.
+      const ownDay = '2026-11-29';
+      const availability = await http()
+        .post('/api/v1/public/businesses/happy-salons-test-1/availability')
+        .send({ date: ownDay, selections: [{ serviceId, variationId }] })
+        .expect(200);
+      expect(availability.body.requiredPrepaidMinor).toBe(0);
+
+      // No multipart body and no proof file at all: the booking still succeeds.
+      const created = await http()
+        .post('/api/v1/customer/bookings')
+        .field(
+          'payload',
+          JSON.stringify({
+            ...CREATE_BODY,
+            selections: selection({ variationId }),
+            startAt: `${ownDay}T14:00:00.000Z`,
+            submissionKey: 'invoice-20261129-0011',
+          }),
+        )
+        .expect(201);
+      // A new booking is PAYMENT_PENDING either way; what distinguishes a
+      // no-deposit booking is that nothing is owed and no proof was demanded.
+      expect(created.body.status).toBe('awaiting-verification');
+      // Nothing was prepaid, so the customer chose no method and none is reported.
+      expect(created.body.prepaidMinor).toBe(0);
+      expect(created.body.paymentMethod).toBeNull();
+
+      const booking = await prisma.booking.findFirstOrThrow({
+        where: { businessId, startAt: new Date(`${ownDay}T14:00:00.000Z`) },
+      });
+      const payment = await prisma.payment.findFirstOrThrow({ where: { bookingId: booking.id } });
+      expect(payment.prepaidMinor).toBe(0n);
+      // Nothing was ever attached to THIS payment: no file object and no proof
+      // that carries one. (Other bookings in this file do have real proofs.)
+      expect(
+        await prisma.paymentProof.count({ where: { paymentId: payment.id, fileObjectId: { not: null } } }),
+      ).toBe(0);
+
+      // The owner sees the same truth: no method, no amount, no attachment.
+      const ownerView = await http()
+        .get(`/api/v1/owner/businesses/${businessId}/bookings/${booking.id}`)
+        .set(owner(OWNER_A))
+        .expect(200);
+      expect(ownerView.body.payment.prepaidMinor).toBe(0);
+      expect(ownerView.body.payment.method).toBeNull();
+      expect(ownerView.body.proofs).toEqual([]);
+
+      // And the booking is confirmed by the ordinary owner action, with no proof
+      // to review: a no-deposit request is not blocked by the receipt workflow.
+      const confirmed = await http()
+        .post(`/api/v1/owner/businesses/${businessId}/bookings/${booking.id}/accept`)
+        .set(owner(OWNER_A))
+        .expect(200);
+      expect(confirmed.body.status).toBe('CONFIRMED');
+      expect(confirmed.body.payment.status).toBe('ACCEPTED');
     });
 
     it('owner downloads the proof file with attachment headers; other tenants and unknown ids get 404 (REQ-114/115/118)', async () => {
