@@ -159,8 +159,9 @@ export function BookingDetailPage() {
   // A stored payment method is labelled from the real backend method code.
   // The public API carries no owner-published payment instructions, so the code's
   // own display label is the only thing shown. No placeholder details are ever
-  // rendered.
-  const paymentLabel = paymentMethodLabel(booking.paymentMethod) ?? booking.paymentMethod
+  // rendered, and a booking that required no deposit says so rather than
+  // borrowing a method the customer never picked.
+  const paymentLabel = paymentMethodLabel(booking.paymentMethod)
 
   const reviewPaymentStatus = paymentReview.review?.paymentStatus ?? null
 
@@ -275,7 +276,7 @@ export function BookingDetailPage() {
         </h2>
         <p className="booking-detail__row">
           <span className="booking-detail__label">Method</span>
-          <span>{paymentLabel}</span>
+          <span>{paymentLabel ?? 'No payment required'}</span>
         </p>
         <p className="booking-detail__row">
           <span className="booking-detail__label">Status</span>
