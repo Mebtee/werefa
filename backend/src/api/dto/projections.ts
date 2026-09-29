@@ -164,11 +164,18 @@ export class CustomerBookingView {
   @ApiProperty({ example: 'my-salon' }) businessSlug: string;
   @ApiProperty({ example: 10000 }) totalPriceMinor: number;
   @ApiProperty({ example: 0 }) prepaidMinor: number;
-  @ApiProperty({ example: 'BANK_TRANSFER' }) paymentMethod: string;
+  /**
+   * The method the customer actually chose. `null` when nothing was prepaid:
+   * a booking with no deposit has no payment method, and the column's
+   * placeholder must not be reported to the customer or the owner as if it were
+   * one (REQ-110 — no deposit means no payment).
+   */
+  @ApiProperty({ example: 'BANK_TRANSFER', enum: PaymentMethod, nullable: true }) paymentMethod: string | null;
   @ApiPropertyOptional() note: string | null;
 }
 
 export function customerBookingProjection(businessSlug: string, booking: BookingWithRelations): CustomerBookingView {
+  const prepaidMinor = booking.payment?.prepaidMinor ?? 0n;
   return {
     status: PUBLIC_STATUS[booking.status],
     startAt: booking.startAt.toISOString(),
@@ -176,8 +183,8 @@ export function customerBookingProjection(businessSlug: string, booking: Booking
     serviceNames: booking.components.map((c) => c.nameSnapshot),
     businessSlug,
     totalPriceMinor: toNumber(sumComponents(booking.components))!,
-    prepaidMinor: toNumber(booking.payment?.prepaidMinor ?? 0n)!,
-    paymentMethod: booking.payment?.method ?? PaymentMethod.BANK_TRANSFER,
+    prepaidMinor: toNumber(prepaidMinor)!,
+    paymentMethod: prepaidMinor > 0n ? booking.payment?.method ?? null : null,
     note: booking.note,
   };
 }
@@ -343,7 +350,11 @@ export class OwnerBookingComponentView {
 
 export class OwnerPaymentView {
   @ApiProperty({ example: 'PENDING', enum: PaymentState }) status: PaymentState;
-  @ApiProperty({ example: 'BANK_TRANSFER', enum: PaymentMethod }) method: PaymentMethod;
+  /**
+   * `null` when no deposit was required: the customer never chose a method, so
+   * the stored placeholder is not reported as one (REQ-110).
+   */
+  @ApiProperty({ example: 'BANK_TRANSFER', enum: PaymentMethod, nullable: true }) method: PaymentMethod | null;
   @ApiProperty({ example: 0 }) prepaidMinor: number;
 }
 
@@ -388,7 +399,7 @@ export function ownerBookingProjection(booking: BookingWithRelations): OwnerBook
     payment: booking.payment
       ? {
           status: booking.payment.status,
-          method: booking.payment.method,
+          method: booking.payment.prepaidMinor > 0n ? booking.payment.method : null,
           prepaidMinor: toNumber(booking.payment.prepaidMinor)!,
         }
       : null,
