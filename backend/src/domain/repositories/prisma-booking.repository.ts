@@ -182,9 +182,16 @@ export class PrismaBookingRepository implements BookingRepository {
     return { ...booking, proofTimeline } as unknown as BookingWithHistory;
   }
 
+  /**
+   * The owner-visible proof timeline. A booking created without a deposit still
+   * gets a `payment_proof` row (the column is the payment's submission record),
+   * but a row with no file object is not a proof: listing it would show the owner
+   * a fabricated `payment-proof-<id>.bin` attachment of 0 bytes that the
+   * download route can never serve. Only rows that carry a real file appear.
+   */
   private async proofTimelineFor(paymentId: string): Promise<import('./booking.repository.port').ProofTimelineEntry[]> {
     const proofs = await this.prisma.paymentProof.findMany({
-      where: { paymentId },
+      where: { paymentId, fileObjectId: { not: null } },
       select: { id: true, submittedAt: true, replacedByProofId: true, fileObjectId: true },
       orderBy: { submittedAt: 'asc' },
     });
