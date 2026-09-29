@@ -10,6 +10,7 @@ import { categoryToCode } from '@/api/business.mapper'
 import { useOwnedBusiness } from '@/features/owner-portal/state/useOwnedBusiness'
 import { LoadState } from '@/features/owner-portal/components/LoadState'
 import { PauseCard } from '@/features/owner-portal/components/PauseCard'
+import { PrepaymentCard } from '@/features/owner-portal/components/PrepaymentCard'
 import { CATEGORY_LABEL } from '@/features/owner-portal/lib/labels'
 import { mapUrl } from '@/lib/format'
 import { Alert } from '@/components/ui/Alert'
@@ -485,6 +486,10 @@ export function BusinessProfilePage() {
           </p>
         </div>
       </section>
+
+      <div style={{ marginTop: 'var(--space-4)' }}>
+        <PrepaymentCard businessId={businessId} business={business} onChanged={reload} />
+      </div>
 
       <div style={{ marginTop: 'var(--space-4)' }}>
         <PauseCard businessId={businessId} business={business} onChanged={reload} />
