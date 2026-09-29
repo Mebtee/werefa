@@ -1,9 +1,15 @@
-import type { BusinessCategory, BusinessDetails, PauseState } from '@/types/models'
+import type {
+  BusinessCategory,
+  BusinessDetails,
+  PauseState,
+  PrepaymentConfig,
+} from '@/types/models'
 import type {
   BusinessCategoryCode,
   BusinessCoordinates,
   OwnerBusinessView,
   PublicBusinessView,
+  UpdateBusinessSettingsInput,
 } from './types'
 
 /**
@@ -44,6 +50,53 @@ export function pauseFromBusiness(
   const message = pauseMessage?.trim() ? pauseMessage : undefined
   if (reopenAt) return { kind: 'until', reopenDate: reopenAt.slice(0, 10), message }
   return { kind: 'indefinite', message }
+}
+
+/**
+ * Real per-business prepayment configuration (REQ-110/111) → the UI model.
+ *
+ * The backend owns the decision: the owner configures a percentage OR a fixed
+ * minor-unit amount (or none at all), and the same three columns are what
+ * `computePrepaidAmount` uses to derive every disclosed deposit. Nothing is
+ * defaulted to a platform percentage here — a value the projection does not
+ * carry for the active mode simply has no value.
+ */
+export function prepaymentFromView(view: {
+  prepaymentMode: 'NONE' | 'PERCENTAGE' | 'FIXED'
+  prepaymentPercent: number | null
+  prepaymentFixedMinor: number | null
+}): PrepaymentConfig {
+  if (view.prepaymentMode === 'PERCENTAGE' && view.prepaymentPercent !== null) {
+    return { mode: 'percentage', value: view.prepaymentPercent }
+  }
+  if (view.prepaymentMode === 'FIXED' && view.prepaymentFixedMinor !== null) {
+    return { mode: 'fixed', value: view.prepaymentFixedMinor }
+  }
+  return { mode: 'none' }
+}
+
+/** The inverse of {@link prepaymentFromView} for `PATCH …/settings`. */
+export function prepaymentToSettings(
+  config: PrepaymentConfig,
+): Pick<
+  UpdateBusinessSettingsInput,
+  'prepaymentMode' | 'prepaymentPercent' | 'prepaymentFixedMinor'
+> {
+  if (config.mode === 'percentage' && config.value !== undefined) {
+    return {
+      prepaymentMode: 'PERCENTAGE',
+      prepaymentPercent: config.value,
+      prepaymentFixedMinor: null,
+    }
+  }
+  if (config.mode === 'fixed' && config.value !== undefined) {
+    return {
+      prepaymentMode: 'FIXED',
+      prepaymentPercent: null,
+      prepaymentFixedMinor: config.value,
+    }
+  }
+  return { prepaymentMode: 'NONE', prepaymentPercent: null, prepaymentFixedMinor: null }
 }
 
 /**
@@ -96,6 +149,9 @@ export function hybridizeOwnedBusiness(
     phone: view.phonePublic ?? '',
     pause: pauseFromBusiness(view.isPaused, view.pauseMessage, view.reopenAt),
     bookingIntervalMinutes: view.bookingIntervalMinutes,
+    // The real deposit configuration, not a rendering default: this is what
+    // decides whether the customer booking wizard asks for a payment proof.
+    prepayment: prepaymentFromView(view),
   }
 }
 
@@ -106,6 +162,13 @@ export function hybridizeOwnedBusiness(
  * a caller-supplied set of *rendering defaults* of the same shape as
  * `DEFAULT_PUBLIC_BUSINESS_FIELDS` — it is never a demo business, catalogue or
  * schedule, and a production caller passes nothing.
+ *
+ * `PublicBusinessView` carries no prepayment field, and none is needed: the
+ * customer wizard never guesses a deposit from business metadata. It shows and
+ * enforces exactly the amount the backend derives per selection in the
+ * availability response (`requiredPrepaidMinor`, computed by the same
+ * `computePrepaidAmount` that rejects a proof-less booking), so no additional
+ * public field is required or added here.
  */
 export function hybridizePublicBusiness(
   view: PublicBusinessView,

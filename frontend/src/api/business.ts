@@ -7,6 +7,7 @@ import type {
   PauseBusinessInput,
   PublicBusinessView,
   UpdateBusinessProfileInput,
+  UpdateBusinessSettingsInput,
 } from './types'
 
 /**
@@ -75,6 +76,26 @@ export function resumeOwnedBusiness(businessId: string): Promise<OwnerBusinessVi
 
 export function getPublicBusiness(slug: string, signal?: AbortSignal): Promise<PublicBusinessView> {
   return apiRequest<PublicBusinessView>(`${PUBLIC_BUSINESSES}/${slug}`, { signal }).then(({ data }) => data)
+}
+
+/**
+ * Writes the owner's per-business operational settings: the booking interval
+ * and the prepayment configuration (REQ-110/111).
+ *
+ * This is the ONLY route that turns a deposit on or off. It is what makes the
+ * customer-facing payment-proof step reachable: the backend derives
+ * `requiredPrepaidMinor` for every availability response from the same
+ * configuration this call persists, and `POST /customer/bookings` refuses a
+ * proof-less booking whenever the derived amount is greater than zero.
+ */
+export function updateOwnerBusinessSettings(
+  businessId: string,
+  input: UpdateBusinessSettingsInput,
+): Promise<OwnerBusinessView> {
+  return apiRequest<OwnerBusinessView>(`${OWNER_BUSINESSES}/${businessId}/settings`, {
+    method: 'PATCH',
+    body: input,
+  }).then(({ data }) => data)
 }
 
 export function isNotFoundError(error: unknown): boolean {

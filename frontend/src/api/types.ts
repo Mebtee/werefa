@@ -211,9 +211,24 @@ export interface CreateServiceVariantInput {
   durationDeltaMinutes: number
 }
 
-/** `PATCH /api/v1/owner/businesses/:id/settings` body (booking interval lives on business settings). */
+/**
+ * `PATCH /api/v1/owner/businesses/:id/settings` body. Both the booking interval
+ * and the per-business prepayment configuration live on business settings
+ * (REQ-110/111), so one owner route writes both.
+ *
+ * The prepayment form is exactly the one the backend accepts: `NONE`
+ * (no deposit), `PERCENTAGE` (with `prepaymentPercent`, 1..100) or `FIXED`
+ * (with `prepaymentFixedMinor`, minor units). There is no platform-wide
+ * default percentage — the owner chooses, and the backend derives the deposit
+ * from this configuration.
+ */
 export interface UpdateBusinessSettingsInput {
   bookingIntervalMinutes?: number
+  prepaymentMode?: 'NONE' | 'PERCENTAGE' | 'FIXED'
+  /** Required when `prepaymentMode` is `PERCENTAGE`; ignored otherwise. */
+  prepaymentPercent?: number | null
+  /** Minor units (integer); required when `prepaymentMode` is `FIXED`. */
+  prepaymentFixedMinor?: number | null
 }
 
 // ---------------------------------------------------------------------------
@@ -415,7 +430,8 @@ export interface CustomerBookingView {
   businessSlug: string
   totalPriceMinor: number
   prepaidMinor: number
-  paymentMethod: string
+  /** `null` when the business requires no deposit, so no method was chosen. */
+  paymentMethod: string | null
   note: string | null
 }
 

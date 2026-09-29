@@ -1,4 +1,5 @@
 import { apiRequest } from './http'
+import { updateOwnerBusinessSettings } from './business'
 import type {
   OwnerScheduleConflictView,
   OwnerScheduleSaveResultView,
@@ -18,7 +19,9 @@ import type {
  * current/versions/conflicts reads, the versioned save, the Keep-Booking
  * exception, and the public schedule projection. Interval changes ride the
  * real business-settings endpoint (`PATCH …/settings`) because the backend
- * stores the booking interval on BusinessSettings, not on the schedule.
+ * stores the booking interval on BusinessSettings, not on the schedule. That
+ * same route carries the prepayment configuration, so both share one client
+ * (`updateOwnerBusinessSettings`).
  *
  * Weekday conversion: the UI works in frontend days (Sunday = 0), the backend
  * in ISO weekdays (Monday = 1 … Sunday = 7). Mapping happens in
@@ -76,10 +79,7 @@ export function updateOwnerScheduleInterval(
   businessId: string,
   input: UpdateBusinessSettingsInput,
 ): Promise<OwnerBusinessView> {
-  return apiRequest<OwnerBusinessView>(
-    `/owner/businesses/${businessId}/settings`,
-    { method: 'PATCH', body: input },
-  ).then(({ data }) => data)
+  return updateOwnerBusinessSettings(businessId, input)
 }
 
 export function getPublicSchedule(slug: string): Promise<PublicScheduleView> {
