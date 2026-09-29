@@ -128,6 +128,21 @@ export class BusinessService {
     }
   }
 
+  /**
+   * Owner booking-interval and prepayment settings (REQ-110 / REQ-111).
+   *
+   * The prepayment triplet is always written WHOLE: the value that belongs to the
+   * chosen mode plus an explicit null for the field that does not. Two reasons,
+   * both REQ-111 AC1 ("one of the two forms, never both"):
+   *
+   *  - A request that carries a value for the mode it did not select is rejected
+   *    outright rather than silently reinterpreted.
+   *  - Switching modes (e.g. PERCENTAGE 30 -> NONE, or -> FIXED) always clears the
+   *    value that no longer applies. Without this the row keeps a stale
+   *    `prepayment_percent` next to `prepayment_mode = 'NONE'`, which violates the
+   *    `business_settings_prepayment_mode` CHECK constraint and surfaces to the
+   *    owner as an opaque 500 instead of the setting they asked for.
+   */
   async updateSettings(
     ctx: ActorContext,
     businessId: string,
@@ -139,19 +154,54 @@ export class BusinessService {
     },
   ) {
     await this.tenantGuard.requireOwnedBusiness(ctx, businessId);
+    const patch: {
+      bookingIntervalMinutes?: number;
+      prepaymentMode?: 'NONE' | 'PERCENTAGE' | 'FIXED';
+      prepaymentPercent?: number | null;
+      prepaymentFixedMinor?: bigint | null;
+    } = {};
     if (input.bookingIntervalMinutes !== undefined) {
       if (input.bookingIntervalMinutes <= 0 || input.bookingIntervalMinutes % 5 !== 0) {
         throw domainErrors.invalidSchedule({ bookingIntervalMinutes: 'Interval must be a positive multiple of 5.' });
       }
+      patch.bookingIntervalMinutes = input.bookingIntervalMinutes;
     }
-    if (input.prepaymentMode === 'PERCENTAGE' && (input.prepaymentPercent == null || input.prepaymentPercent < 1 || input.prepaymentPercent > 100)) {
-      throw domainErrors.invalidSchedule({ prepaymentPercent: 'Percentage must be 1–100.' });
-    }
-    if (input.prepaymentMode === 'FIXED' && (input.prepaymentFixedMinor == null || input.prepaymentFixedMinor < 0n)) {
-      throw domainErrors.invalidSchedule({ prepaymentFixedMinor: 'Fixed prepayment must be non-negative.' });
+    if (input.prepaymentMode !== undefined) {
+      if (input.prepaymentMode === 'PERCENTAGE') {
+        if (input.prepaymentPercent == null || input.prepaymentPercent < 1 || input.prepaymentPercent > 100) {
+          throw domainErrors.invalidSchedule({ prepaymentPercent: 'Percentage must be 1–100.' });
+        }
+        if (input.prepaymentFixedMinor != null) {
+          throw domainErrors.invalidSchedule({
+            prepaymentFixedMinor: 'Choose a percentage or a fixed amount, not both.',
+          });
+        }
+        patch.prepaymentPercent = input.prepaymentPercent;
+        patch.prepaymentFixedMinor = null;
+      } else if (input.prepaymentMode === 'FIXED') {
+        if (input.prepaymentFixedMinor == null || input.prepaymentFixedMinor < 0n) {
+          throw domainErrors.invalidSchedule({ prepaymentFixedMinor: 'Fixed prepayment must be non-negative.' });
+        }
+        if (input.prepaymentPercent != null) {
+          throw domainErrors.invalidSchedule({
+            prepaymentPercent: 'Choose a percentage or a fixed amount, not both.',
+          });
+        }
+        patch.prepaymentFixedMinor = input.prepaymentFixedMinor;
+        patch.prepaymentPercent = null;
+      } else {
+        if (input.prepaymentPercent != null || input.prepaymentFixedMinor != null) {
+          throw domainErrors.invalidSchedule({
+            prepaymentMode: 'With no deposit, do not send a percentage or a fixed amount.',
+          });
+        }
+        patch.prepaymentPercent = null;
+        patch.prepaymentFixedMinor = null;
+      }
+      patch.prepaymentMode = input.prepaymentMode;
     }
     return withBusinessAdvisoryLock(this.prisma, businessId, (tx) =>
-      this.businessRepo.updateSettings(tx, { businessId, ...input }),
+      this.businessRepo.updateSettings(tx, { businessId, ...patch }),
     );
   }
 
