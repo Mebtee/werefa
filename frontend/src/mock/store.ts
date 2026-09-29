@@ -12,6 +12,7 @@ import type {
   Money,
   PauseState,
   PaymentMethodId,
+  PrepaymentConfig,
   ProofFile,
   ScheduleConflict,
   ScheduleConflictAction,
@@ -255,6 +256,19 @@ export function saveBookingInterval(
   bookingIntervalMinutes: number,
 ): StoreResult<BusinessDetails> {
   return updateBusiness(slug, { bookingIntervalMinutes })
+}
+
+/**
+ * Owner prepayment configuration (REQ-110/111). Test-double state for the real
+ * `PATCH /owner/businesses/:id/settings` route: the availability projection and
+ * booking creation both derive the deposit from this value, exactly as the
+ * backend derives it from `business_settings.prepayment_*`.
+ */
+export function savePrepayment(
+  slug: string,
+  prepayment: PrepaymentConfig,
+): StoreResult<BusinessDetails> {
+  return updateBusiness(slug, { prepayment })
 }
 
 export function saveSpecialDays(

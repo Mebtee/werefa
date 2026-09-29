@@ -37,6 +37,7 @@ import {
   rescheduleBooking,
   resubmitRejectedProof,
   saveBookingInterval,
+  savePrepayment,
   saveSchedule,
   scheduleSnapshotOf,
   setCustomerTelegramConnected,
@@ -1396,11 +1397,77 @@ export function installBusinessApiStub(
         }
 
         if (action === 'settings' && method === 'PATCH') {
-          const input = (body ?? {}) as { bookingIntervalMinutes?: unknown }
+          const input = (body ?? {}) as {
+            bookingIntervalMinutes?: unknown
+            prepaymentMode?: unknown
+            prepaymentPercent?: unknown
+            prepaymentFixedMinor?: unknown
+          }
           if (typeof input.bookingIntervalMinutes === 'number' && Number.isFinite(input.bookingIntervalMinutes)) {
             routeState.bookingIntervalMinutes = input.bookingIntervalMinutes
             if (routeState.id === state.id) {
               saveBookingInterval(storeSlug, input.bookingIntervalMinutes)
+            }
+          }
+          // REQ-110/111: the same route carries the owner's deposit choice, and
+          // it is the only way a business can require a prepayment at all. The
+          // double mirrors the real backend: one form or none, never a mix, and
+          // the value for the mode that was not chosen is always cleared.
+          if (typeof input.prepaymentMode === 'string') {
+            const mode = input.prepaymentMode
+            if (
+              (mode === 'PERCENTAGE' && input.prepaymentFixedMinor != null) ||
+              (mode === 'FIXED' && input.prepaymentPercent != null) ||
+              (mode === 'NONE' &&
+                (input.prepaymentPercent != null || input.prepaymentFixedMinor != null))
+            ) {
+              return envelope(
+                400,
+                'VALIDATION_ERROR',
+                'Validation failed',
+                'Choose a percentage or a fixed amount, not both.',
+              )
+            }
+            if (mode === 'PERCENTAGE') {
+              const percent = input.prepaymentPercent
+              if (typeof percent !== 'number' || !Number.isInteger(percent) || percent < 1 || percent > 100) {
+                return envelope(
+                  400,
+                  'VALIDATION_ERROR',
+                  'Validation failed',
+                  'prepaymentPercent must be a whole number between 1 and 100.',
+                )
+              }
+              routeState.prepaymentMode = 'PERCENTAGE'
+              routeState.prepaymentPercent = percent
+              routeState.prepaymentFixedMinor = null
+            } else if (mode === 'FIXED') {
+              const fixed = input.prepaymentFixedMinor
+              if (typeof fixed !== 'number' || !Number.isInteger(fixed) || fixed < 0) {
+                return envelope(
+                  400,
+                  'VALIDATION_ERROR',
+                  'Validation failed',
+                  'prepaymentFixedMinor must be a whole number of 0 or more.',
+                )
+              }
+              routeState.prepaymentMode = 'FIXED'
+              routeState.prepaymentPercent = null
+              routeState.prepaymentFixedMinor = fixed
+            } else {
+              routeState.prepaymentMode = 'NONE'
+              routeState.prepaymentPercent = null
+              routeState.prepaymentFixedMinor = null
+            }
+            if (routeState.id === state.id) {
+              savePrepayment(
+                storeSlug,
+                routeState.prepaymentMode === 'PERCENTAGE'
+                  ? { mode: 'percentage', value: routeState.prepaymentPercent ?? undefined }
+                  : routeState.prepaymentMode === 'FIXED'
+                    ? { mode: 'fixed', value: routeState.prepaymentFixedMinor ?? undefined }
+                    : { mode: 'none' },
+              )
             }
           }
           return json(cloneOwnerBusiness(routeState))
