@@ -1314,6 +1314,145 @@ const request = await http()
       const after = await prisma.fileObject.count({ where: { category: 'CUSTOMER_PROOF' } });
       expect(after).toBe(before + 1);
     });
+
+    it('snapshots the deposit per booking: a later configuration or price change never rewrites an existing booking (REQ-108/110/111)', async () => {
+      await setupWorld();
+      // A day of its own: the shared fixture dates are claimed by neighbouring
+      // tests and the appointment is long enough to overlap adjacent hours.
+      const day = '2026-12-05';
+
+      const patchSettings = (body: Record<string, unknown>) =>
+        http()
+          .patch(`/api/v1/owner/businesses/${businessId}/settings`)
+          .set(owner(OWNER_A))
+          .send(body)
+          .expect(200);
+
+      const availability = () =>
+        http()
+          .post('/api/v1/public/businesses/happy-salons-test-1/availability')
+          .send({ date: day, selections: selection({ variationId }) })
+          .expect(200);
+
+      // Always take the first slot the backend currently offers, so the three
+      // bookings never collide regardless of the service duration configured by
+      // an earlier test in this file.
+      const nextFreeSlot = async (): Promise<string> => {
+        const res = await availability();
+        const slot = (res.body.slots as { startAt: string }[])[0];
+        expect(slot).toBeTruthy();
+        return slot.startAt;
+      };
+
+      const dbPrepaid = async (bookingId: number): Promise<bigint> => {
+        const payment = await prisma.payment.findFirstOrThrow({ where: { bookingId } });
+        return payment.prepaidMinor;
+      };
+
+      const ownerPrepaid = async (bookingId: number): Promise<number> => {
+        const res = await http()
+          .get(`/api/v1/owner/businesses/${businessId}/bookings/${bookingId}`)
+          .set(owner(OWNER_A))
+          .expect(200);
+        return res.body.payment.prepaidMinor as number;
+      };
+
+      const services = await http()
+        .get(`/api/v1/owner/businesses/${businessId}/services`)
+        .set(owner(OWNER_A))
+        .expect(200);
+      const service = (services.body as { id: string; basePriceMinor: number }[]).find(
+        (s) => s.id === serviceId,
+      )!;
+      const originalPrice = service.basePriceMinor;
+
+      try {
+        // Day 1 — the business requires 50% up front.
+        await patchSettings({
+          prepaymentMode: 'PERCENTAGE',
+          prepaymentPercent: 50,
+          prepaymentFixedMinor: null,
+        });
+        const total = (await availability()).body.computedTotalPriceMinor as number;
+        const half = Math.floor((total * 50) / 100);
+        expect(half).toBeGreaterThan(0);
+
+        const startA = await nextFreeSlot();
+        const first = await postBookingForm({
+          ...CREATE_BODY,
+          selections: selection({ variationId }),
+          startAt: startA,
+          submissionKey: 'snapshot-20261205-0001',
+        }).expect(201);
+        expect(first.body.prepaidMinor).toBe(half);
+
+        const bookingA = await prisma.booking.findFirstOrThrow({
+          where: { businessId, startAt: new Date(startA) },
+        });
+        expect(await dbPrepaid(bookingA.id)).toBe(BigInt(half));
+
+        // Day 2 — the owner switches to a fixed amount AND raises the price.
+        await patchSettings({ prepaymentMode: 'FIXED', prepaymentFixedMinor: 1234 });
+        await http()
+          .patch(`/api/v1/owner/businesses/${businessId}/services/${serviceId}`)
+          .set(owner(OWNER_A))
+          .send({ basePriceMinor: originalPrice + 5000 })
+          .expect(200);
+
+        // The existing booking keeps its own snapshot — in the database and
+        // through the owner projection (no recalculation from current settings).
+        expect(await ownerPrepaid(bookingA.id)).toBe(half);
+        expect(await dbPrepaid(bookingA.id)).toBe(BigInt(half));
+
+        // A NEW booking picks up the NEW configuration.
+        const startB = await nextFreeSlot();
+        const second = await postBookingForm({
+          ...CREATE_BODY,
+          selections: selection({ variationId }),
+          startAt: startB,
+          submissionKey: 'snapshot-20261205-0002',
+        }).expect(201);
+        expect(second.body.prepaidMinor).toBe(1234);
+
+        const bookingB = await prisma.booking.findFirstOrThrow({
+          where: { businessId, startAt: new Date(startB) },
+        });
+        expect(await dbPrepaid(bookingB.id)).toBe(1234n);
+        // Neither booking was rewritten by the other's configuration.
+        expect(await dbPrepaid(bookingA.id)).toBe(BigInt(half));
+
+        // Day 3 — no deposit at all: a new booking needs no receipt, and the two
+        // existing snapshots still stand untouched.
+        await patchSettings({ prepaymentMode: 'NONE' });
+        expect((await availability()).body.requiredPrepaidMinor).toBe(0);
+
+        const startC = await nextFreeSlot();
+        const third = await http()
+          .post('/api/v1/customer/bookings')
+          .field(
+            'payload',
+            JSON.stringify({
+              ...CREATE_BODY,
+              selections: selection({ variationId }),
+              startAt: startC,
+              submissionKey: 'snapshot-20261205-0003',
+            }),
+          )
+          .expect(201);
+        expect(third.body.prepaidMinor).toBe(0);
+        expect(third.body.paymentMethod).toBeNull();
+
+        expect(await dbPrepaid(bookingA.id)).toBe(BigInt(half));
+        expect(await dbPrepaid(bookingB.id)).toBe(1234n);
+      } finally {
+        await patchSettings({ prepaymentMode: 'NONE' });
+        await http()
+          .patch(`/api/v1/owner/businesses/${businessId}/services/${serviceId}`)
+          .set(owner(OWNER_A))
+          .send({ basePriceMinor: originalPrice })
+          .expect(200);
+      }
+    });
   });
 });
 
