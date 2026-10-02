@@ -313,7 +313,8 @@ export type BookingDisposition =
 export type SubmitResult =
   | { status: 'created'; disposition: BookingDisposition }
   | { status: 'unavailable' }
-  | { status: 'error' }
+  /** Failed submission with a safe, honest message derived from the real error. */
+  | { status: 'error'; message: string }
 
 /**
  * Booking lifecycle state (REQ-101). No other user-facing booking state exists.

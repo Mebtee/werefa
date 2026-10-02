@@ -147,6 +147,13 @@ export interface BusinessApiStubOptions {
    */
   failPublicTelegramConnect?: boolean
   /**
+   * Consulted for the public customer booking route (`POST /customer/bookings`)
+   * ON REQUEST. Return a `Response` to force an error for the submission, or
+   * null to let the double handle it. Used to exercise the frontend's booking
+   * error mapping (Prompt 56).
+   */
+  failCustomerBookingRequest?: (request: { method: string; path: string }) => Response | null
+  /**
    * Consulted by the owner booking routes ON REQUEST (Prompt 51). Return a
    * `Response` to force an error for a specific method/path, or null to let the
    * double handle it. Used to exercise 403/404/409/5xx on the review surface.
@@ -235,6 +242,16 @@ function json<T>(body: T): Response {
     status: 200,
     headers: { 'content-type': 'application/json' },
   })
+}
+
+/**
+ * Backend-parity ET phone check for the customer booking double. Mirrors
+ * `@IsPhoneNumber('ET')` closely enough for tests: the ET national number is 9
+ * digits, optionally prefixed by `+251`, `251` or `0`, separators allowed.
+ */
+function isValidEtPhone(phone: string): boolean {
+  const normalized = phone.replace(/[\s()-]/g, '')
+  return /^(?:\+251|251|0)?[1-9]\d{8}$/.test(normalized)
 }
 
 function newOwnerState(): OwnerBusinessView {
@@ -1553,6 +1570,8 @@ export function installBusinessApiStub(
       if (rest[0] === 'customer') {
         const action = rest[1]
         if (action === 'bookings' && method === 'POST') {
+          const forced = options.failCustomerBookingRequest?.({ method, path: pathname })
+          if (forced) return forced
           const payload = (body ?? {}) as Record<string, unknown>
           const slug = String(payload.businessSlug ?? '')
           const selections = Array.isArray(payload.selections) ? payload.selections : []
@@ -1565,7 +1584,10 @@ export function installBusinessApiStub(
           if (!slug.trim() || slug.trim().length < 2) fields.businessSlug = 'Business slug is required.'
           if (selections.length === 0) fields.selections = 'Select at least one service.'
           if (!customerName.trim()) fields.customerName = 'Customer name is required.'
-          if (!customerPhone.trim()) fields.customerPhone = 'Customer phone is required.'
+          if (!customerPhone.trim())
+            fields.customerPhone = 'Customer phone is required.'
+          else if (!isValidEtPhone(customerPhone))
+            fields.customerPhone = 'customerPhone must be a valid phone number'
           if (!startAtText || Number.isNaN(new Date(startAtText).getTime())) fields.startAt = 'startAt must be a valid ISO datetime.'
           if (!submissionKey.trim()) fields.submissionKey = 'submissionKey is required.'
           if (Object.keys(fields).length > 0) return validationEnvelope(fields)

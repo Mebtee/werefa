@@ -98,7 +98,7 @@ export function DoneStep({
     <>
       <h2 className="step-title">Something went wrong</h2>
       <Alert tone="danger" title="Booking not sent">
-        Your booking request could not be sent. Please try again.
+        {result.message}
       </Alert>
       <nav className="wizard__nav" aria-label="Error actions">
         <Button variant="primary" onClick={onRetry}>

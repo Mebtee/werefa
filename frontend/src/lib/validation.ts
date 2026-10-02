@@ -5,11 +5,24 @@ export interface ValidationResult {
   errors: Partial<Record<keyof CustomerDetails, string>>
 }
 
-/** Phone shape used on both the booking form and the status lookup (REQ-054). */
-export const PHONE_PATTERN = /^\+?[0-9][0-9\s()-]{6,15}$/
+/**
+ * Ethiopian (ET) phone shape used on both the booking form and the status
+ * lookup (REQ-054).
+ *
+ * The backend validates with `@IsPhoneNumber('ET')` (libphonenumber) and is
+ * authoritative. This client check mirrors the ET national-number length so a
+ * wrong-length number is rejected before a booking request is ever sent —
+ * otherwise the whole submission fails server-side with a 400 that the customer
+ * cannot act on. It accepts the national forms a customer actually types:
+ * `+2519…`, `2519…`, `09…` or the bare `9…`, with optional spaces, hyphens or
+ * parentheses (normalized away before matching). ET's national number is 9
+ * digits starting with a non-zero digit.
+ */
+export const PHONE_PATTERN = /^(?:\+251|251|0)?[1-9]\d{8}$/
 
 export function isValidPhone(phone: string): boolean {
-  return PHONE_PATTERN.test(phone.trim())
+  const normalized = phone.replace(/[\s()-]/g, '')
+  return PHONE_PATTERN.test(normalized)
 }
 
 /**

@@ -9,7 +9,7 @@ import type {
 } from '@/types/models'
 import { createCustomerBooking } from '@/api/booking'
 import { createdResultFromView } from '@/api/booking.mapper'
-import { ApiError } from '@/api/errors'
+import { ApiError, toUserMessage } from '@/api/errors'
 
 export const STEP_SERVICES = 0
 export const STEP_DATE_TIME = 1
@@ -28,6 +28,32 @@ function newSubmissionKey(): string {
     return cryptoObj.randomUUID()
   }
   return `book-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+/**
+ * Derives a safe, honest, actionable message for a failed booking submission.
+ * The backend is authoritative and its field errors are never rendered raw; we
+ * map the known booking fields to customer-facing copy and otherwise fall back
+ * to the centralized `toUserMessage` (which never exposes internals).
+ */
+function submitFailureMessage(error: unknown): string {
+  if (error instanceof ApiError && error.kind === 'validation' && error.fields) {
+    const fields = error.fields
+    if (fields.customerPhone) {
+      return 'That phone number does not look valid. Please go back, check it and try again.'
+    }
+    if (fields.customerName) {
+      return 'Please check the name on the booking and try again.'
+    }
+    if (fields.proof) {
+      return 'Your payment proof was not accepted. Please attach a clear image or PDF and try again.'
+    }
+    if (fields.startAt || fields.selections) {
+      return 'Your selected service or time is no longer valid. Please pick a service and time again.'
+    }
+    return 'Some details of your booking are not valid. Please go back and check them, then try again.'
+  }
+  return toUserMessage(error)
 }
 
 export function useBookingFlow(business: BusinessDetails) {
@@ -185,7 +211,7 @@ export function useBookingFlow(business: BusinessDetails) {
         if (error instanceof ApiError && error.code === 'SLOT_UNAVAILABLE') {
           setResult({ status: 'unavailable' })
         } else {
-          setResult({ status: 'error' })
+          setResult({ status: 'error', message: submitFailureMessage(error) })
         }
         setStep(STEP_DONE)
       } finally {

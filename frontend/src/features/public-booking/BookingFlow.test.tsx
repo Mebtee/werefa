@@ -686,6 +686,71 @@ describe('public business page states (Prompt 55)', () => {
   })
 })
 
+describe('booking submission validation & error honesty (Prompt 56)', () => {
+  it('rejects a wrong-length phone on the details step instead of failing the submit', { timeout: 20_000 }, async () => {
+    const { container } = renderPage()
+
+    await screen.findByRole('heading', { name: 'Addis Beauty Lounge' })
+    await reachCustomerStep(container)
+
+    await user.type(screen.getByLabelText('Your name'), 'Selam Tesfaye')
+    // A 10-digit national number matched the old loose pattern but the backend
+    // (@IsPhoneNumber('ET')) rejects it. It must be caught client-side.
+    await user.type(screen.getByLabelText('Phone number'), '09112233445')
+    await user.click(screen.getByRole('button', { name: /continue to review/i }))
+
+    expect(await screen.findByText(/does not look valid/i)).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: 'Your details', level: 2 }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('heading', { name: 'Review your booking' }),
+    ).not.toBeInTheDocument()
+
+    // No booking request left the client at all.
+    expect(
+      stub?.calls.some((call) => call.url.includes('/customer/bookings')),
+    ).toBe(false)
+  })
+
+  it('surfaces the real safe reason when the backend rejects the booking', { timeout: 20_000 }, async () => {
+    installStub({
+      failCustomerBookingRequest: () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              code: 'VALIDATION_ERROR',
+              title: 'Invalid request',
+              fields: {
+                customerPhone: 'customerPhone must be a valid phone number',
+              },
+            },
+          }),
+          { status: 400, headers: { 'content-type': 'application/json' } },
+        ),
+    })
+    const { date, time } = freeWindowSlot()
+    const { container } = renderPage()
+
+    await screen.findByRole('heading', { name: 'Addis Beauty Lounge' })
+    await bookToPaymentStep(container, date, time)
+    await user.click(
+      screen.getByRole('button', { name: /confirm & send booking request/i }),
+    )
+
+    expect(
+      await screen.findByRole('heading', { name: 'Something went wrong' }),
+    ).toBeInTheDocument()
+    // The honest, actionable reason — never the old opaque generic copy.
+    expect(await screen.findByText(/does not look valid/i)).toBeInTheDocument()
+    expect(
+      screen.queryByText(/could not be sent\. please try again/i),
+    ).not.toBeInTheDocument()
+    // No internals leak into the UI.
+    expect(screen.queryByText(/customerPhone/)).not.toBeInTheDocument()
+  })
+})
+
 describe('booking conflict & idempotency (Prompt 55)', () => {
   it('shows the recoverable "time just got taken" state when the slot is lost in a race (REQ-121/REQ-122)', async () => {
     const { date, time } = freeWindowSlot()

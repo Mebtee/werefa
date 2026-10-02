@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { validateCustomerDetails, validateProofFile } from '@/lib/validation'
+import {
+  isValidPhone,
+  validateCustomerDetails,
+  validateProofFile,
+} from '@/lib/validation'
 
 describe('validateCustomerDetails', () => {
   it('accepts a valid name and phone', () => {
@@ -29,6 +33,29 @@ describe('validateCustomerDetails', () => {
       note: '',
     })
     expect(result.valid).toBe(true)
+  })
+})
+
+describe('isValidPhone (ET parity with the backend)', () => {
+  it('accepts every national ET form a customer actually types', () => {
+    for (const phone of [
+      '+251911223344',
+      '0911223344',
+      '251911223344',
+      '+251 91 122 3344',
+      '0911-223-344',
+      '911223344',
+    ]) {
+      expect(isValidPhone(phone), phone).toBe(true)
+    }
+  })
+
+  it('rejects the wrong-length numbers the backend rejects (REQ-054)', () => {
+    // These all matched the old loose pattern but fail @IsPhoneNumber('ET'),
+    // which made the whole booking submission fail server-side.
+    for (const phone of ['09112233445', '+25191122334', '091122334', 'not-a-phone']) {
+      expect(isValidPhone(phone), phone).toBe(false)
+    }
   })
 })
 
