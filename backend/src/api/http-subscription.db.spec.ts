@@ -225,6 +225,69 @@ describe.skipIf(!RUN)('Subscription & billing workflow (real DB)', () => {
     await http().get(`/api/v1/admin/subscription/proofs?state=PENDING`).set(owner(OWNER_A)).expect(403);
   });
 
+  it('admin inspects the actual proof file (image + PDF), owner cannot; no storage key leaks', async () => {
+    const image = await postProof(businessId, { submissionKey: 'sub-file-image' }).expect(201);
+    const imageFile = await http()
+      .get(`/api/v1/admin/subscription/proofs/${image.body.id}/file`)
+      .set(admin(ADMIN_1))
+      .expect(200);
+    expect(imageFile.headers['content-type']).toBe('image/png');
+    expect(imageFile.headers['content-disposition']).toContain('inline');
+    expect(imageFile.headers['x-content-type-options']).toBe('nosniff');
+    expect(Buffer.from(imageFile.body).equals(PROOF_PNG)).toBe(true);
+
+    // The opaque storage key and the storage directory never reach the client.
+    const headerDump = JSON.stringify(imageFile.headers);
+    expect(headerDump).not.toContain(proofStorageDir);
+    expect(headerDump.toLowerCase()).not.toContain('storageKey'.toLowerCase());
+
+    // PDF proofs keep their real content type too.
+    const pdfBytes = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF');
+    const pdf = await http()
+      .post(`/api/v1/owner/businesses/${businessId}/subscription/proof`)
+      .set(owner(OWNER_A))
+      .field('payload', JSON.stringify({ submissionKey: 'sub-file-pdf' }))
+      .attach('proof', pdfBytes, { filename: 'transfer.pdf', contentType: 'application/pdf' })
+      .expect(201);
+    const pdfFile = await http()
+      .get(`/api/v1/admin/subscription/proofs/${pdf.body.id}/file`)
+      .set(admin(ADMIN_1))
+      .expect(200);
+    expect(pdfFile.headers['content-type']).toBe('application/pdf');
+    expect(Buffer.from(pdfFile.body).equals(pdfBytes)).toBe(true);
+
+    // An owner (even the proof's own owner) has no admin review boundary.
+    await http()
+      .get(`/api/v1/admin/subscription/proofs/${image.body.id}/file`)
+      .set(owner(OWNER_A))
+      .expect(403);
+    await http()
+      .get(`/api/v1/admin/subscription/proofs/${image.body.id}/file`)
+      .expect(401);
+
+    // A well-formed but unknown proof id is an honest 404, never fabricated bytes.
+    const missingId = '40000000-0000-4000-8000-0000000000ff';
+    const missing = await http()
+      .get(`/api/v1/admin/subscription/proofs/${missingId}/file`)
+      .set(admin(ADMIN_1))
+      .expect(404);
+    expect(missing.body.error.code).toBe('NOT_FOUND');
+  });
+
+  it('a proof row without a file is an honest 404 (no fabricated receipt)', async () => {
+    const created = await postProof(businessId, { submissionKey: 'sub-file-less' }).expect(201);
+    const proofId = created.body.id as string;
+
+    // Simulate the file-less proof state the projection already refuses to render.
+    await prisma.subscriptionProof.update({ where: { id: proofId }, data: { fileObjectId: null } });
+
+    const res = await http()
+      .get(`/api/v1/admin/subscription/proofs/${proofId}/file`)
+      .set(admin(ADMIN_1))
+      .expect(404);
+    expect(res.body.error.code).toBe('NOT_FOUND');
+  });
+
   it('approval activates a 30-day paid period (REQ-130/137); a second approval of the same proof is 409', async () => {
     const subBefore = await prisma.subscription.findUnique({ where: { businessId } });
     const beforeEnd = subBefore?.periodEndsAt ?? null;
@@ -256,6 +319,86 @@ describe.skipIf(!RUN)('Subscription & billing workflow (real DB)', () => {
       .set(owner(OWNER_A))
       .expect(403);
     expect(ownerCannotApprove.body.error.code).toBe('FORBIDDEN');
+  });
+
+  it('an approved proof is never deleted: the SAME row stays readable under state=APPROVED', async () => {
+    const created = await postProof(businessId, { submissionKey: 'sub-keep-001' }).expect(201);
+    const proofId = created.body.id as string;
+    const beforeCount = await prisma.subscriptionProof.count({ where: { businessId } });
+    const fileBefore = await prisma.subscriptionProof.findUnique({
+      where: { id: proofId },
+      select: { fileObjectId: true, requestedAt: true, createdAt: true, submissionKey: true },
+    });
+
+    const approved = await http()
+      .post(`/api/v1/admin/subscription/proofs/${proofId}/approve`)
+      .set(admin(ADMIN_1))
+      .expect(200);
+    expect(approved.body.reviewState).toBe('APPROVED');
+
+    // 1. The record itself is intact: same id, same proof lineage, same submission.
+    const afterRow = await prisma.subscriptionProof.findUnique({
+      where: { id: proofId },
+      select: {
+        id: true,
+        reviewState: true,
+        reviewedBy: true,
+        fileObjectId: true,
+        requestedAt: true,
+        createdAt: true,
+        submissionKey: true,
+      },
+    });
+    expect(afterRow).not.toBeNull();
+    expect(afterRow!.id).toBe(proofId);
+    expect(afterRow!.reviewState).toBe('APPROVED');
+    expect(afterRow!.reviewedBy).toBe(ADMIN_1);
+    expect(afterRow!.fileObjectId).toBe(fileBefore!.fileObjectId);
+    expect(afterRow!.requestedAt).toEqual(fileBefore!.requestedAt);
+    expect(afterRow!.createdAt).toEqual(fileBefore!.createdAt);
+    expect(afterRow!.submissionKey).toBe(fileBefore!.submissionKey);
+    // No duplicate row was created for the decision.
+    expect(await prisma.subscriptionProof.count({ where: { businessId } })).toBe(beforeCount);
+
+    // 2. It left the PENDING queue (queue semantics) ...
+    const pending = await http().get(`/api/v1/admin/subscription/proofs?state=PENDING`).set(admin(ADMIN_1)).expect(200);
+    expect(pending.body.some((row: { id: string }) => row.id === proofId)).toBe(false);
+
+    // ... and is still served by the existing Admin route under its own state.
+    const approvedList = await http().get(`/api/v1/admin/subscription/proofs?state=APPROVED`).set(admin(ADMIN_1)).expect(200);
+    const listed = approvedList.body.find((row: { id: string }) => row.id === proofId);
+    expect(listed).toBeTruthy();
+    expect(listed.reviewState).toBe('APPROVED');
+    expect(listed.approvedUntil).toBe(approved.body.approvedUntil);
+    expect(listed.businessId).toBe(businessId);
+    expect(listed.businessName).toBeTruthy();
+    expect(listed.ownerEmail).toBe('sub-owner-a@example.com');
+    expect(JSON.stringify(listed)).not.toContain('storageKey');
+
+    // 3. The approved receipt is still inspectable over the authorized route.
+    const file = await http()
+      .get(`/api/v1/admin/subscription/proofs/${proofId}/file`)
+      .set(admin(ADMIN_2))
+      .expect(200);
+    expect(file.headers['content-type']).toBe('image/png');
+    expect(Buffer.from(file.body).equals(PROOF_PNG)).toBe(true);
+
+    // 4. The audit history keeps one row for this approval.
+    const history = await prisma.subscriptionStatusHistory.findMany({
+      where: { businessId, toStatus: 'ACTIVE' },
+      orderBy: { occurredAt: 'asc' },
+    });
+    expect(history.length).toBeGreaterThanOrEqual(1);
+    expect(history.some((row) => row.reason?.includes(approved.body.approvedUntil as string))).toBe(true);
+
+    // 5. Authorization is unchanged for the decided view.
+    await http().get(`/api/v1/admin/subscription/proofs?state=APPROVED`).set(owner(OWNER_A)).expect(403);
+    await http().get(`/api/v1/admin/subscription/proofs?state=APPROVED`).expect(401);
+    await http()
+      .get(`/api/v1/admin/subscription/proofs/${proofId}/file`)
+      .set(owner(OWNER_A))
+      .expect(403);
+    await http().get(`/api/v1/admin/subscription/proofs?state=PAID`).set(admin(ADMIN_1)).expect(400);
   });
 
   it('concurrent double-approve of the same proof extends exactly once (never +60d)', async () => {
@@ -319,6 +462,59 @@ describe.skipIf(!RUN)('Subscription & billing workflow (real DB)', () => {
     expect(ownerEmails.length).toBe(1); // exactly the sub-rej-001 rejection
     expect(ownerEmails[0].recipientRef).toBe(OWNER_A);
     expect(ownerEmails[0].state).toBe('SUPPRESSED');
+  });
+
+  it('a rejected proof is likewise kept and readable under state=REJECTED with its reason', async () => {
+    const created = await postProof(businessId, { submissionKey: 'sub-keep-rej-001' }).expect(201);
+    const proofId = created.body.id as string;
+    const fileBefore = await prisma.subscriptionProof.findUnique({
+      where: { id: proofId },
+      select: { fileObjectId: true, requestedAt: true, createdAt: true },
+    });
+
+    await http()
+      .post(`/api/v1/admin/subscription/proofs/${proofId}/reject`)
+      .set(admin(ADMIN_1))
+      .send({ reason: 'Amount does not match the invoice.' })
+      .expect(200);
+
+    // The record is updated in place: same id, same proof bytes, reason recorded.
+    const row = await prisma.subscriptionProof.findUnique({
+      where: { id: proofId },
+      select: {
+        id: true,
+        reviewState: true,
+        rejectionReason: true,
+        approvedUntil: true,
+        fileObjectId: true,
+        requestedAt: true,
+        createdAt: true,
+      },
+    });
+    expect(row!.id).toBe(proofId);
+    expect(row!.reviewState).toBe('REJECTED');
+    expect(row!.rejectionReason).toBe('Amount does not match the invoice.');
+    expect(row!.approvedUntil).toBeNull();
+    expect(row!.fileObjectId).toBe(fileBefore!.fileObjectId);
+    expect(row!.requestedAt).toEqual(fileBefore!.requestedAt);
+    expect(row!.createdAt).toEqual(fileBefore!.createdAt);
+
+    const pending = await http().get(`/api/v1/admin/subscription/proofs?state=PENDING`).set(admin(ADMIN_1)).expect(200);
+    expect(pending.body.some((candidate: { id: string }) => candidate.id === proofId)).toBe(false);
+
+    const rejectedList = await http().get(`/api/v1/admin/subscription/proofs?state=REJECTED`).set(admin(ADMIN_1)).expect(200);
+    const listed = rejectedList.body.find((candidate: { id: string }) => candidate.id === proofId);
+    expect(listed).toBeTruthy();
+    expect(listed.reviewState).toBe('REJECTED');
+    expect(listed.rejectionReason).toBe('Amount does not match the invoice.');
+
+    // The rejected receipt is still inspectable by an Admin and by nobody else.
+    const file = await http()
+      .get(`/api/v1/admin/subscription/proofs/${proofId}/file`)
+      .set(admin(ADMIN_2))
+      .expect(200);
+    expect(Buffer.from(file.body).equals(PROOF_PNG)).toBe(true);
+    await http().get(`/api/v1/admin/subscription/proofs?state=REJECTED`).set(owner(OWNER_A)).expect(403);
   });
 
   it('the booking gate is time-aware: closed after grace, open inside any grace, reopens on approval', async () => {
