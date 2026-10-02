@@ -13,6 +13,8 @@ import { listOwnerScheduleConflicts } from '@/api/schedule'
 import { ownerBookingFromWire } from '@/features/owner-portal/lib/ownerBooking'
 import { useOwnedBusiness } from '@/features/owner-portal/state/useOwnedBusiness'
 import { usePaymentReview } from '@/features/owner-portal/state/usePaymentReview'
+import type { OwnerProofReview } from '@/features/owner-portal/lib/paymentReview'
+import { PaymentProofPreview, type PaymentProofFile } from '@/components/proof/PaymentProofPreview'
 import { LoadState } from '@/features/owner-portal/components/LoadState'
 import { RescheduleForm } from '@/features/owner-portal/components/RescheduleForm'
 import {
@@ -165,6 +167,12 @@ export function BookingDetailPage() {
 
   const reviewPaymentStatus = paymentReview.review?.paymentStatus ?? null
 
+  // The currently reviewable proof: the newest proof that a later resubmission
+  // has NOT replaced. Older/replaced receipts stay in the lineage list below but
+  // are never presented as the receipt under review (Prompt 13/69 lineage).
+  const currentProof: OwnerProofReview | null =
+    [...(paymentReview.review?.proofs ?? [])].reverse().find((proof) => !proof.replaced) ?? null
+
   return (
     <>
       <nav aria-label="Breadcrumb" className="booking-breadcrumb">
@@ -207,6 +215,10 @@ export function BookingDetailPage() {
         busy={busy || paymentReview.reviewing}
         confirming={confirming}
         setConfirming={setConfirming}
+        proof={currentProof}
+        proofLoading={paymentReview.loading}
+        proofError={paymentReview.error}
+        loadProof={paymentReview.loadProof}
         rejection={rejection}
         onRejectionChange={(value) => {
           setRejection(value)
@@ -415,6 +427,10 @@ function BookingActions({
   busy,
   confirming,
   setConfirming,
+  proof,
+  proofLoading,
+  proofError,
+  loadProof,
   rejection,
   onRejectionChange,
   rejectionError,
@@ -431,6 +447,11 @@ function BookingActions({
   busy: boolean
   confirming: ConfirmMode
   setConfirming: (mode: ConfirmMode) => void
+  /** The currently reviewable proof, or null when none was uploaded. */
+  proof: OwnerProofReview | null
+  proofLoading: boolean
+  proofError: string | null
+  loadProof: (proof: OwnerProofReview) => Promise<PaymentProofFile>
   rejection: string
   onRejectionChange: (value: string) => void
   rejectionError: string | null
@@ -451,10 +472,29 @@ function BookingActions({
           Review decision
         </h2>
         <p className="card__subtitle">
-          Confirming locks in this slot for the customer. If you reject, the
-          slot stays blocked until you release it or the customer resubmits
-          proof.
+          Inspect the uploaded receipt below, then Accept or Reject. Confirming
+          locks in this slot for the customer. If you reject, the slot stays
+          blocked until you release it or the customer resubmits proof.
         </p>
+        {proof ? (
+          <PaymentProofPreview
+            loadKey={proof.proofId}
+            load={() => loadProof(proof)}
+            fileName={proof.fileName}
+            mimeType={proof.mimeType}
+            sizeBytes={proof.sizeBytes}
+            submittedAt={proof.submittedAt}
+            downloadLabel="Download receipt"
+          />
+        ) : (
+          <p className="card__subtitle">
+            {proofError
+              ? `Could not load the payment proof: ${proofError}`
+              : proofLoading
+                ? 'Loading the payment proof…'
+                : 'No payment proof uploaded.'}
+          </p>
+        )}
         {confirming === 'cancel-pending' ? (
           <ConfirmInline
             note="Cancel this booking? The slot stays blocked until you release it, and the customer is not notified."

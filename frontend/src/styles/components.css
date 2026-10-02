@@ -3042,3 +3042,99 @@ fieldset.option-group legend {
 .admin-event {
   min-width: 0;
 }
+
+/* ---------------------------------------------------------------------------
+ * Payment receipt / proof preview (owner + admin review surfaces)
+ * Renders the real authenticated proof; bounded so a long or oddly-shaped
+ * receipt never widens the page or overflows its card.
+ * ------------------------------------------------------------------------- */
+
+.proof-preview {
+  min-width: 0;
+  margin-block: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.proof-preview__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.proof-preview__state {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+}
+
+.proof-preview__thumb {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface, transparent);
+  cursor: zoom-in;
+}
+
+.proof-preview__thumb:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
+.proof-preview__image {
+  display: block;
+  max-width: 100%;
+  max-height: 60vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+
+.proof-preview__frame {
+  display: block;
+  width: 100%;
+  /* Bounded on every viewport without a media query. */
+  height: clamp(240px, 50vh, 420px);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.proof-preview__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.proof-preview__modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  background: rgba(0, 0, 0, 0.7);
+}
+
+.proof-preview__modal-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 100%;
+  max-height: 90vh;
+  overflow: auto;
+  outline: none;
+}
+
+.proof-preview__image--large {
+  max-height: 80vh;
+}

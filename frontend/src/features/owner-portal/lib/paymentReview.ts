@@ -38,6 +38,8 @@ export function ownerPaymentStateFromWire(status: string | null | undefined): Pa
 /** One proof as rendered in the owner proof timeline. */
 export interface OwnerProofReview {
   proofId: string
+  /** Real upload instant as returned by the backend projection. */
+  submittedAt: string
   fileName: string
   mimeType: string
   sizeBytes: number
@@ -66,6 +68,7 @@ export function rejectionReasonFromDetail(detail: OwnerBookingDetailView): strin
 function proofReviewOf(proof: OwnerBookingProofView): OwnerProofReview {
   return {
     proofId: proof.proofId,
+    submittedAt: proof.submittedAt,
     fileName: proof.fileName,
     mimeType: proof.mimeType,
     sizeBytes: proof.sizeBytes,

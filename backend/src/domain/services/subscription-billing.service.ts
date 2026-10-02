@@ -223,6 +223,35 @@ export class SubscriptionBillingService {
     return this.subscriptionRepo.listProofsByReviewState(state);
   }
 
+  /**
+   * Admin/Super Admin proof-file retrieval for the review preview.
+   *
+   * Lets a reviewer inspect the ACTUAL uploaded receipt before deciding, without
+   * weakening the review boundary: the same `requireAdminOrSuperAdmin` gate as
+   * the queue/approve/reject routes, the bytes come from the existing
+   * `PaymentProofStorage` abstraction, and the opaque storage key is never
+   * returned. A missing proof, a proof with no file, or a vanished object is an
+   * honest 404 rather than fabricated content.
+   */
+  async getProofFileForAdmin(
+    ctx: ActorContext,
+    proofId: string,
+  ): Promise<{ bytes: Buffer; mimeType: string; sizeBytes: bigint; proofId: string }> {
+    this.tenantGuard.requireAdminOrSuperAdmin(ctx);
+    const proof = await this.subscriptionRepo.getProofById(proofId);
+    if (!proof?.fileObjectId) throw domainErrors.businessNotFound('Proof not found.');
+    const file = await this.fileRepo.findById(proof.fileObjectId);
+    if (!file) throw domainErrors.businessNotFound('Proof not found.');
+    const content = await this.proofStorage.read(file.storageKey);
+    if (!content) throw domainErrors.businessNotFound('Proof file is unavailable.');
+    return {
+      bytes: content.bytes,
+      mimeType: file.mimeType,
+      sizeBytes: file.sizeBytes,
+      proofId: proof.id,
+    };
+  }
+
   private submittedEvent(proof: SubscriptionProof): SubscriptionNotificationEvent {
     return { type: 'SUBSCRIPTION_PROOF_SUBMITTED', businessId: proof.businessId, proofId: proof.id, occurredAt: this.clock.now() };
   }

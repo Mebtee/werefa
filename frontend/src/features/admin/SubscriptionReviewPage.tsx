@@ -5,9 +5,11 @@ import { toUserMessage } from '@/api/errors'
 import {
   approveSubscriptionProof,
   listSubscriptionProofs,
+  loadSubscriptionProofFile,
   rejectSubscriptionProof,
 } from '@/api/admin'
 import type { AdminSubscriptionProofView } from '@/api/types'
+import { PaymentProofPreview } from '@/components/proof/PaymentProofPreview'
 
 /**
  * Admin subscription proof review queue (Prompt 52; REQ-137/138).
@@ -106,6 +108,13 @@ export function SubscriptionReviewPage() {
                   Owner: {row.ownerEmail} · submitted {new Date(row.requestedAt).toLocaleString()}
                 </p>
               </div>
+              <PaymentProofPreview
+                loadKey={row.id}
+                load={() => loadSubscriptionProofFile(row.id)}
+                submittedAt={row.requestedAt}
+                title="Payment Receipt / Proof"
+                downloadLabel="Download receipt"
+              />
               <div className="proof-queue__actions">
                 <Button
                   type="button"

@@ -1,9 +1,10 @@
-import { Body, Controller, Get, HttpCode, Inject, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Param, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { SubscriptionBillingService } from '../../domain/services/subscription-billing.service';
 import { ActorContext } from '../../domain/authorization/actor-context';
 import { Actor, ApiAuthGuard } from '../auth/api-auth.guard';
-import { AdminSubscriptionProofView, adminProofProjection } from '../dto/projections';
+import { AdminSubscriptionProofView, adminProofProjection, proofFileName } from '../dto/projections';
 import {
   RejectSubscriptionProofPayload,
   SubscriptionProofIdParamDto,
@@ -30,6 +31,25 @@ export class AdminSubscriptionController {
   ): Promise<AdminSubscriptionProofView[]> {
     const rows = await this.billing.listProofsForReview(actor, query.state);
     return rows.map(adminProofProjection);
+  }
+
+  @Get('proofs/:proofId/file')
+  @ApiOperation({
+    summary:
+      'Inspect the actual uploaded proof file (Admin/Super Admin review preview, REQ-136/137). Tenant-safe, no storage key.',
+  })
+  @ApiOkResponse({ description: 'Binary proof file with its real content type (never an unauthenticated URL).' })
+  async proofFile(
+    @Actor() actor: ActorContext,
+    @Param() params: SubscriptionProofIdParamDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const file = await this.billing.getProofFileForAdmin(actor, params.proofId);
+    res.setHeader('Content-Type', file.mimeType);
+    res.setHeader('Content-Disposition', `inline; filename="${proofFileName(file.proofId, file.mimeType)}"`);
+    res.setHeader('Content-Length', file.sizeBytes.toString());
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.end(file.bytes);
   }
 
   @Post('proofs/:proofId/approve')

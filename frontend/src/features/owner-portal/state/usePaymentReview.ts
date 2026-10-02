@@ -11,6 +11,7 @@ import {
   type OwnerPaymentReview,
   type OwnerProofReview,
 } from '@/features/owner-portal/lib/paymentReview'
+import type { PaymentProofFile } from '@/components/proof/PaymentProofPreview'
 
 /**
  * Owner payment-proof review controller (Prompt 51).
@@ -38,6 +39,11 @@ export interface UsePaymentReview {
   /** Returns true on success so the caller can refresh related views. */
   reject: (reason: string) => Promise<boolean>
   download: (proof: OwnerProofReview) => Promise<void>
+  /**
+   * Loads the real proof bytes through the SAME tenant-scoped download route so
+   * the review surface can render an inline receipt preview. Nothing is saved.
+   */
+  loadProof: (proof: OwnerProofReview) => Promise<PaymentProofFile>
   clearActionError: () => void
 }
 
@@ -140,6 +146,21 @@ export function usePaymentReview(
     [businessId, bookingId],
   )
 
+  const loadProof = useCallback(
+    async (proof: OwnerProofReview): Promise<PaymentProofFile> => {
+      if (!businessId || !bookingId) {
+        throw new Error('Missing booking context.')
+      }
+      const result = await downloadOwnerBookingProof(businessId, bookingId, proof.proofId)
+      return {
+        blob: result.blob,
+        contentType: result.contentType,
+        fileName: result.fileName ?? proof.fileName,
+      }
+    },
+    [businessId, bookingId],
+  )
+
   const clearActionError = useCallback(() => setActionError(null), [])
 
   return {
@@ -152,6 +173,7 @@ export function usePaymentReview(
     accept,
     reject,
     download,
+    loadProof,
     clearActionError,
   }
 }

@@ -826,7 +826,10 @@ function ownerBookingDetailViewOf(booking: Booking): OwnerBookingDetailView {
       actorUserId: null,
       reason: entry.state === 'rejected' ? booking.rejectionReason : null,
     })),
-    proofs: [ownerProofViewOf(booking)],
+    // A booking may legitimately have no proof (file-less proofs were removed
+    // from the owner projection), so the double mirrors the real empty list
+    // instead of fabricating a proof the backend would not return.
+    proofs: booking.proof ? [ownerProofViewOf(booking)] : [],
   }
 }
 

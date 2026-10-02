@@ -1,4 +1,4 @@
-import { apiRequest } from './http'
+import { apiDownload, apiRequest } from './http'
 import type {
   AdminSubscriptionProofView,
   AdminUserView,
@@ -41,6 +41,24 @@ export function listSubscriptionProofs(
   }).then(({ data }) => data)
 }
 
+/**
+ * Streams one subscription proof file over the authenticated Admin route so a
+ * reviewer can inspect the real receipt before approving/rejecting. The proof
+ * is never exposed on a public/unauthenticated URL; the same session-gated
+ * authorization boundary as the queue governs it.
+ */
+export function loadSubscriptionProofFile(
+  proofId: string,
+): Promise<{ blob: Blob; contentType: string | null; fileName: string | null }> {
+  const path = `/admin/subscription/proofs/${encodeURIComponent(proofId)}/file`
+  return apiDownload(path, { method: 'GET' }).then(({ data, contentType, fileName }) => ({
+    blob: data,
+    contentType,
+    fileName,
+  }))
+}
+
+/** Approves a pending subscription proof; activates/extends a 30-day period. */
 export function approveSubscriptionProof(proofId: string): Promise<AdminSubscriptionProofView> {
   return apiRequest<AdminSubscriptionProofView>(
     `/admin/subscription/proofs/${encodeURIComponent(proofId)}/approve`,

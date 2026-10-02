@@ -194,3 +194,94 @@ describe('owner payment-proof review — error handling', () => {
     ).not.toBeInTheDocument()
   })
 })
+
+/** jsdom does not implement object URLs, so a preview test installs them. */
+function installObjectUrls(prefix: string) {
+  const createObjectURL = vi.fn(() => prefix)
+  const revokeObjectURL = vi.fn()
+  Object.defineProperty(URL, 'createObjectURL', {
+    value: createObjectURL,
+    configurable: true,
+    writable: true,
+  })
+  Object.defineProperty(URL, 'revokeObjectURL', {
+    value: revokeObjectURL,
+    configurable: true,
+    writable: true,
+  })
+  return { createObjectURL, revokeObjectURL }
+}
+
+describe('owner payment-receipt preview before the decision', () => {
+  it('renders the real uploaded receipt fetched over the tenant-scoped route', async () => {
+    installObjectUrls('blob:receipt')
+    const pending = seededPending()
+    const { stub } = renderAppAt(`/owner/bookings/${pending.id}`)
+    await screen.findByRole('heading', { name: pending.customer.name })
+
+    // The preview must use the same authenticated proof route as the download.
+    expect(
+      stub.calls.some(
+        (call) =>
+          call.method === 'GET' &&
+          call.url.endsWith(`${bookingEndpoint(pending.id)}/proofs/proof-${pending.id}`),
+      ),
+    ).toBe(true)
+
+    // The actual image renders (contained), with open/enlarge + download.
+    expect(await screen.findByRole('img', { name: /deposit-receipt\.png/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open / Enlarge' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Download receipt' })).toBeInTheDocument()
+
+    // The decision controls stay available next to the receipt.
+    expect(screen.getByRole('button', { name: 'Accept booking' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Reject booking' })).toBeInTheDocument()
+  })
+
+  it('opens the enlarged receipt and closes it with Escape', async () => {
+    installObjectUrls('blob:receipt')
+    const pending = seededPending()
+    renderAppAt(`/owner/bookings/${pending.id}`)
+    await screen.findByRole('heading', { name: pending.customer.name })
+
+    await user.click(await screen.findByRole('button', { name: 'Open / Enlarge' }))
+    expect(
+      await screen.findByRole('dialog', { name: /deposit-receipt\.png/ }),
+    ).toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('shows an honest no-proof state without fabricating a receipt', async () => {
+    const pending = seededPending()
+    // A booking can legitimately carry no proof (file-less proofs are dropped
+    // from the owner projection); the UI must say so, not invent one.
+    getBooking(PRIMARY_BUSINESS_SLUG, pending.id)!.proof = null
+    renderAppAt(`/owner/bookings/${pending.id}`)
+    await screen.findByRole('heading', { name: pending.customer.name })
+
+    expect(await screen.findByText('No payment proof uploaded.')).toBeInTheDocument()
+    expect(screen.queryByRole('img', { name: /receipt/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Accept booking' })).toBeInTheDocument()
+  })
+
+  it('shows an honest error state when the receipt fails to load, keeping the decision controls', async () => {
+    const pending = seededPending()
+    renderAppAt(`/owner/bookings/${pending.id}`, {
+      businessApi: {
+        failOwnerBookingRequest: ({ method, path }) =>
+          method === 'GET' && path.endsWith(`/proofs/proof-${pending.id}`)
+            ? errorEnvelope(404, 'NOT_FOUND', 'Proof not found.')
+            : null,
+      },
+    })
+    await screen.findByRole('heading', { name: pending.customer.name })
+
+    expect(
+      await screen.findByText(/Could not load the payment receipt/i),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Accept booking' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Reject booking' })).toBeInTheDocument()
+  })
+})
