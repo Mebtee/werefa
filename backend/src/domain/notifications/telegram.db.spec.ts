@@ -657,4 +657,73 @@ describe.skipIf(!RUN)('telegram notification flow (live PostgreSQL)', () => {
     expect(ownerForThisBusiness).toBe(0);
     void PROOF_SAMPLES;
   });
+
+  it('a customer code can never be redeemed as an owner connection and vice versa (kind binding)', async () => {
+    const w = await readyBusiness(18);
+    await makeBooking(w, new Date('2026-09-15T10:00:00.000Z'), 'key-tgbot-18');
+
+    // Customer code → CUSTOMER connection only.
+    const customerIssued = (await connections.connectCustomer(w.ownerSlug, '+251911112233')) as { deepLink: string };
+    await webhook.handleUpdate(startUpdate(codeFromLink(customerIssued.deepLink), 18001));
+    const customerConn = await prisma.telegramConnection.findFirst({
+      where: { businessId: w.businessId, kind: 'CUSTOMER' },
+    });
+    expect(customerConn!.state).toBe('CONNECTED');
+    expect(customerConn!.chatId).toBe(18001n);
+    expect(customerConn!.userId).toBeNull();
+    // The customer redemption did NOT create an owner connection for that owner.
+    expect(await connections.ownerConnected(w.ownerId, w.businessId)).toBe(false);
+    expect(await prisma.telegramConnection.count({ where: { businessId: w.businessId, kind: 'BUSINESS_OWNER' } })).toBe(0);
+
+    // Owner code → BUSINESS_OWNER connection only, bound to the acting owner.
+    const ownerIssued = (await connections.connectOwner(w.ownerId, w.businessId)) as { deepLink: string };
+    await webhook.handleUpdate(startUpdate(codeFromLink(ownerIssued.deepLink), 18002));
+    const ownerConn = await prisma.telegramConnection.findFirst({
+      where: { businessId: w.businessId, kind: 'BUSINESS_OWNER' },
+    });
+    expect(ownerConn!.state).toBe('CONNECTED');
+    expect(ownerConn!.chatId).toBe(18002n);
+    expect(ownerConn!.userId).toBe(w.ownerId);
+    expect(ownerConn!.customerPhone).toBeNull();
+    // The customer connection is untouched by the owner redemption.
+    const stillCustomer = await prisma.telegramConnection.findFirst({
+      where: { businessId: w.businessId, kind: 'CUSTOMER' },
+    });
+    expect(stillCustomer!.chatId).toBe(18001n);
+  });
+
+  it('an owner cannot issue or redeem a Telegram code for a business they do not own (tenant isolation)', async () => {
+    const w = await readyBusiness(19);
+    const stranger = await prisma.user.create({
+      data: { email: 'tgbot-stranger-19@example.com', passwordHash: 'x'.repeat(60), role: 'OWNER' },
+    });
+
+    await expectCode(connections.connectOwner(stranger.id, w.businessId), ErrorCode.NOT_FOUND);
+    await expectCode(connections.issueOwnerCode(stranger.id, w.businessId), ErrorCode.NOT_FOUND);
+
+    // A refused tenant access leaves no connection, no token and no leak of the business existence.
+    expect(await prisma.telegramConnectionToken.count({ where: { businessId: w.businessId } })).toBe(0);
+    expect(await prisma.telegramConnection.count({ where: { businessId: w.businessId } })).toBe(0);
+  });
+
+  it('an unauthenticated (empty) actor cannot create an owner connection', async () => {
+    const w = await readyBusiness(20);
+    await expectCode(connections.connectOwner('', w.businessId), ErrorCode.FORBIDDEN);
+    await expectCode(connections.issueOwnerCode('', w.businessId), ErrorCode.FORBIDDEN);
+    expect(await prisma.telegramConnectionToken.count({ where: { businessId: w.businessId } })).toBe(0);
+  });
+
+  it('the connect result carries only the deep link — never the bot token, webhook secret or bare code', async () => {
+    const w = await readyBusiness(21);
+    await makeBooking(w, new Date('2026-09-15T10:00:00.000Z'), 'key-tgbot-21');
+    const issued = await connections.connectCustomer(w.ownerSlug, '+251911112233');
+    expect(Object.keys(issued).sort()).toEqual(['deepLink', 'expiresInMs', 'status']);
+    const serialized = JSON.stringify(issued);
+    expect(serialized).not.toContain(config.telegramBotToken!);
+    expect(serialized).not.toContain(config.telegramBotWebhookSecret!);
+    // The one-time code appears ONLY inside the returned deep link (its sole conveyance).
+    const token = await prisma.telegramConnectionToken.findFirst({ where: { businessId: w.businessId } });
+    const code = codeFromLink((issued as { deepLink: string }).deepLink);
+    expect(token!.codeHash).not.toContain(code);
+  });
 });
