@@ -37,3 +37,9 @@ Thumbs.db
 # Playwright report
 test-results/
 playwright-report/
+
+# Local-only documentation — kept on this machine, deliberately not published.
+# The canonical specification and the implementation reports are read from the
+# working tree by `npm run acceptance:static` (scripts/acceptance.mjs), so they
+# must stay present on disk. They are intentionally NOT tracked.
+/docs/
