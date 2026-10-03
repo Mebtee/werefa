@@ -1,19 +1,20 @@
-import { useState, type ChangeEvent } from 'react'
+import { useState } from 'react'
 import type {
   BusinessDetails,
   Money,
   PaymentMethodId,
   ProofFile,
 } from '@/types/models'
-import { formatBytes, formatMoney } from '@/lib/format'
-import { validateProofFile } from '@/lib/validation'
+import { formatMoney } from '@/lib/format'
 import {
   PAYMENT_METHOD_IDS as PUBLISHABLE_METHOD_IDS,
   PAYMENT_METHOD_LABEL,
 } from '@/lib/paymentMethods'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
+import { ProofPicker } from '@/components/proof/ProofPicker'
 import { cn } from '@/lib/cn'
+import { InfoIcon, ShieldIcon } from '@/components/ui/icons'
 
 interface PaymentStepProps {
   business: BusinessDetails
@@ -38,7 +39,6 @@ export function PaymentStep({
   onSubmit,
   submitting,
 }: PaymentStepProps) {
-  const [proofError, setProofError] = useState<string | null>(null)
   const [touched, setTouched] = useState(false)
 
   // The public business API (PublicBusinessView) carries no owner-published
@@ -47,26 +47,8 @@ export function PaymentStep({
   // availability view, and the only choices offered are the two method codes the
   // booking API actually accepts. The customer is told plainly that the
   // destination account is not published online, instead of being shown
-  // fabricated bank or mobile-money details.
+  // fabricated transfer details.
   const methods = PUBLISHABLE_METHOD_IDS.map((id) => ({ id, label: PAYMENT_METHOD_LABEL[id] }))
-
-  const handleProofChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0] ?? null
-    if (!file) {
-      setProof(null)
-      return
-    }
-    const result = validateProofFile(file)
-    if (result.ok) {
-      setProof(result.proof)
-      setProofError(null)
-    } else {
-      setProof(null)
-      setProofError(result.error.message)
-      // Allow picking the same file again after an invalid choice.
-      event.target.value = ''
-    }
-  }
 
   const ready = paymentMethod !== null && proof !== null
 
@@ -78,84 +60,77 @@ export function PaymentStep({
 
   return (
     <>
-      <h2 className="step-title">Payment & confirmation</h2>
+      <h2 className="step-title">Payment &amp; confirmation</h2>
       <p className="step-subtitle">
-        Send the deposit, then attach your proof. The business confirms once
-        the payment is reviewed.
+        Send the deposit, then attach your proof. The business confirms once the
+        payment has been reviewed.
       </p>
 
-      <Alert tone="info" title="Deposit to pay">
-        Please pay{' '}
-        <strong>{formatMoney(deposit, business.currency)}</strong> using one of
-        the methods below, then attach the proof.
-      </Alert>
-
-      <h3 className="option-group__title">Payment method</h3>
-      <Alert tone="warning" title="Payment details are not published online">
-        This business requires a deposit, but its booking page does not publish
-        a bank account or mobile-money number. Ask the business where to send the
-        deposit, then choose how you paid and attach your proof.
-      </Alert>
-      <div className="payment-methods" role="radiogroup" aria-label="Payment method">
-        {methods.map((method) => {
-          const active = method.id === paymentMethod
-          return (
-            <label
-              key={method.id}
-              className={cn('payment-option', active && 'payment-option--active')}
-            >
-              <input
-                type="radio"
-                name="payment-method"
-                value={method.id}
-                checked={active}
-                onChange={() => setPayment(method.id)}
-              />
-              <span>
-                <span className="payment-option__label">{method.label}</span>
-              </span>
-            </label>
-          )
-        })}
+      <div className="deposit-banner">
+        <span className="deposit-banner__label">Deposit to pay</span>
+        <span className="deposit-banner__amount">
+          {formatMoney(deposit, business.currency)}
+        </span>
+        <span className="deposit-banner__note">
+          This amount comes from {business.name} and is the same figure the
+          booking request is checked against.
+        </span>
       </div>
 
-      <h3 className="option-group__title">Attach payment proof</h3>
-      {proof ? (
-        <div className="proof-preview">
-          <span>
-            <strong>{proof.fileName}</strong>{' '}
-            <span className="line-item__meta">
-              ({formatBytes(proof.sizeBytes)} · {proof.mimeType})
-            </span>
-          </span>
-          <Button variant="outline" onClick={() => setProof(null)}>
-            Replace
-          </Button>
-        </div>
-      ) : (
-        <div className="upload-zone">
-          <label className="upload-zone__label" htmlFor="proof-upload">
-            Choose image or PDF
-          </label>
-          <input
-            id="proof-upload"
-            className="sr-only"
-            type="file"
-            accept="image/bmp,image/gif,image/jpeg,image/png,image/webp,application/pdf,.pdf"
-            onChange={handleProofChange}
-          />
-          <p className="line-item__meta">
-            Screenshot of your bank/Telebirr transfer, or the PDF receipt. Max
-            5 MB. Only the business you are booking with can see it.
-          </p>
-        </div>
-      )}
-
-      {proofError && (
-        <Alert tone="danger" title="Could not use that proof">
-          {proofError}
+      <section className="step-section" aria-labelledby="payment-method-title">
+        <h3 className="option-group__title" id="payment-method-title">
+          Payment method
+        </h3>
+        <Alert tone="warning" title="Payment details are not published online">
+          This business requires a deposit, but its booking page does not publish
+          a destination to send it to. Ask the business where to send the deposit,
+          then choose how you paid and attach your proof.
         </Alert>
-      )}
+        <div className="payment-methods" role="radiogroup" aria-label="Payment method">
+          {methods.map((method) => {
+            const active = method.id === paymentMethod
+            return (
+              <label
+                key={method.id}
+                className={cn('payment-option', active && 'payment-option--active')}
+              >
+                <input
+                  type="radio"
+                  name="payment-method"
+                  value={method.id}
+                  checked={active}
+                  onChange={() => setPayment(method.id)}
+                />
+                <span>
+                  <span className="payment-option__label">{method.label}</span>
+                  <span className="payment-option__hint">
+                    <InfoIcon size={14} />
+                    Choose the method you actually used
+                  </span>
+                </span>
+              </label>
+            )
+          })}
+        </div>
+      </section>
+
+      <section className="step-section" aria-labelledby="proof-title">
+        <h3 className="option-group__title" id="proof-title">
+          Attach payment proof
+        </h3>
+        <ProofPicker
+          inputId="proof-upload"
+          proof={proof}
+          onChange={setProof}
+          busy={submitting}
+          hint="Screenshot of your transfer, or the PDF receipt. Max 5 MB. Only the business you are booking with can see it."
+        />
+        <p className="step-note">
+          <ShieldIcon size={15} />
+          Your proof is sent to {business.name} alone and is never published on
+          this page.
+        </p>
+      </section>
 
       {touched && !ready && (
         <Alert tone="warning" title="Almost there">
@@ -174,7 +149,7 @@ export function PaymentStep({
           loading={submitting}
           disabled={submitting}
         >
-          Confirm & send booking request
+          Confirm &amp; send booking request
         </Button>
       </nav>
     </>

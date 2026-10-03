@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { connectCustomerTelegram, telegramLinkFromView } from '@/api/telegram'
 import { isValidPhone } from '@/lib/validation'
+import { SendIcon } from '@/components/ui/icons'
 
 /**
  * Customer "connect by phone" Telegram card (Prompt 51; REQ-056).
@@ -92,6 +93,9 @@ export function TelegramConnectCard({ businessSlug, phone }: TelegramConnectCard
     <section className="card card--padded" aria-labelledby="telegram-connect-title">
       <div className="telegram-panel">
         <div className="telegram-panel__head">
+          <span className="telegram-panel__icon">
+            <SendIcon size={22} />
+          </span>
           <div className="telegram-panel__head-text">
             <h2 className="telegram-panel__title" id="telegram-connect-title">
               Do you use Telegram?

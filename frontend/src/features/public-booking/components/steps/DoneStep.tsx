@@ -4,6 +4,7 @@ import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { TelegramConnectCard } from '@/features/public-booking/components/steps/TelegramConnectCard'
+import { CheckCircleIcon } from '@/components/ui/icons'
 
 interface DoneStepProps {
   result: SubmitResult | null
@@ -16,6 +17,15 @@ interface DoneStepProps {
   onRetry: () => void
 }
 
+/**
+ * Terminal step of the wizard.
+ *
+ * The only thing rendered here is what the real submission returned: there is no
+ * booking id, code or reference in the response, so none is shown — the customer
+ * is told, truthfully, that their phone number identifies the booking. A failed
+ * submission stays a failure with a retry, and a slot lost mid-booking says so
+ * instead of implying a reservation.
+ */
 export function DoneStep({
   result,
   submitting,
@@ -28,11 +38,9 @@ export function DoneStep({
 }: DoneStepProps) {
   if (submitting || result === null) {
     return (
-      <div style={{ padding: 'var(--space-6) 0', textAlign: 'center' }}>
+      <div className="loading-state loading-state--inline">
         <Spinner label="Sending your booking request" />
-        <p style={{ marginTop: 'var(--space-3)', color: 'var(--color-text-muted)' }}>
-          Sending your booking request…
-        </p>
+        <p className="loading-state__label">Sending your booking request…</p>
       </div>
     )
   }
@@ -43,22 +51,27 @@ export function DoneStep({
     return (
       <>
         <h2 className="step-title">Request sent</h2>
-        <Alert tone="success" title="Booking request received">
-          {pendingPayment ? (
-            <p>
-              We have your booking request and your payment proof. Your booking
-              will be confirmed once the business reviews the payment.
+        <div className="success-panel">
+          <span className="success-panel__icon">
+            <CheckCircleIcon size={26} />
+          </span>
+          <Alert tone="success" title="Booking request received">
+            {pendingPayment ? (
+              <p>
+                We have your booking request and your payment proof. Your booking
+                will be confirmed once the business reviews the payment.
+              </p>
+            ) : (
+              <p>
+                Your booking request has been received. The business will confirm
+                it with you shortly.
+              </p>
+            )}
+            <p style={{ marginTop: 'var(--space-2)' }}>
+              Bookings are identified by your phone number: <strong>{phone}</strong>.
             </p>
-          ) : (
-            <p>
-              Your booking request has been received. The business will confirm
-              it with you shortly.
-            </p>
-          )}
-          <p style={{ marginTop: 'var(--space-2)' }}>
-            Bookings are identified by your phone number: <strong>{phone}</strong>.
-          </p>
-        </Alert>
+          </Alert>
+        </div>
 
         <TelegramConnectCard businessSlug={businessSlug} phone={customer.phone} />
 
