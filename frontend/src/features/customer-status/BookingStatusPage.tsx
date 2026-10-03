@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import type { CSSProperties } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import type { BusinessDetails, CustomerBookingStatusEntry } from '@/types/models'
 import { getPublicBusiness, isNotFoundError } from '@/api/business'
@@ -14,6 +13,7 @@ import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { Field } from '@/components/ui/Field'
 import { Spinner } from '@/components/ui/Spinner'
+import { SearchIcon } from '@/components/ui/icons'
 import { BookingStatusCard } from '@/features/customer-status/BookingStatusCard'
 import { ResubmissionPanel } from '@/features/customer-status/ResubmissionPanel'
 
@@ -34,6 +34,16 @@ type LookupState =
     }
   | { phase: 'error' }
 
+/**
+ * Public "check my booking" page (`/p/:slug/status`).
+ *
+ * Privacy is unchanged and is what shapes this page: the real
+ * `GET /customer/status` route is keyed by the phone number the customer typed
+ * and returns only appointment time, state and — for a rejected booking — a
+ * resubmission path. Nothing else about the booking is available to show, so
+ * nothing else is invented here, and the rejected-state resubmission never
+ * claims a code was sent.
+ */
 export function BookingStatusPage() {
   const { slug } = useParams<{ slug: string }>()
   const [load, setLoad] = useState<LoadState>({ status: 'loading' })
@@ -114,28 +124,25 @@ export function BookingStatusPage() {
     await performLookup(trimmed)
   }
 
+  const business = load.status === 'ready' ? load.business : null
+
   return (
-    <div
-      className="page-root"
-      style={
-        load.status === 'ready'
-          ? ({ '--accent': load.business.accentColor } as CSSProperties)
-          : undefined
-      }
-    >
+    <div className="page-root customer-shell">
       <a className="skip-link" href="#main">
         Skip to main content
       </a>
 
       <main id="main" className="page-root__main">
         {load.status === 'loading' && (
-          <div className="container" style={{ paddingBlock: 'var(--space-8)', textAlign: 'center' }}>
-            <Spinner label="Loading" />
+          <div className="container status-page__pad">
+            <div className="loading-state">
+              <Spinner label="Loading" />
+            </div>
           </div>
         )}
 
         {load.status === 'notfound' && (
-          <div className="container" style={{ paddingBlock: 'var(--space-8)' }}>
+          <div className="container status-page__pad">
             <Alert tone="warning" title="Business not found">
               No business was found at this address. Check the link you were
               given, or ask the business for its correct booking link.
@@ -144,21 +151,25 @@ export function BookingStatusPage() {
         )}
 
         {load.status === 'error' && (
-          <div className="container" style={{ paddingBlock: 'var(--space-8)' }}>
+          <div className="container status-page__pad">
             <Alert tone="danger" title="Could not load this page">
               We could not load this business page right now. Please try again.
             </Alert>
           </div>
         )}
 
-        {load.status === 'ready' && (
-          <div className="container" style={{ paddingBlock: 'var(--space-6)' }}>
+        {business && (
+          <div className="container status-page">
             <div className="status-page__header">
               <nav aria-label="Breadcrumb" className="booking-breadcrumb">
-                <Link to={`/p/${load.business.slug}`}>{load.business.name}</Link>
+                <Link to={`/p/${business.slug}`}>{business.name}</Link>
                 <span aria-hidden="true">/</span>
                 <span>Check my booking</span>
               </nav>
+              <span className="status-page__eyebrow">
+                <SearchIcon size={16} />
+                Booking status
+              </span>
               <h1 className="page-title">Check my booking</h1>
               <p className="page-subtitle">
                 Enter the phone number you used when you booked to see your
@@ -206,13 +217,16 @@ export function BookingStatusPage() {
             </form>
 
             {lookup.phase === 'loading' && (
-              <div style={{ paddingBlock: 'var(--space-6)', textAlign: 'center' }}>
-                <Spinner label="Looking up your bookings" />
+              <div className="status-page__pad">
+                <div className="loading-state">
+                  <Spinner label="Looking up your bookings" />
+                  <p className="loading-state__label">Looking up your bookings…</p>
+                </div>
               </div>
             )}
 
             {lookup.phase === 'error' && (
-              <div style={{ paddingBlock: 'var(--space-5)' }}>
+              <div className="status-page__pad">
                 <Alert tone="danger" title="Could not check your booking">
                   We could not look up your booking right now. Please try again.
                 </Alert>
@@ -220,7 +234,7 @@ export function BookingStatusPage() {
             )}
 
             {lookup.phase === 'results' && lookup.bookings.length === 0 && (
-              <div style={{ paddingBlock: 'var(--space-5)' }}>
+              <div className="status-page__pad">
                 <Alert tone="info" title="No booking found">
                   No booking found for this phone number.
                 </Alert>
@@ -238,17 +252,22 @@ export function BookingStatusPage() {
                   {lookup.bookings.length} booking{lookup.bookings.length === 1 ? '' : 's'} found.
                 </div>
 
-                <p className="telegram-status" data-connected={lookup.telegramConnected ? 'true' : 'false'}>
-                  {lookup.telegramConnected ? 'Telegram connected' : 'Not connected to Telegram'}
-                </p>
-                <p className="telegram-panel__note" style={{ marginTop: 'var(--space-2)' }}>
-                  {lookup.telegramConnected
-                    ? 'Updates about your bookings go to your Telegram for this business.'
-                    : 'Link Telegram when you book so updates and reminders reach you there (REQ-056).'}
-                </p>
+                <div className="telegram-status-row">
+                  <p
+                    className="telegram-status"
+                    data-connected={lookup.telegramConnected ? 'true' : 'false'}
+                  >
+                    {lookup.telegramConnected ? 'Telegram connected' : 'Not connected to Telegram'}
+                  </p>
+                  <p className="telegram-panel__note">
+                    {lookup.telegramConnected
+                      ? 'Updates about your bookings go to your Telegram for this business.'
+                      : 'Link Telegram when you book so updates and reminders reach you there (REQ-056).'}
+                  </p>
+                </div>
 
                 {resubmitNotice && (
-                  <div style={{ marginBottom: 'var(--space-4)' }}>
+                  <div className="status-page__pad">
                     <Alert tone="success" title="Proof resubmitted">
                       {resubmitNotice}
                     </Alert>
@@ -267,7 +286,7 @@ export function BookingStatusPage() {
                 ))}
 
                 {resubmitting && (
-                  <div style={{ marginTop: 'var(--space-4)' }}>
+                  <div className="status-page__pad">
                     <ResubmissionPanel
                       businessSlug={slug ?? ''}
                       phone={phone.trim()}

@@ -1,15 +1,15 @@
-import { useRef, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useRef, useState, type FormEvent } from 'react'
 import type { ProofFile } from '@/types/models'
 import {
   requestResubmissionCode,
   verifyResubmission,
 } from '@/api/booking'
 import { toUserMessage } from '@/api/errors'
-import { formatBytes } from '@/lib/format'
-import { validateProofFile } from '@/lib/validation'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { Field } from '@/components/ui/Field'
+import { ProofPicker } from '@/components/proof/ProofPicker'
+import { ShieldIcon } from '@/components/ui/icons'
 
 interface ResubmissionPanelProps {
   businessSlug: string
@@ -35,7 +35,8 @@ function newSubmissionKey(): string {
  * Honest about code delivery: the code is one-time, expiring and phone-scoped,
  * and is delivered out-of-band, so this panel NEVER claims a code was "sent".
  * It offers a code-request step, then a 6-digit code + fresh-proof step, and
- * reports only what the backend actually confirms.
+ * reports only what the backend actually confirms. One stable submission key per
+ * attempt keeps a double submit idempotent server-side.
  */
 export function ResubmissionPanel({
   businessSlug,
@@ -51,7 +52,6 @@ export function ResubmissionPanel({
   const [codeError, setCodeError] = useState<string | null>(null)
   const [proof, setProof] = useState<ProofFile | null>(null)
   const [proofError, setProofError] = useState<string | null>(null)
-  // One stable key per attempt so a double submit is idempotent server-side.
   const submissionKeyRef = useRef<string | null>(null)
 
   const requestCode = async () => {
@@ -64,23 +64,6 @@ export function ResubmissionPanel({
       setError(toUserMessage(requestError))
     } finally {
       setRequesting(false)
-    }
-  }
-
-  const handleProofChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0] ?? null
-    if (!file) {
-      setProof(null)
-      return
-    }
-    const result = validateProofFile(file)
-    if (result.ok) {
-      setProof(result.proof)
-      setProofError(null)
-    } else {
-      setProof(null)
-      setProofError(result.error.message)
-      event.target.value = ''
     }
   }
 
@@ -123,7 +106,7 @@ export function ResubmissionPanel({
       </p>
 
       {error && (
-        <div style={{ marginBottom: 'var(--space-4)' }}>
+        <div className="panel-stack">
           <Alert tone="danger" title="Could not resubmit">
             {error}
           </Alert>
@@ -176,39 +159,31 @@ export function ResubmissionPanel({
             )}
           </Field>
 
-          <h3 className="option-group__title">New payment proof</h3>
-          {proof ? (
-            <div className="proof-preview">
-              <span>
-                <strong>{proof.fileName}</strong>{' '}
-                <span className="line-item__meta">
-                  ({formatBytes(proof.sizeBytes)} · {proof.mimeType})
-                </span>
-              </span>
-              <Button type="button" variant="outline" onClick={() => setProof(null)}>
-                Replace
-              </Button>
-            </div>
-          ) : (
-            <div className="upload-zone">
-              <label className="upload-zone__label" htmlFor="resubmit-proof-upload">
-                Choose image or PDF
-              </label>
-              <input
-                id="resubmit-proof-upload"
-                className="sr-only"
-                type="file"
-                accept="image/bmp,image/gif,image/jpeg,image/png,image/webp,application/pdf,.pdf"
-                onChange={handleProofChange}
-              />
-              <p className="line-item__meta">Max 5 MB.</p>
-            </div>
-          )}
+          <section className="step-section" aria-labelledby="resubmit-proof-title">
+            <h3 className="option-group__title" id="resubmit-proof-title">
+              New payment proof
+            </h3>
+            <ProofPicker
+              inputId="resubmit-proof-upload"
+              proof={proof}
+              onChange={(next) => {
+                setProof(next)
+                setProofError(null)
+              }}
+              busy={verifying}
+              hint="The replacement must show the same transfer you are resubmitting for. Max 5 MB."
+            />
+          </section>
           {proofError && (
             <Alert tone="danger" title="Could not use that proof">
               {proofError}
             </Alert>
           )}
+
+          <p className="step-note">
+            <ShieldIcon size={15} />
+            Your new proof replaces the rejected one for this business only.
+          </p>
 
           <nav className="wizard__nav" aria-label="Resubmission actions">
             <Button type="button" variant="outline" onClick={onClose} disabled={verifying}>
@@ -220,7 +195,7 @@ export function ResubmissionPanel({
               loading={verifying}
               disabled={verifying}
             >
-              Verify & resubmit
+              Verify &amp; resubmit
             </Button>
           </nav>
         </form>
