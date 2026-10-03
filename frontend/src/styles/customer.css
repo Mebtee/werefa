@@ -1,0 +1,2253 @@
+/* ---------------------------------------------------------------------------
+ * Werefa customer-facing design system — scoped styles.
+ *
+ * Everything here is namespaced under `.customer-shell`, the shell class the two
+ * customer surfaces mount (`/p/:slug` and `/p/:slug/status`). Nothing in this
+ * file can reach the Owner portal, the Admin surface, the auth screens or the
+ * Werefa marketing site: those keep the shared `tokens.css` / `components.css`
+ * theme untouched. This is why the owner dashboard is deliberately NOT restyled
+ * by a customer-side visual refresh.
+ *
+ * Tokens are declared on `.customer-shell` rather than `:root`, mirroring the
+ * convention `features/marketing/marketing.css` already uses for its own
+ * `.mkt` scope.
+ *
+ * Design direction
+ * ----------------
+ * Warm neutral canvas + clean white surfaces + deep charcoal ink, with a
+ * restrained sage accent. `--accent` is the single hook every accent-driven
+ * rule reads, and the derived tones below are computed from it with
+ * `color-mix`, so an accent can be swapped in one place and every button, chip,
+ * focus ring and tinted surface follows with guaranteed contrast. Nothing here
+ * repaints a business's own branding: the real logo and cover photo the
+ * projection carries are what identify the business visually.
+ * ------------------------------------------------------------------------- */
+
+.customer-shell {
+  /* --- Canvas & ink ---------------------------------------------------- */
+  --cs-canvas: #f7f4ef;
+  --cs-canvas-deep: #efeae1;
+  --cs-surface: #ffffff;
+  --cs-surface-sunken: #fbf8f4;
+  --cs-ink: #241f1b;
+  --cs-ink-soft: #5c534a;
+  --cs-ink-faint: #8a7f73;
+  --cs-line: #e8e1d7;
+  --cs-line-strong: #d3c8ba;
+
+  /* --- Accent: platform default is a restrained sage -------------------- *
+   * `PublicBusinessView` projects no business accent colour (only logo and
+   * cover URLs), so the customer pages deliberately bind nothing inline here
+   * and this is the accent they use. `tokens.css` keeps `--accent` pink for
+   * the Owner portal, Admin surface and auth screens, which this file must not
+   * reach. The derived tones are what the UI actually paints with. */
+  --accent: #4c6b52;
+  --accent-strong: color-mix(in srgb, var(--accent) 82%, #0f1611);
+  --accent-deep: color-mix(in srgb, var(--accent) 62%, #0d130f);
+  --accent-soft: color-mix(in srgb, var(--accent) 9%, #ffffff);
+  --accent-edge: color-mix(in srgb, var(--accent) 26%, #ffffff);
+
+  /* Re-point the shared surface/ink tokens so components.css primitives
+   * (`.card`, `.input`, `.alert`, `.chip`, `.field__error`, …) pick up the
+   * customer palette without any component needing a second class. */
+  --color-bg: var(--cs-canvas);
+  --color-surface: var(--cs-surface);
+  --color-surface-muted: var(--cs-surface-sunken);
+  --color-text: var(--cs-ink);
+  --color-text-muted: var(--cs-ink-soft);
+  --color-border: var(--cs-line);
+  --color-border-strong: var(--cs-line-strong);
+  --focus-ring: color-mix(in srgb, var(--accent-strong) 62%, transparent);
+
+  /* --- Feedback tones: warmer, still WCAG-AA legible on their own bg ---- */
+  --color-success: #1c6b45;
+  --color-success-bg: #e7f3ec;
+  --color-warning: #8a5d10;
+  --color-warning-bg: #fbf1de;
+  --color-danger: #a8322f;
+  --color-danger-bg: #fbeae7;
+  --color-info: #2b5f9c;
+  --color-info-bg: #e9f0f8;
+
+  /* --- Type ------------------------------------------------------------- */
+  --cs-font: var(--font-sans);
+  --cs-text-xs: 12px;
+  --cs-text-sm: 13.5px;
+  --cs-text-base: 16px;
+  --cs-text-lg: 18px;
+  --cs-text-xl: 22px;
+  --cs-text-2xl: clamp(1.65rem, 1.2rem + 2.2vw, 2.35rem);
+
+  /* --- Space ------------------------------------------------------------ */
+  --cs-1: 4px;
+  --cs-2: 8px;
+  --cs-3: 12px;
+  --cs-4: 16px;
+  --cs-5: 20px;
+  --cs-6: 24px;
+  --cs-7: 32px;
+  --cs-8: 44px;
+  --cs-9: 64px;
+
+  /* --- Shape ------------------------------------------------------------ */
+  --cs-radius-sm: 8px;
+  --cs-radius-md: 12px;
+  --cs-radius-lg: 18px;
+  --cs-radius-xl: 24px;
+  --cs-radius-pill: 999px;
+
+  --cs-shadow-sm: 0 1px 2px rgb(36 31 27 / 0.05);
+  --cs-shadow-md: 0 2px 4px rgb(36 31 27 / 0.04), 0 10px 26px -18px rgb(36 31 27 / 0.3);
+  --cs-shadow-lg: 0 4px 10px -4px rgb(36 31 27 / 0.08), 0 26px 52px -30px rgb(36 31 27 / 0.42);
+
+  --cs-ease: cubic-bezier(0.22, 0.68, 0.24, 1);
+  --cs-container: 1120px;
+  --cs-measure: 68ch;
+
+  /* Re-point the shared shape tokens used by components.css primitives. */
+  --radius-sm: var(--cs-radius-sm);
+  --radius-md: var(--cs-radius-md);
+  --radius-lg: var(--cs-radius-lg);
+  --text-xs: var(--cs-text-xs);
+  --text-sm: var(--cs-text-sm);
+  --text-lg: var(--cs-text-lg);
+  --text-xl: var(--cs-text-xl);
+  --text-2xl: var(--cs-text-2xl);
+  --container: var(--cs-container);
+  --content-max: 640px;
+  --shadow-sm: var(--cs-shadow-sm);
+  --shadow-lg: var(--cs-shadow-lg);
+}
+
+/* ---------------------------------------------------------------------------
+ * Page frame
+ * ------------------------------------------------------------------------- */
+
+.customer-shell {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--cs-canvas);
+  color: var(--cs-ink);
+  font-family: var(--cs-font);
+  /* Belt and braces against a stray wide child (a long unbroken slug, a wide
+   * receipt filename) turning into horizontal page scroll on a 320px screen.
+   * Inner scroll areas (date strip, stepper) scroll themselves. */
+  overflow-x: clip;
+}
+
+.customer-shell .page-root__main {
+  flex: 1 0 auto;
+}
+
+.customer-shell .container {
+  width: 100%;
+  max-width: var(--cs-container);
+  padding-inline: clamp(16px, 4.5vw, 32px);
+}
+
+/* Mobile keyboard ergonomics: a focused control inside the wizard must stay
+ * visible when the on-screen keyboard shrinks the visual viewport. `scroll-
+ * padding` gives the browser room to reveal it without manual scrolling. */
+.customer-shell .customer-flow {
+  scroll-padding-block: var(--cs-8) var(--cs-7);
+}
+
+.customer-shell .section-block {
+  margin-block: var(--cs-7) var(--cs-6);
+}
+
+/* ---------------------------------------------------------------------------
+ * Buttons — one consistent system across the whole customer journey
+ * ------------------------------------------------------------------------- */
+
+.customer-shell .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--cs-2);
+  min-height: 46px;
+  padding: var(--cs-3) var(--cs-6);
+  border: 1px solid transparent;
+  border-radius: var(--cs-radius-pill);
+  background: var(--cs-surface);
+  color: var(--cs-ink);
+  font-size: var(--cs-text-sm);
+  font-weight: 650;
+  line-height: 1.2;
+  text-align: center;
+  text-decoration: none;
+  box-shadow: var(--cs-shadow-sm);
+  transition:
+    background 140ms var(--cs-ease),
+    border-color 140ms var(--cs-ease),
+    color 140ms var(--cs-ease),
+    box-shadow 140ms var(--cs-ease);
+}
+
+.customer-shell .btn:hover {
+  background: var(--cs-surface-sunken);
+}
+
+.customer-shell .btn--primary {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  color: #fff;
+  box-shadow: var(--cs-shadow-md);
+}
+
+.customer-shell .btn--primary:hover {
+  background: var(--accent-deep);
+  border-color: var(--accent-deep);
+}
+
+.customer-shell .btn--outline {
+  background: var(--cs-surface);
+  border-color: var(--cs-line-strong);
+  color: var(--cs-ink);
+  box-shadow: none;
+}
+
+.customer-shell .btn--outline:hover {
+  background: var(--cs-surface-sunken);
+  border-color: var(--accent-edge);
+}
+
+/* Toggle buttons (`aria-pressed`) carry their state in text and in a leading
+ * mark as well as in colour — never colour alone. */
+.customer-shell .btn[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.customer-shell .btn:disabled {
+  opacity: 0.5;
+  box-shadow: none;
+}
+
+.customer-shell .btn--block {
+  width: 100%;
+}
+
+.customer-shell .btn--lg {
+  min-height: 52px;
+  padding-inline: var(--cs-7);
+  font-size: var(--cs-text-base);
+}
+
+.customer-shell .btn--sm {
+  min-height: 36px;
+  padding: var(--cs-1) var(--cs-4);
+  font-size: var(--cs-text-xs);
+}
+
+.customer-shell .spinner {
+  width: 18px;
+  height: 18px;
+  border-width: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+ * Cards, surfaces, badges
+ * ------------------------------------------------------------------------- */
+
+.customer-shell .card {
+  background: var(--cs-surface);
+  border: 1px solid var(--cs-line);
+  border-radius: var(--cs-radius-lg);
+  box-shadow: var(--cs-shadow-sm);
+}
+
+.customer-shell .card--padded {
+  padding: var(--cs-6);
+}
+
+.customer-shell .card__title {
+  font-size: var(--cs-text-lg);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin-bottom: var(--cs-1);
+}
+
+.customer-shell .card__subtitle {
+  color: var(--cs-ink-soft);
+  font-size: var(--cs-text-sm);
+  margin-bottom: var(--cs-4);
+}
+
+.customer-shell .badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cs-1);
+  padding: 3px var(--cs-3);
+  border-radius: var(--cs-radius-pill);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-edge);
+  color: var(--accent-strong);
+  font-size: var(--cs-text-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* ---------------------------------------------------------------------------
+ * Chips (option toggles, dates, times)
+ * ------------------------------------------------------------------------- */
+
+.customer-shell .chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--cs-2);
+  min-height: 44px;
+  padding: var(--cs-2) var(--cs-4);
+  border: 1.5px solid var(--cs-line);
+  border-radius: var(--cs-radius-md);
+  background: var(--cs-surface);
+  color: var(--cs-ink);
+  font-size: var(--cs-text-sm);
+  font-weight: 600;
+  line-height: 1.25;
+  box-shadow: var(--cs-shadow-sm);
+  transition:
+    border-color 140ms var(--cs-ease),
+    background 140ms var(--cs-ease),
+    color 140ms var(--cs-ease);
+}
+
+.customer-shell .chip:hover:not(:disabled) {
+  border-color: var(--accent-edge);
+  background: var(--cs-surface-sunken);
+}
+
+/* Pressed = filled accent surface + a check mark, so the selected state is
+ * carried by shape/fill as well as hue. */
+.customer-shell .chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.customer-shell .chip:disabled {
+  opacity: 0.55;
+  border-style: dashed;
+  border-color: var(--cs-line);
+  background: var(--cs-surface-sunken);
+  color: var(--cs-ink-faint);
+  box-shadow: none;
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--cs-ink-faint) 55%, transparent);
+}
+
+/* ---------------------------------------------------------------------------
+ * Form fields
+ * ------------------------------------------------------------------------- */
+
+.customer-shell .field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cs-2);
+  margin-bottom: var(--cs-5);
+  min-width: 0;
+}
+
+.customer-shell .field__label {
+  font-size: var(--cs-text-sm);
+  font-weight: 700;
+  color: var(--cs-ink);
+}
+
+.customer-shell .field__hint {
+  font-size: var(--cs-text-xs);
+  color: var(--cs-ink-soft);
+}
+
+.customer-shell .field__error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cs-2);
+  font-size: var(--cs-text-sm);
+  font-weight: 650;
+  color: var(--color-danger);
+}
+
+.customer-shell .input,
+.customer-shell .select,
+.customer-shell .textarea {
+  /* `width: 100%` + `min-width: 0` keeps a field from ever being narrower than
+   * its content and stops long values widening the page on a 320px screen. */
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  padding: var(--cs-3) var(--cs-4);
+  background: var(--cs-surface);
+  border: 1.5px solid var(--cs-line-strong);
+  border-radius: var(--cs-radius-md);
+  color: var(--cs-ink);
+  font-size: 16px; /* keeps iOS from zooming on focus */
+  line-height: 1.4;
+  transition:
+    border-color 140ms var(--cs-ease),
+    box-shadow 140ms var(--cs-ease);
+}
+
+.customer-shell .textarea {
+  min-height: 104px;
+  resize: vertical;
+}
+
+.customer-shell .input::placeholder,
+.customer-shell .textarea::placeholder {
+  color: var(--cs-ink-faint);
+}
+
+.customer-shell .input:focus,
+.customer-shell .textarea:focus,
+.customer-shell .select:focus {
+  border-color: var(--accent);
+}
+
+.customer-shell .input[aria-invalid="true"],
+.customer-shell .textarea[aria-invalid="true"] {
+  border-color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger-bg) 55%, #ffffff);
+}
+
+/* ---------------------------------------------------------------------------
+ * Alerts — tone is carried by an icon + title, not colour alone
+ * ------------------------------------------------------------------------- */
+
+.customer-shell .alert {
+  display: flex;
+  gap: var(--cs-3);
+  align-items: flex-start;
+  padding: var(--cs-4);
+  border: 1px solid transparent;
+  border-radius: var(--cs-radius-md);
+  margin-block: var(--cs-4);
+  font-size: var(--cs-text-sm);
+  line-height: 1.55;
+}
+
+.customer-shell .alert__title {
+  font-weight: 700;
+  margin-bottom: var(--cs-1);
+}
+
+.customer-shell .alert > div {
+  min-width: 0;
+}
+
+.customer-shell .alert p + p {
+  margin-top: var(--cs-2);
+}
+
+/* ---------------------------------------------------------------------------
+ * Business hero — real logo, real cover photo, real name & details
+ * ------------------------------------------------------------------------- */
+
+.customer-shell .hero {
+  position: relative;
+  margin-bottom: var(--cs-6);
+  background: var(--cs-surface);
+  border-bottom: 1px solid var(--cs-line);
+}
+
+.customer-shell .hero__media {
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, var(--accent-soft), var(--cs-canvas-deep));
+}
+
+.customer-shell .hero__cover {
+  display: block;
+  width: 100%;
+  /* A restrained band, not a full-bleed hero: the customer's job is to find
+   * services and book, so the photograph is atmosphere, not the page. */
+  height: clamp(140px, 34vw, 230px);
+  object-fit: cover;
+}
+
+/* Without a configured cover photo the band is a quiet brand-tinted gradient,
+   never an invented image. */
+.customer-shell .hero__banner {
+  display: block;
+  width: 100%;
+  height: clamp(88px, 20vw, 150px);
+  background:
+    radial-gradient(
+      120% 160% at 12% 0%,
+      var(--accent-soft) 0%,
+      var(--cs-canvas-deep) 62%,
+      var(--cs-canvas-deep) 100%
+    );
+}
+
+.customer-shell .hero__body {
+  padding-block: var(--cs-5) var(--cs-6);
+}
+
+.customer-shell .hero__top {
+  display: flex;
+  align-items: center;
+  gap: var(--cs-4);
+  flex-wrap: wrap;
+}
+
+.customer-shell .hero__logo {
+  flex: none;
+  width: 72px;
+  height: 72px;
+  border-radius: var(--cs-radius-lg);
+  background: var(--accent-strong);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-size: var(--cs-text-xl);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  /* On a narrow screen the logo overlaps the cover band, so it needs a ring to
+     separate it from the photograph behind. */
+  box-shadow:
+    0 0 0 3px var(--cs-surface),
+    var(--cs-shadow-md);
+}
+
+.customer-shell .hero__logo-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+.customer-shell .hero__identity {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--cs-2);
+}
+
+.customer-shell .hero__name {
+  font-size: var(--cs-text-2xl);
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  line-height: 1.12;
+  overflow-wrap: anywhere;
+}
+
+.customer-shell .hero__tagline {
+  color: var(--cs-ink-soft);
+  font-size: var(--cs-text-base);
+  overflow-wrap: anywhere;
+}
+
+.customer-shell .hero__summary {
+  margin-top: var(--cs-5);
+}
+
+.customer-shell .hero__desc {
+  color: var(--cs-ink-soft);
+  font-size: var(--cs-text-base);
+  line-height: 1.65;
+  max-width: var(--cs-measure);
+  overflow-wrap: anywhere;
+}
+
+.customer-shell .hero__facts {
+  list-style: none;
+  padding: 0;
+  margin-top: var(--cs-5);
+  display: grid;
+  gap: var(--cs-2);
+  grid-template-columns: 1fr;
+}
+
+.customer-shell .hero__fact {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cs-3);
+  min-width: 0;
+  padding: var(--cs-3) var(--cs-4);
+  border: 1px solid var(--cs-line);
+  border-radius: var(--cs-radius-md);
+  background: var(--cs-surface-sunken);
+}
+
+.customer-shell .hero__fact-icon {
+  flex: none;
+  color: var(--accent-strong);
+  margin-top: 1px;
+}
+
+.customer-shell .hero__fact dt {
+  font-size: var(--cs-text-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--cs-ink-faint);
+}
+
+.customer-shell .hero__fact dd {
+  margin: 0;
+  font-size: var(--cs-text-sm);
+  overflow-wrap: anywhere;
+}
+
+.customer-shell .hero__fact dd a {
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+.customer-shell .hero__actions {
+  display: flex;
+  gap: var(--cs-3);
+  flex-wrap: wrap;
+  margin-top: var(--cs-5);
+}
+
+.customer-shell .hero__actions .btn {
+  flex: 1 1 220px;
+}
+
+.customer-shell .notice {
+  margin: var(--cs-5) 0 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * Service catalogue
+ * ------------------------------------------------------------------------- */
+
+.customer-shell .section-title {
+  font-size: var(--cs-text-xl);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  margin-bottom: var(--cs-2);
+}
+
+.customer-shell .section-lede {
+  color: var(--cs-ink-soft);
+  font-size: var(--cs-text-sm);
+  margin-bottom: var(--cs-5);
+  max-width: var(--cs-measure);
+}
+
+.customer-shell .services {
+  display: grid;
+  gap: var(--cs-3);
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.customer-shell .service-card {
+  padding: var(--cs-5);
+  border: 1px solid var(--cs-line);
+  border-radius: var(--cs-radius-lg);
+  background: var(--cs-surface);
+  box-shadow: var(--cs-shadow-sm);
+  transition:
+    border-color 140ms var(--cs-ease),
+    box-shadow 140ms var(--cs-ease);
+  min-width: 0;
+}
+
+/* The card itself is not clickable (the explicit button below is), but it
+   mirrors that button's selected state so the pairing reads as one control. */
+.customer-shell .service-card:has(.btn[aria-pressed="true"]) {
+  border-color: var(--accent);
+  background: linear-gradient(180deg, var(--accent-soft), var(--cs-surface) 62%);
+  box-shadow: var(--cs-shadow-md);
+}
+
+.customer-shell .service-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--cs-3) var(--cs-4);
+  flex-wrap: wrap;
+}
+
+.customer-shell .service-card__headings {
+  min-width: 0;
+  flex: 1 1 190px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--cs-1);
+}
+
+.customer-shell .service-card__name {
+  font-size: var(--cs-text-lg);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+.customer-shell .service-card__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--cs-2);
+  flex-wrap: wrap;
+  font-size: var(--cs-text-sm);
+  color: var(--cs-ink-soft);
+}
+
+.customer-shell .service-card__priceblock {
+  display: flex;
+  align-items: baseline;
+  gap: var(--cs-2);
+  flex: none;
+}
+
+.customer-shell .service-card__price {
+  font-size: var(--cs-text-lg);
+  font-weight: 750;
+  color: var(--accent-strong);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.customer-shell .service-card__priceblock .service-card__meta {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.customer-shell .service-card__options {
+  margin-top: var(--cs-4);
+  padding-top: var(--cs-4);
+  border-top: 1px solid var(--cs-line);
+  display: flex;
+  flex-direction: column;
+  gap: var(--cs-4);
+}
+
+.customer-shell .service-card__options-text {
+  font-size: var(--cs-text-sm);
+  color: var(--cs-ink-soft);
+  margin: 0;
+}
+
+.customer-shell .service-card__toggle {
+  margin-top: var(--cs-5);
+  display: flex;
+}
+
+.customer-shell .service-card__toggle .btn {
+  width: 100%;
+}
+
+.customer-shell .option-group {
+  margin-bottom: 0;
+  min-width: 0;
+}
+
+.customer-shell fieldset.option-group {
+  border: 0;
+  padding: 0;
+  min-width: 0;
+  margin-inline: 0;
+}
+
+.customer-shell fieldset.option-group legend {
+  padding: 0;
+}
+
+.customer-shell .option-group__title {
+  font-size: var(--cs-text-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--cs-ink-faint);
+  margin-bottom: var(--cs-2);
+}
+
+.customer-shell .option-group__list {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cs-2);
+}
+
+/* ---------------------------------------------------------------------------
+ * Step indicator
+ * ------------------------------------------------------------------------- */
+
+.customer-shell .stepper {
+  display: flex;
+  align-items: center;
+  gap: var(--cs-1);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  margin: 0 calc(var(--cs-2) * -1);
+  padding: var(--cs-1) var(--cs-2) var(--cs-4);
+  -webkit-overflow-scrolling: touch;
+}
+
+.customer-shell .stepper__list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.customer-shell .stepper__step {
+  position: relative; /* keeps the sr-only labels inside the scroll area */
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cs-2);
+  padding: var(--cs-1) var(--cs-2);
+  font-size: var(--cs-text-xs);
+  font-weight: 650;
+  color: var(--cs-ink-faint);
+  white-space: nowrap;
+}
+
+.customer-shell .stepper__step[aria-current="step"] {
+  color: var(--cs-ink);
+  font-weight: 700;
+}
+
+.customer-shell .stepper__dot {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid var(--cs-line-strong);
+  background: var(--cs-surface);
+  color: var(--cs-ink-faint);
+  font-size: var(--cs-text-xs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.customer-shell .stepper__step[aria-current="step"] .stepper__dot {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  color: #fff;
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+.customer-shell .stepper__step.stepper__step--done .stepper__dot {
+  background: var(--color-success-bg);
+  border-color: color-mix(in srgb, var(--color-success) 40%, transparent);
+  color: var(--color-success);
+}
+
+.customer-shell .stepper__divider {
+  flex: none;
+  width: 14px;
+  height: 1.5px;
+  background: var(--cs-line-strong);
+}
+
+/* ---------------------------------------------------------------------------
+ * Wizard frame
+ * ------------------------------------------------------------------------- */
+
+.customer-shell .wizard {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--cs-6);
+  padding: var(--cs-5);
+  border: 1px solid var(--cs-line);
+  border-radius: var(--cs-radius-xl);
+  background: var(--cs-surface);
+  box-shadow: var(--cs-shadow-md);
+  min-width: 0;
+}
+
+.customer-shell .wizard__main {
+  min-width: 0; /* lets the grid track shrink below the date strip's min-content */
+}
+
+/* Holds the active step so a desktop measure cap has one element to apply to,
+   whatever the step renders. */
+.customer-shell .wizard__panel {
+  min-width: 0;
+}
+
+.customer-shell .wizard__nav {
+  display: flex;
+  gap: var(--cs-3);
+  margin-top: var(--cs-6);
+  padding-top: var(--cs-5);
+  border-top: 1px solid var(--cs-line);
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+
+.customer-shell .wizard__nav .btn {
+  flex: 1 1 auto;
+}
+
+/* The step's single primary action always sits on the trailing edge. */
+.customer-shell .wizard__nav .btn:not(:first-child) {
+  margin-inline-start: auto;
+  flex: 1 1 200px;
+}
+
+.customer-shell .wizard__nav .btn--block {
+  flex: 1 1 100%;
+  margin-inline-start: 0;
+}
+
+.customer-shell .step-title {
+  font-size: var(--cs-text-xl);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  margin-bottom: var(--cs-2);
+}
+
+.customer-shell .step-title:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 4px;
+  border-radius: var(--cs-radius-sm);
+}
+
+.customer-shell .step-subtitle {
+  color: var(--cs-ink-soft);
+  font-size: var(--cs-text-sm);
+  line-height: 1.6;
+  margin-bottom: var(--cs-5);
+  max-width: var(--cs-measure);
+}
+
+.customer-shell .step-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--cs-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--cs-5);
+}
+
+.customer-shell .step-meta__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cs-2);
+  padding: var(--cs-1) var(--cs-3);
+  border: 1px solid var(--cs-line);
+  border-radius: var(--cs-radius-pill);
+  background: var(--cs-surface-sunken);
+  font-size: var(--cs-text-xs);
+  font-weight: 600;
+  color: var(--cs-ink-soft);
+}
+
+.customer-shell .step-meta__item--strong {
+  border-color: var(--accent-edge);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+/* A step that groups one decision (all dates, all times, all proofs). */
+.customer-shell .step-section {
+  margin-top: var(--cs-6);
+}
+
+.customer-shell .step-section > .option-group__title {
+  display: flex;
+  align-items: center;
+  gap: var(--cs-2);
+  margin-top: 0;
+}
+
+/* Small quiet note under a step — privacy or data-visibility reassurance. */
+.customer-shell .step-note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cs-2);
+  margin: var(--cs-4) 0 0;
+  color: var(--cs-ink-soft);
+  font-size: var(--cs-text-xs);
+  line-height: 1.6;
+}
+
+.customer-shell .step-note svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+ * Date & time
+ * ------------------------------------------------------------------------- */
+
+.customer-shell .picker-group {
+  margin-bottom: var(--cs-6);
+}
+
+.customer-shell .picker-group__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--cs-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--cs-3);
+}
+
+.customer-shell .picker-group__title {
+  font-size: var(--cs-text-sm);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--cs-ink);
+  margin: 0;
+}
+
+.customer-shell .picker-group__hint {
+  font-size: var(--cs-text-xs);
+  color: var(--cs-ink-faint);
+}
+
+.customer-shell .date-strip {
+  display: flex;
+  gap: var(--cs-2);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding: var(--cs-1) var(--cs-1) var(--cs-3);
+  margin-inline: calc(var(--cs-1) * -1);
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+}
+
+.customer-shell .date-chip {
+  flex: none;
+  flex-direction: column;
+  gap: 0;
+  width: 76px;
+  min-width: 76px;
+  min-height: 66px;
+  padding: var(--cs-3) var(--cs-2);
+  border-radius: var(--cs-radius-md);
+  scroll-snap-align: start;
+}
+
+.customer-shell .date-chip__weekday {
+  font-size: var(--cs-text-xs);
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--cs-ink-faint);
+}
+
+/* Big day-of-month + short month carry the visual weight; the full ISO date
+ * stays below them because it is what assistive tech and the tests read. */
+.customer-shell .date-chip__day {
+  font-size: var(--cs-text-xl);
+  font-weight: 750;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.customer-shell .date-chip__month {
+  font-size: var(--cs-text-xs);
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--cs-ink-faint);
+}
+
+.customer-shell .date-chip__date {
+  font-size: var(--cs-text-sm);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  line-height: 1.3;
+  /* ISO dates must never break mid-token on a 320px screen. */
+  overflow-wrap: normal;
+}
+
+.customer-shell .date-chip[aria-pressed="true"] .date-chip__weekday,
+.customer-shell .date-chip[aria-pressed="true"] .date-chip__date,
+.customer-shell .date-chip[aria-pressed="true"] .date-chip__month {
+  color: var(--accent-strong);
+}
+
+.customer-shell .date-chip__state {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--cs-ink-faint);
+}
+
+.customer-shell .time-grid {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  /* Two comfortable touch targets per row even on a 320px screen; wider
+     viewports get more columns automatically. */
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: var(--cs-2);
+  margin-top: var(--cs-3);
+}
+
+.customer-shell .time-grid__item {
+  min-width: 0;
+}
+
+.customer-shell .time-grid__item button {
+  width: 100%;
+  min-height: 48px;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+.customer-shell .time-grid__item button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+/* ---------------------------------------------------------------------------
+ * Booking summary
+ * ------------------------------------------------------------------------- */
+
+.customer-shell .summary {
+  padding: var(--cs-5);
+  background: var(--cs-surface);
+  min-width: 0;
+}
+
+.customer-shell .summary--panel {
+  border: 1px solid var(--cs-line);
+  border-radius: var(--cs-radius-lg);
+  background: var(--cs-surface-sunken);
+}
+
+.customer-shell .summary--panel .summary__heading-row {
+  padding-bottom: var(--cs-1);
+  border-bottom: 1px solid var(--cs-line);
+  margin-bottom: var(--cs-2);
+}
+
+.customer-shell .summary__business {
+  display: flex;
+  align-items: center;
+  gap: var(--cs-2);
+  font-size: var(--cs-text-sm);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin-bottom: var(--cs-4);
+  overflow-wrap: anywhere;
+}
+
+.customer-shell .summary__section {
+  margin-bottom: var(--cs-5);
+  min-width: 0;
+}
+
+.customer-shell .summary__section:last-child {
+  margin-bottom: 0;
+}
+
+.customer-shell .summary__heading {
+  font-size: var(--cs-text-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--cs-ink-faint);
+  margin: 0;
+}
+
+.customer-shell .summary__heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cs-2);
+  margin-bottom: var(--cs-2);
+}
+
+.customer-shell .summary__heading-row .summary__heading {
+  margin-bottom: 0;
+}
+
+.customer-shell .summary__empty,
+.customer-shell .summary__placeholder {
+  color: var(--cs-ink-faint);
+  font-size: var(--cs-text-sm);
+  margin: 0;
+}
+
+/* Closing reassurance under the summary: the request is not confirmed yet. */
+.customer-shell .summary__footnote {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cs-2);
+  margin: var(--cs-4) 0 0;
+  padding-top: var(--cs-3);
+  border-top: 1px solid var(--cs-line);
+  color: var(--cs-ink-faint);
+  font-size: var(--cs-text-xs);
+  line-height: 1.6;
+}
+
+.customer-shell .summary__footnote svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.customer-shell .summary__value {
+  margin: 0;
+  font-size: var(--cs-text-sm);
+  overflow-wrap: anywhere;
+}
+
+.customer-shell .summary__value--strong {
+  font-size: var(--cs-text-base);
+  font-weight: 700;
+}
+
+.customer-shell .summary__list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.customer-shell .line-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--cs-3);
+  padding-block: var(--cs-2);
+  border-bottom: 1px solid var(--cs-line);
+  min-width: 0;
+}
+
+.customer-shell .line-item:last-child {
+  border-bottom: 0;
+}
+
+.customer-shell .line-item__name {
+  min-width: 0;
+  font-size: var(--cs-text-sm);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.customer-shell .line-item__price {
+  flex: none;
+  font-size: var(--cs-text-sm);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.customer-shell .line-item__meta {
+  display: block;
+  font-size: var(--cs-text-xs);
+  color: var(--cs-ink-faint);
+}
+
+.customer-shell .total-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--cs-3);
+  margin-top: var(--cs-3);
+  padding-top: var(--cs-3);
+  border-top: 1.5px solid var(--cs-line-strong);
+  font-size: var(--cs-text-base);
+  font-weight: 700;
+}
+
+.customer-shell .total-row--soft,
+.customer-shell .total-row--muted {
+  margin-top: var(--cs-1);
+  padding-top: 0;
+  border-top: 0;
+  font-size: var(--cs-text-sm);
+  font-weight: 500;
+  color: var(--cs-ink-soft);
+}
+
+.customer-shell .total-row--deposit {
+  margin-top: var(--cs-3);
+  padding: var(--cs-3);
+  border: 1px solid var(--accent-edge);
+  border-radius: var(--cs-radius-md);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.customer-shell .edit-link {
+  flex: none;
+  min-height: 32px;
+  padding: var(--cs-1) var(--cs-2);
+  background: none;
+  border: 0;
+  border-radius: var(--cs-radius-sm);
+  color: var(--accent-strong);
+  font-size: var(--cs-text-xs);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.customer-shell .edit-link:hover {
+  color: var(--accent-deep);
+}
+
+/* Compact summary disclosure for mobile */
+.customer-shell .summary-disclosure {
+  border: 1px solid var(--cs-line);
+  border-radius: var(--cs-radius-md);
+  background: var(--cs-surface-sunken);
+  overflow: hidden;
+}
+
+.customer-shell .summary-disclosure > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cs-3);
+  flex-wrap: wrap;
+  min-height: 48px;
+  padding: var(--cs-3) var(--cs-4);
+  font-size: var(--cs-text-sm);
+  font-weight: 700;
+}
+
+.customer-shell .summary-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.customer-shell .summary-disclosure > summary::after {
+  content: "▾";
+  flex: none;
+  color: var(--cs-ink-faint);
+  transition: transform 140ms var(--cs-ease);
+}
+
+.customer-shell .summary-disclosure[open] > summary::after {
+  transform: rotate(180deg);
+}
+
+.customer-shell .summary-disclosure__meta {
+  font-weight: 600;
+  font-size: var(--cs-text-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--cs-ink-faint);
+}
+
+.customer-shell .summary-disclosure .summary {
+  padding: var(--cs-4);
+  border-top: 1px solid var(--cs-line);
+  background: var(--cs-surface);
+}
+
+/* ---------------------------------------------------------------------------
+ * Payment & receipt upload
+ * ------------------------------------------------------------------------- */
+
+.customer-shell .payment-methods {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--cs-2);
+  margin-bottom: var(--cs-6);
+}
+
+.customer-shell .payment-option {
+  display: flex;
+  align-items: center;
+  gap: var(--cs-3);
+  min-height: 48px;
+  border: 1.5px solid var(--cs-line);
+  border-radius: var(--cs-radius-md);
+  padding: var(--cs-3) var(--cs-4);
+  cursor: pointer;
+  background: var(--cs-surface);
+  transition:
+    border-color 140ms var(--cs-ease),
+    background 140ms var(--cs-ease);
+}
+
+.customer-shell .payment-option:hover {
+  border-color: var(--accent-edge);
+}
+
+.customer-shell .payment-option.payment-option--active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.customer-shell .payment-option input {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  accent-color: var(--accent-strong);
+}
+
+.customer-shell .payment-option__label {
+  display: block;
+  font-size: var(--cs-text-sm);
+  font-weight: 700;
+}
+
+.customer-shell .payment-option__hint {
+  display: flex;
+  align-items: center;
+  gap: var(--cs-1);
+  margin-top: 2px;
+  color: var(--cs-ink-faint);
+  font-size: var(--cs-text-xs);
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+/* The deposit is the number the whole payment step turns on, so it gets its own
+ * quiet panel instead of living inside a paragraph of body copy. */
+.customer-shell .deposit-banner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cs-1);
+  margin-bottom: var(--cs-6);
+  padding: var(--cs-5);
+  border: 1px solid var(--accent-edge);
+  border-radius: var(--cs-radius-lg);
+  background: linear-gradient(180deg, var(--accent-soft), var(--cs-surface) 70%);
+}
+
+.customer-shell .deposit-banner__label {
+  font-size: var(--cs-text-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--cs-ink-faint);
+}
+
+.customer-shell .deposit-banner__amount {
+  font-size: var(--cs-text-2xl);
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--accent-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.customer-shell .deposit-banner__note {
+  color: var(--cs-ink-soft);
+  font-size: var(--cs-text-xs);
+  line-height: 1.6;
+  max-width: var(--cs-measure);
+}
+
+/* Drop zone. The whole surface is the label for the real file input, so a tap
+   anywhere on it opens the picker and the control stays keyboard reachable
+   through its own visible label. */
+.customer-shell .upload-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--cs-3);
+  min-height: 168px;
+  padding: var(--cs-6) var(--cs-4);
+  border: 1.5px dashed var(--cs-line-strong);
+  border-radius: var(--cs-radius-lg);
+  background: var(--cs-surface-sunken);
+  text-align: center;
+  transition:
+    border-color 140ms var(--cs-ease),
+    background 140ms var(--cs-ease);
+}
+
+.customer-shell .upload-zone:hover,
+.customer-shell .upload-zone:focus-within {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.customer-shell .upload-zone__icon {
+  color: var(--accent-strong);
+}
+
+.customer-shell .upload-zone__label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cs-2);
+  min-height: 44px;
+  padding: var(--cs-2) var(--cs-5);
+  border-radius: var(--cs-radius-pill);
+  background: var(--accent-strong);
+  color: #fff;
+  font-size: var(--cs-text-sm);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.customer-shell .upload-zone__hint {
+  margin: 0;
+  font-size: var(--cs-text-xs);
+  color: var(--cs-ink-soft);
+  max-width: 42ch;
+}
+
+/* Selected file: real name, real size/type and — for a real image — a real
+   object-URL preview that fits the viewport without distortion. */
+.customer-shell .proof-preview {
+  display: flex;
+  align-items: stretch;
+  gap: var(--cs-4);
+  padding: var(--cs-4);
+  border: 1px solid var(--accent-edge);
+  border-radius: var(--cs-radius-lg);
+  background: var(--cs-surface);
+}
+
+.customer-shell .proof-preview__thumb {
+  flex: none;
+  width: 88px;
+  height: 88px;
+  border-radius: var(--cs-radius-md);
+  border: 1px solid var(--cs-line);
+  background: var(--cs-surface-sunken);
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  color: var(--cs-ink-faint);
+}
+
+.customer-shell .proof-preview__img {
+  width: 100%;
+  height: 100%;
+  /* Contain, never fill: a tall receipt screenshot must not be cropped or
+     stretched, and must fit any viewport width. */
+  object-fit: contain;
+}
+
+.customer-shell .proof-preview__body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--cs-1);
+  justify-content: center;
+}
+
+.customer-shell .proof-preview__name {
+  font-size: var(--cs-text-sm);
+  font-weight: 700;
+  color: var(--cs-ink);
+  /* Long file names wrap rather than widening the page. */
+  overflow-wrap: anywhere;
+}
+
+.customer-shell .proof-preview__meta {
+  font-size: var(--cs-text-xs);
+  color: var(--cs-ink-faint);
+}
+
+.customer-shell .proof-preview__actions {
+  display: flex;
+  gap: var(--cs-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* The name and size/type read as one chip row under the preview. */
+.customer-shell .proof-preview .line-item__meta {
+  margin: 0;
+}
+
+/* Horizontal room is finite on a phone: let the thumbnail shrink rather than
+   push the actions off-screen. */
+.customer-shell .proof-preview__thumb {
+  max-width: 40%;
+  height: auto;
+  aspect-ratio: 1;
+}
+
+/* ---------------------------------------------------------------------------
+ * Confirmation (done) step
+ * ------------------------------------------------------------------------- */
+
+/* Confirmation reads as one calm block: the seal, then the backend's own
+   wording, then the next actions. */
+.customer-shell .success-panel {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cs-4);
+  margin-bottom: var(--cs-5);
+}
+
+.customer-shell .success-panel__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--color-success-bg);
+  border: 1px solid color-mix(in srgb, var(--color-success) 30%, transparent);
+  color: var(--color-success);
+}
+
+.customer-shell .success-panel .alert {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+}
+
+/* A stack wrapper for alerts/panels that need their own vertical rhythm. */
+.customer-shell .panel-stack {
+  margin-block: var(--cs-4);
+}
+
+.customer-shell .done-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--cs-4);
+  padding: var(--cs-8) var(--cs-5);
+  border: 1px solid var(--accent-edge);
+  border-radius: var(--cs-radius-xl);
+  background: linear-gradient(180deg, var(--accent-soft), var(--cs-surface) 58%);
+  text-align: center;
+}
+
+.customer-shell .done-panel__seal {
+  display: grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  border: 1px solid color-mix(in srgb, var(--color-success) 30%, transparent);
+}
+
+.customer-shell .done-panel__seal--warning {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  border-color: color-mix(in srgb, var(--color-warning) 32%, transparent);
+}
+
+.customer-shell .done-panel__seal--danger {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  border-color: color-mix(in srgb, var(--color-danger) 30%, transparent);
+}
+
+.customer-shell .done-panel__title {
+  font-size: var(--cs-text-xl);
+  font-weight: 750;
+  letter-spacing: -0.015em;
+  margin: 0;
+}
+
+.customer-shell .done-panel__lead {
+  margin: 0;
+  color: var(--cs-ink-soft);
+  font-size: var(--cs-text-base);
+  line-height: 1.6;
+  max-width: 52ch;
+}
+
+.customer-shell .done-panel .alert {
+  margin: 0;
+  text-align: left;
+  width: 100%;
+}
+
+.customer-shell .next-steps {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--cs-2);
+  width: 100%;
+  text-align: left;
+}
+
+.customer-shell .next-steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cs-3);
+  padding: var(--cs-3) var(--cs-4);
+  border: 1px solid var(--cs-line);
+  border-radius: var(--cs-radius-md);
+  background: var(--cs-surface);
+  font-size: var(--cs-text-sm);
+  line-height: 1.55;
+}
+
+.customer-shell .next-steps__index {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-edge);
+  color: var(--accent-strong);
+  font-size: var(--cs-text-xs);
+  font-weight: 700;
+}
+
+/* ---------------------------------------------------------------------------
+ * Customer booking status
+ * ------------------------------------------------------------------------- */
+
+.customer-shell .status-page {
+  padding-block: var(--cs-7) var(--cs-6);
+}
+
+/* Vertical rhythm helper for a single block inside the status page. */
+.customer-shell .status-page__pad {
+  padding-block: var(--cs-4);
+}
+
+.customer-shell .status-page__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cs-2);
+  margin-bottom: var(--cs-3);
+  color: var(--cs-ink-faint);
+  font-size: var(--cs-text-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.customer-shell .status-page__header {
+  margin-bottom: var(--cs-6);
+}
+
+.customer-shell .booking-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: var(--cs-2);
+  margin-bottom: var(--cs-4);
+  font-size: var(--cs-text-xs);
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: var(--cs-ink-faint);
+  flex-wrap: wrap;
+}
+
+.customer-shell .booking-breadcrumb a {
+  color: var(--accent-strong);
+  text-decoration: none;
+}
+
+.customer-shell .booking-breadcrumb a:hover {
+  text-decoration: underline;
+}
+
+.customer-shell .page-title {
+  font-size: var(--cs-text-2xl);
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  margin-bottom: var(--cs-2);
+}
+
+.customer-shell .page-subtitle {
+  color: var(--cs-ink-soft);
+  font-size: var(--cs-text-base);
+  max-width: var(--cs-measure);
+}
+
+.customer-shell .status-page__form {
+  padding: var(--cs-5);
+  max-width: var(--content-max);
+  margin-bottom: var(--cs-6);
+  border: 1px solid var(--cs-line);
+  border-radius: var(--cs-radius-lg);
+  background: var(--cs-surface);
+  box-shadow: var(--cs-shadow-sm);
+}
+
+.customer-shell .status-page__results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cs-4);
+  min-width: 0;
+}
+
+.customer-shell .status-page__results:focus {
+  outline: none;
+}
+
+.customer-shell .status-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cs-4);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: var(--cs-5);
+  border: 1px solid var(--cs-line);
+  border-radius: var(--cs-radius-lg);
+  background: var(--cs-surface);
+  box-shadow: var(--cs-shadow-sm);
+}
+
+.customer-shell .status-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--cs-3);
+  flex-wrap: wrap;
+}
+
+.customer-shell .status-card__title {
+  min-width: 0;
+  font-size: var(--cs-text-lg);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.customer-shell .status-card__when {
+  font-size: var(--cs-text-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--cs-ink-faint);
+}
+
+.customer-shell .status-card__chips {
+  display: flex;
+  gap: var(--cs-2);
+  flex-wrap: wrap;
+}
+
+.customer-shell .status-card__explanation {
+  color: var(--cs-ink-soft);
+  font-size: var(--cs-text-sm);
+  line-height: 1.6;
+  margin: 0;
+}
+
+.customer-shell .status-card__guidance {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cs-3);
+  margin: 0;
+  padding: var(--cs-3) var(--cs-4);
+  border: 1px solid var(--cs-line);
+  border-radius: var(--cs-radius-md);
+  background: var(--cs-surface-sunken);
+  font-size: var(--cs-text-sm);
+  line-height: 1.55;
+  color: var(--cs-ink);
+}
+
+.customer-shell .status-card__guidance-icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--accent-strong);
+}
+
+.customer-shell .status-card__actions {
+  display: flex;
+  gap: var(--cs-2);
+  flex-wrap: wrap;
+}
+
+/* Telegram connection state above the results, with its explanation beneath. */
+.customer-shell .telegram-status-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--cs-2);
+  min-width: 0;
+}
+
+/* Status chip: the label text is the primary signal, the tint is secondary. */
+.customer-shell .booking-chip {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: var(--cs-2);
+  padding: var(--cs-1) var(--cs-3);
+  border: 1px solid transparent;
+  border-radius: var(--cs-radius-pill);
+  font-size: var(--cs-text-xs);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.customer-shell .booking-chip--active {
+  background: var(--color-warning-bg);
+  border-color: color-mix(in srgb, var(--color-warning) 32%, transparent);
+  color: var(--color-warning);
+}
+
+.customer-shell .booking-chip--confirmed,
+.customer-shell .booking-chip--completed {
+  background: var(--color-success-bg);
+  border-color: color-mix(in srgb, var(--color-success) 30%, transparent);
+  color: var(--color-success);
+}
+
+.customer-shell .booking-chip--rejected,
+.customer-shell .booking-chip--cancelled,
+.customer-shell .booking-chip--no-show {
+  background: var(--color-danger-bg);
+  border-color: color-mix(in srgb, var(--color-danger) 26%, transparent);
+  color: var(--color-danger);
+}
+
+/* ---------------------------------------------------------------------------
+ * Telegram (customer connect card) — status never by colour alone
+ * ------------------------------------------------------------------------- */
+
+.customer-shell .telegram-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cs-4);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  margin-block: var(--cs-6);
+  padding: var(--cs-5);
+  border: 1px solid var(--cs-line);
+  border-radius: var(--cs-radius-lg);
+  background: var(--cs-surface);
+  box-shadow: var(--cs-shadow-sm);
+}
+
+.customer-shell .telegram-panel__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cs-4);
+  min-width: 0;
+}
+
+.customer-shell .telegram-panel__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--cs-radius-md);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-edge);
+  color: var(--accent-strong);
+}
+
+.customer-shell .telegram-panel__head-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cs-1);
+  min-width: 0;
+}
+
+.customer-shell .telegram-panel__title {
+  font-size: var(--cs-text-base);
+  font-weight: 700;
+  margin: 0;
+}
+
+.customer-shell .telegram-panel__note {
+  margin: 0;
+  color: var(--cs-ink-soft);
+  font-size: var(--cs-text-sm);
+  line-height: 1.6;
+}
+
+.customer-shell .telegram-panel__inbox {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--cs-3);
+  min-width: 0;
+  width: 100%;
+}
+
+.customer-shell .telegram-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cs-2);
+  align-self: flex-start;
+  padding: var(--cs-1) var(--cs-3);
+  border: 1px solid var(--cs-line);
+  border-radius: var(--cs-radius-pill);
+  background: var(--cs-surface-sunken);
+  font-size: var(--cs-text-xs);
+  font-weight: 700;
+  color: var(--cs-ink-soft);
+}
+
+.customer-shell .telegram-status::before {
+  content: "";
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 2px solid var(--cs-ink-faint);
+  background: transparent;
+}
+
+.customer-shell .telegram-status[data-connected="true"] {
+  border-color: color-mix(in srgb, var(--color-success) 30%, transparent);
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.customer-shell .telegram-status[data-connected="true"]::before {
+  border-color: var(--color-success);
+  background: var(--color-success);
+}
+
+.customer-shell .telegram-status[data-connected="false"] {
+  border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+.customer-shell .telegram-status[data-connected="false"]::before {
+  border-color: var(--color-warning);
+  background: var(--color-warning);
+}
+
+/* ---------------------------------------------------------------------------
+ * Empty / unavailable / loading states
+ * ------------------------------------------------------------------------- */
+
+.customer-shell .empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--cs-3);
+  padding: var(--cs-8) var(--cs-5);
+  border: 1px dashed var(--cs-line-strong);
+  border-radius: var(--cs-radius-lg);
+  background: var(--cs-surface);
+  text-align: center;
+  min-width: 0;
+}
+
+.customer-shell .empty-state__icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.customer-shell .empty-state__title {
+  font-size: var(--cs-text-lg);
+  font-weight: 700;
+  margin: 0;
+}
+
+.customer-shell .empty-state__body {
+  margin: 0;
+  max-width: 44ch;
+  color: var(--cs-ink-soft);
+  font-size: var(--cs-text-sm);
+  line-height: 1.6;
+}
+
+.customer-shell .loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--cs-3);
+  padding: var(--cs-8) var(--cs-4);
+  text-align: center;
+}
+
+.customer-shell .loading-state__label {
+  color: var(--cs-ink-soft);
+  font-size: var(--cs-text-sm);
+}
+
+/* The inline variant sits inside a step rather than a whole page. */
+.customer-shell .loading-state--inline {
+  padding: var(--cs-7) var(--cs-4);
+}
+
+.customer-shell .spinner-wrap {
+  display: inline-flex;
+}
+
+/* ---------------------------------------------------------------------------
+ * Page footer
+ * ------------------------------------------------------------------------- */
+
+.customer-shell .page-footer {
+  margin-top: var(--cs-9);
+  border-top: 1px solid var(--cs-line);
+  background: var(--cs-surface);
+  padding-block: var(--cs-6);
+  color: var(--cs-ink-faint);
+  font-size: var(--cs-text-xs);
+  line-height: 1.6;
+}
+
+.customer-shell .page-footer__inner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--cs-4);
+  flex-wrap: wrap;
+}
+
+.customer-shell .page-footer a {
+  color: var(--accent-strong);
+  font-weight: 650;
+}
+
+/* ---------------------------------------------------------------------------
+ * Responsive — mobile is the primary target
+ * ------------------------------------------------------------------------- */
+
+/* Small phones (320–359px): tighten padding so nothing clips or overflows. */
+@media (max-width: 359px) {
+  .customer-shell .container {
+    padding-inline: 14px;
+  }
+
+  .customer-shell .card--padded {
+    padding: var(--cs-5) var(--cs-4);
+  }
+
+  .customer-shell .wizard {
+    padding: var(--cs-4);
+    border-radius: var(--cs-radius-lg);
+  }
+
+  .customer-shell .service-card {
+    padding: var(--cs-4);
+  }
+
+  .customer-shell .summary {
+    padding: var(--cs-4);
+  }
+
+  .customer-shell .hero__logo {
+    width: 60px;
+    height: 60px;
+  }
+
+  .customer-shell .date-chip {
+    width: 70px;
+    min-width: 70px;
+  }
+
+  .customer-shell .time-grid {
+    grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  }
+
+  .customer-shell .hero__actions .btn {
+    flex: 1 1 100%;
+  }
+}
+
+@media (max-width: 479px) {
+  /* Two equal columns: Back and Continue stay reachable and never clipped. */
+  .customer-shell .wizard__nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .customer-shell .wizard__nav .btn,
+  .customer-shell .wizard__nav .btn:not(:first-child),
+  .customer-shell .wizard__nav .btn--block {
+    width: 100%;
+    margin-inline-start: 0;
+  }
+
+  /* The label still exists for assistive tech; visually only the numbered dots
+     carry the progress on the narrowest screens. The divider is a sibling of
+     the same span, so it is excluded explicitly rather than by position. */
+  .customer-shell .stepper__step > span:not(.stepper__dot):not(.stepper__divider) {
+    display: none;
+  }
+
+  .customer-shell .stepper__divider {
+    width: 10px;
+  }
+
+  .customer-shell .proof-preview {
+    flex-wrap: wrap;
+  }
+
+  .customer-shell .done-panel {
+    padding: var(--cs-7) var(--cs-4);
+  }
+}
+
+@media (min-width: 560px) {
+  .customer-shell .hero__facts {
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  }
+
+  .customer-shell .payment-methods {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+
+  .customer-shell .proof-preview__thumb {
+    width: 112px;
+    height: 112px;
+  }
+}
+
+@media (min-width: 860px) {
+  .customer-shell .wizard {
+    grid-template-columns: 300px minmax(0, 1fr);
+    gap: var(--cs-8);
+    align-items: start;
+    padding: var(--cs-6);
+  }
+
+  .customer-shell .wizard__sidebar {
+    position: sticky;
+    top: var(--cs-5);
+  }
+
+  .customer-shell .wizard__mobile-summary {
+    display: none;
+  }
+
+  .customer-shell .hero__top {
+    flex-wrap: nowrap;
+  }
+
+  .customer-shell .stepper {
+    padding-bottom: var(--cs-5);
+  }
+}
+
+/* Desktop: keep the booking form comfortably readable instead of letting a
+   wide viewport stretch a single column of inputs. */
+@media (min-width: 1180px) {
+  .customer-shell .wizard__panel {
+    max-width: 640px;
+  }
+
+  .customer-shell .time-grid {
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Reduced motion — transitions are decorative here, so drop them entirely.
+ * ------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .customer-shell *,
+  .customer-shell *::before,
+  .customer-shell *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
