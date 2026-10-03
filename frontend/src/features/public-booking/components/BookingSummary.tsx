@@ -8,6 +8,12 @@ import type {
 } from '@/types/models'
 import { buildLineItems, formatMoney, totalDurationMinutes, totalPrice } from '@/lib/format'
 import { weekdayLabel } from '@/lib/time'
+import {
+  CalendarIcon,
+  ClockIcon,
+  ScissorsIcon,
+  UserIcon,
+} from '@/components/ui/icons'
 
 interface BookingSummaryProps {
   business: BusinessDetails
@@ -32,6 +38,15 @@ function EditLink({ onClick, children }: { onClick?: () => void; children: strin
   )
 }
 
+/**
+ * Running summary of the customer's real choices.
+ *
+ * Every figure here is recomputed from the published catalogue and the
+ * selections already made — it is the customer's own preview, not an
+ * authoritative quote. The deposit shown on the review and payment steps is the
+ * backend's figure. Rendered beside the steps on wide screens and inside the
+ * collapsible disclosure on small ones.
+ */
 export function BookingSummary({
   business,
   services,
@@ -49,27 +64,34 @@ export function BookingSummary({
     <div className="summary">
       <section className="summary__section">
         <div className="summary__heading-row">
-          <h3 className="summary__heading">Services</h3>
+          <h3 className="summary__heading">
+            <ScissorsIcon size={16} /> Services
+          </h3>
           <EditLink onClick={onEdit?.services}>services</EditLink>
         </div>
-        <ul style={{ listStyle: 'none', padding: 0 }}>
-          {lineItems.map((item) => (
-            <li key={`${item.selection.serviceId}-${item.selection.variationId ?? 'none'}`} className="line-item">
-              <div>
-                <div>{item.name}</div>
-                <div className="line-item__meta">
-                  {item.durationMinutes} min
+        {lineItems.length === 0 ? (
+          <p className="summary__placeholder">No services added yet.</p>
+        ) : (
+          <ul className="summary__list">
+            {lineItems.map((item) => (
+              <li
+                key={`${item.selection.serviceId}-${item.selection.variationId ?? 'none'}`}
+                className="line-item"
+              >
+                <div>
+                  <div>{item.name}</div>
+                  <div className="line-item__meta">{item.durationMinutes} min</div>
                 </div>
-              </div>
-              <span>{formatMoney(item.unitPrice, business.currency)}</span>
-            </li>
-          ))}
-        </ul>
+                <span>{formatMoney(item.unitPrice, business.currency)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
         <div className="total-row">
           <span>Total</span>
           <span>{formatMoney(total, business.currency)}</span>
         </div>
-        <div className="total-row" style={{ fontWeight: 500, color: 'var(--color-text-muted)' }}>
+        <div className="total-row total-row--muted">
           <span>Duration</span>
           <span>{duration} min</span>
         </div>
@@ -77,7 +99,9 @@ export function BookingSummary({
 
       <section className="summary__section">
         <div className="summary__heading-row">
-          <h3 className="summary__heading">Date & time</h3>
+          <h3 className="summary__heading">
+            <CalendarIcon size={16} /> Date &amp; time
+          </h3>
           <EditLink onClick={onEdit?.dateTime}>date & time</EditLink>
         </div>
         <p>
@@ -91,7 +115,9 @@ export function BookingSummary({
 
       <section className="summary__section">
         <div className="summary__heading-row">
-          <h3 className="summary__heading">Your details</h3>
+          <h3 className="summary__heading">
+            <UserIcon size={16} /> Your details
+          </h3>
           <EditLink onClick={onEdit?.customer}>details</EditLink>
         </div>
         <p>
@@ -101,6 +127,12 @@ export function BookingSummary({
         </p>
         {customer.note && <p className="line-item__meta">{customer.note}</p>}
       </section>
+
+      <p className="summary__footnote">
+        <ClockIcon size={15} />
+        The business reviews every request; a booking is only confirmed once they
+        accept it.
+      </p>
     </div>
   )
 }

@@ -5,6 +5,7 @@ import type {
 } from '@/types/models'
 import { formatMoney } from '@/lib/format'
 import { Button } from '@/components/ui/Button'
+import { CheckIcon, ClockIcon } from '@/components/ui/icons'
 
 interface ServicesStepProps {
   business: BusinessDetails
@@ -16,6 +17,15 @@ interface ServicesStepProps {
   onNext: () => void
 }
 
+/**
+ * Step 1 — service selection.
+ *
+ * Presentation only: `toggleService` / `setVariation` / `toggleAddOn` are the
+ * flow hook's existing callbacks, so multi-service selection and the resulting
+ * price/duration totals are computed exactly as before. Prices and durations
+ * shown are the real published catalogue values; the total the customer will be
+ * charged is still decided by the backend.
+ */
 export function ServicesStep({
   business,
   services,
@@ -25,6 +35,7 @@ export function ServicesStep({
   toggleAddOn,
   onNext,
 }: ServicesStepProps) {
+  const selectedCount = selections.length
 
   return (
     <>
@@ -34,10 +45,7 @@ export function ServicesStep({
         update as you add options.
       </p>
 
-      <ul
-        className="services"
-        style={{ listStyle: 'none', padding: 0 }}
-      >
+      <ul className="services">
         {services.map((service) => {
           const selection = selections.find((s) => s.serviceId === service.id)
           const isSelected = Boolean(selection)
@@ -46,13 +54,19 @@ export function ServicesStep({
             <li key={service.id}>
               <article className="card service-card">
                 <div className="service-card__head">
-                  <h3 className="service-card__name">{service.name}</h3>
+                  <div className="service-card__headings">
+                    <h3 className="service-card__name">{service.name}</h3>
+                    <span className="service-card__meta">
+                      <ClockIcon
+                        size={15}
+                        style={{ display: 'inline', verticalAlign: '-2px' }}
+                      />{' '}
+                      {service.baseDurationMinutes} min
+                    </span>
+                  </div>
                   <span className="service-card__priceblock">
                     <span className="service-card__price">
                       {formatMoney(service.basePriceMinor, business.currency)}
-                    </span>
-                    <span className="service-card__meta">
-                      {service.baseDurationMinutes} min
                     </span>
                   </span>
                 </div>
@@ -62,8 +76,7 @@ export function ServicesStep({
                     {service.variations.length > 0 && (
                       <fieldset className="option-group">
                         <legend className="option-group__title">
-                          {service.name} — option
-                          {isSelected ? '' : ' (add the service first)'}
+                          {isSelected ? 'Choose an option' : 'Add the service to choose an option'}
                         </legend>
                         <div className="option-group__list">
                           {service.variations.map((variation) => {
@@ -74,21 +87,26 @@ export function ServicesStep({
                               variation.priceDeltaMinor > 0
                                 ? ` +${formatMoney(variation.priceDeltaMinor, business.currency)}`
                                 : ''
+                            const durationDelta =
+                              variation.durationDeltaMinutes !== 0
+                                ? ` · ${variation.durationDeltaMinutes > 0 ? '+' : ''}${variation.durationDeltaMinutes} min`
+                                : ''
                             return (
-                              <li key={variation.id}>
-                                <button
-                                  type="button"
-                                  className="chip"
-                                  aria-pressed={active}
-                                  disabled={!isSelected}
-                                  onClick={() =>
-                                    setVariation(service.id, active ? null : variation.id)
-                                  }
-                                >
-                                  {variation.name}
-                                  {delta}
-                                </button>
-                              </li>
+                              <button
+                                key={variation.id}
+                                type="button"
+                                className="chip"
+                                aria-pressed={active}
+                                disabled={!isSelected}
+                                onClick={() =>
+                                  setVariation(service.id, active ? null : variation.id)
+                                }
+                              >
+                                {active ? <CheckIcon size={15} /> : null}
+                                {variation.name}
+                                {delta}
+                                {durationDelta}
+                              </button>
                             )
                           })}
                         </div>
@@ -97,30 +115,28 @@ export function ServicesStep({
 
                     {service.addOns.length > 0 && (
                       <fieldset className="option-group">
-                        <legend className="option-group__title">
-                          {service.name} — add-ons
-                        </legend>
+                        <legend className="option-group__title">Add-ons</legend>
                         <div className="option-group__list">
                           {service.addOns.map((addOn) => {
                             const active =
                               isSelected &&
                               selection?.addOnIds.includes(addOn.id)
                             return (
-                              <li key={addOn.id}>
-                                <button
-                                  type="button"
-                                  className="chip"
-                                  aria-pressed={active}
-                                  disabled={!isSelected}
-                                  onClick={() => toggleAddOn(service.id, addOn.id)}
-                                >
-                                  {addOn.name}
-                                  {' · '}
-                                  +{formatMoney(addOn.priceDeltaMinor, business.currency)}
-                                  {' · '}
-                                  +{addOn.durationDeltaMinutes} min
-                                </button>
-                              </li>
+                              <button
+                                key={addOn.id}
+                                type="button"
+                                className="chip"
+                                aria-pressed={active}
+                                disabled={!isSelected}
+                                onClick={() => toggleAddOn(service.id, addOn.id)}
+                              >
+                                {active ? <CheckIcon size={15} /> : null}
+                                {addOn.name}
+                                {' · '}
+                                +{formatMoney(addOn.priceDeltaMinor, business.currency)}
+                                {' · '}
+                                +{addOn.durationDeltaMinutes} min
+                              </button>
                             )
                           })}
                         </div>
@@ -131,11 +147,18 @@ export function ServicesStep({
 
                 <div className="service-card__toggle">
                   <Button
-                    variant="outline"
+                    variant={isSelected ? 'outline' : 'primary'}
                     aria-pressed={isSelected}
                     onClick={() => toggleService(service.id)}
                   >
-                    {isSelected ? 'Remove from booking' : 'Add to booking'}
+                    {isSelected ? (
+                      <>
+                        <CheckIcon size={17} />
+                        Remove from booking
+                      </>
+                    ) : (
+                      'Add to booking'
+                    )}
                   </Button>
                 </div>
               </article>
@@ -144,19 +167,16 @@ export function ServicesStep({
         })}
       </ul>
 
-      <nav
-        className="wizard__nav"
-        aria-label="Services step actions"
-      >
+      <nav className="wizard__nav" aria-label="Services step actions">
         <Button
           variant="primary"
           block={true}
-          disabled={selections.length === 0}
+          disabled={selectedCount === 0}
           onClick={onNext}
         >
-          {selections.length === 0
+          {selectedCount === 0
             ? 'Choose at least one service'
-            : `Continue — ${selections.length} selected`}
+            : `Continue — ${selectedCount} selected`}
         </Button>
       </nav>
     </>

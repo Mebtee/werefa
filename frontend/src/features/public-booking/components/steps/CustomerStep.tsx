@@ -85,6 +85,11 @@ export function CustomerStep({
         )}
       />
 
+      <p className="step-note">
+        Only this business can see what you enter here, together with your phone
+        number so they can reach you about the booking.
+      </p>
+
       <nav className="wizard__nav" aria-label="Your details step actions">
         <Button variant="outline" onClick={onBack}>
           Back

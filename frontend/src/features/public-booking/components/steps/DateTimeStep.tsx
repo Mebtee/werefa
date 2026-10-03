@@ -11,6 +11,7 @@ import type { PublicAvailabilityView } from '@/api/types'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
+import { CalendarIcon, InfoIcon } from '@/components/ui/icons'
 
 interface DateTimeStepProps {
   business: BusinessDetails
@@ -35,6 +36,33 @@ interface DateTimeState {
   clearedReason: boolean
 }
 
+const MONTHS = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+] as const
+
+/**
+ * Splits an already-resolved `YYYY-MM-DD` string for display only. Pure string
+ * work — never `new Date(...)`, which would re-interpret the calendar date in
+ * the browser's own timezone and can shift the day (REQ-165).
+ */
+function partsOf(date: DateString): { day: string; month: string } {
+  return {
+    day: date.slice(8, 10),
+    month: MONTHS[Number(date.slice(5, 7)) - 1] ?? '',
+  }
+}
+
+/**
+ * Step 2 — date and time.
+ *
+ * Availability is whatever the real public availability endpoint returns: one
+ * call per window date to build the date strip, one call for the chosen date to
+ * list its slots, and the backend's own `requiredPrepaidMinor` reported upwards
+ * for the deposit. Dates with no bookable time are rendered disabled rather than
+ * hidden, times are listed in 24-hour form (REQ-224/225), and nothing is
+ * presented as reserved — the copy says so explicitly.
+ */
 export function DateTimeStep({
   business,
   durationMinutes,
@@ -135,59 +163,63 @@ export function DateTimeStep({
     <>
       <h2 className="step-title">Pick a date and time</h2>
       <p className="step-subtitle">
-        Your booking needs {durationMinutes} minutes in total.
+        Your booking needs {durationMinutes} minutes in total. Times are in
+        24-hour format and nothing is reserved until the business confirms.
       </p>
 
-      <Alert tone="info">
-        Times shown may already be taken by other customers. Nothing is reserved
-        until the business confirms your booking.
-      </Alert>
-
-      <h3 className="option-group__title" style={{ marginTop: 'var(--space-4)' }}>
-        Date
-      </h3>
-      {state.datesError ? (
-        <Alert tone="danger" title="Could not load the date list">
-          <Button variant="outline" onClick={retry}>
-            Try again
-          </Button>
-        </Alert>
-      ) : state.dates === null ? (
-        <Spinner label="Loading available dates" />
-      ) : (
-        <div className="date-strip" role="list">
-          {state.dates.map((entry) => {
-            const isSelected = entry.date === date
-            return (
-              <button
-                key={entry.date}
-                type="button"
-                className="chip date-chip"
-                role="listitem"
-                aria-pressed={isSelected}
-                disabled={!entry.hasTimes}
-                onClick={() => selectDate(entry.date)}
-              >
-                <span className="date-chip__weekday">
-                  {weekdayLabel(entry.date)}
-                </span>
-                <span className="date-chip__date">{entry.date}</span>
-              </button>
-            )
-          })}
-        </div>
-      )}
+      <section className="step-section" aria-labelledby="dates-title">
+        <h3 className="option-group__title" id="dates-title">
+          <CalendarIcon
+            size={16}
+            style={{ display: 'inline', verticalAlign: '-2px' }}
+          />{' '}
+          Date
+        </h3>
+        {state.datesError ? (
+          <Alert tone="danger" title="Could not load the date list">
+            <Button variant="outline" onClick={retry}>
+              Try again
+            </Button>
+          </Alert>
+        ) : state.dates === null ? (
+          <Spinner label="Loading available dates" />
+        ) : (
+          <div className="date-strip" role="list">
+            {state.dates.map((entry) => {
+              const isSelected = entry.date === date
+              const { day, month } = partsOf(entry.date)
+              return (
+                <button
+                  key={entry.date}
+                  type="button"
+                  className="chip date-chip"
+                  role="listitem"
+                  aria-pressed={isSelected}
+                  disabled={!entry.hasTimes}
+                  onClick={() => selectDate(entry.date)}
+                >
+                  <span className="date-chip__weekday">
+                    {weekdayLabel(entry.date)}
+                  </span>
+                  <span className="date-chip__day">{day}</span>
+                  <span className="date-chip__month">{month}</span>
+                  <span className="date-chip__date">{entry.date}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </section>
 
       {state.clearedReason && (
-        <Alert tone="warning">
+        <Alert tone="warning" title="Please choose a time again">
           Your previously chosen time is no longer available for this selection.
-          Please pick again.
         </Alert>
       )}
 
       {date && (
-        <>
-          <h3 className="option-group__title" style={{ marginTop: 'var(--space-4)' }}>
+        <section className="step-section" aria-labelledby="times-title">
+          <h3 className="option-group__title" id="times-title">
             Available times on {date}
           </h3>
           {state.slotsError ? (
@@ -219,18 +251,21 @@ export function DateTimeStep({
                   </li>
                 ))}
               </ul>
-              <Alert tone="info">
-                Times are shown in 24-hour format. If a time fits your total
-                duration it is included above; anything else is already booked
-                or blocked.
-              </Alert>
+              <p className="field__hint">
+                <InfoIcon
+                  size={15}
+                  style={{ display: 'inline', verticalAlign: '-2px' }}
+                />{' '}
+                Times that fit your total duration are listed here. Anything
+                missing is already booked or blocked.
+              </p>
             </>
           )}
-        </>
+        </section>
       )}
 
       {!timeValid && (
-        <p className="field__hint" style={{ marginTop: 'var(--space-4)' }}>
+        <p className="field__hint" style={{ marginTop: 'var(--cs-5)' }}>
           Pick an available date and time to continue.
         </p>
       )}

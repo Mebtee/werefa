@@ -25,6 +25,15 @@ interface BookingWizardProps {
   services: readonly Service[]
 }
 
+/**
+ * The booking wizard for `/p/:slug`.
+ *
+ * All state, validation, availability, deposit and submission behaviour comes
+ * from `useBookingFlow` unchanged — this component only decides layout:
+ * a persistent summary beside the steps from 860px up, and a collapsed summary
+ * above the steps below that so the mobile page stays compact. The step order,
+ * the "Book now" heading and the `#book` anchor target are stable.
+ */
 export function BookingWizard({ business, services }: BookingWizardProps) {
   const flow = useBookingFlow(business)
   const lineItems = buildLineItems(services, flow.selections)
@@ -153,7 +162,11 @@ export function BookingWizard({ business, services }: BookingWizardProps) {
       <h2 className="section-title" id="book-title">
         Book now
       </h2>
-      <div className="wizard card" style={{ padding: 'var(--space-4)' }}>
+      <p className="section-lede">
+        Book in a few short steps. You will review everything, and if a deposit
+        is required you will send your payment proof before the request is sent.
+      </p>
+      <div className="wizard card">
         <aside className="wizard__sidebar">
           <BookingSummary
             business={business}
@@ -187,7 +200,7 @@ export function BookingWizard({ business, services }: BookingWizardProps) {
             </div>
           )}
           {showStepper && <Stepper steps={BOOKING_STEP_LABELS} current={flow.step} />}
-          {content}
+          <div className="wizard__panel">{content}</div>
         </div>
       </div>
     </section>
