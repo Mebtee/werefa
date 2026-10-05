@@ -22,10 +22,12 @@
     "prisma:generate": "prisma generate",
     "prisma:dev": "node scripts/prisma-migrate.mjs dev",
     "prisma:deploy": "node scripts/prisma-migrate.mjs deploy",
+    "prisma:resolve": "node scripts/prisma-migrate.mjs resolve",
     "prisma:status": "node scripts/prisma-migrate.mjs status",
     "db:up": "docker compose -f docker-compose.dev.yml up -d --wait",
     "db:down": "docker compose -f docker-compose.dev.yml down",
     "db:provision": "node scripts/db-provision.mjs",
+    "db:provision:roles": "node scripts/db-provision-roles.mjs",
     "db:reset": "node scripts/db-reset.mjs",
     "db:migrate": "node scripts/db-migrate.mjs",
     "postinstall": "prisma generate"
