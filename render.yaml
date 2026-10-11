@@ -1,0 +1,75 @@
+# =============================================================================
+# Werefa — Render Blueprint (STAGING web service only)
+#
+# This file declares ONE web service for the existing NestJS backend
+# (`backend/`). It deliberately does NOT provision a database: the existing
+# Supabase PostgreSQL project is the database provider, and Render must never
+# create or replace it.
+#
+# No secret values belong in this file. Variables a human must supply are
+# declared with `sync: false`; Render prompts for them during Blueprint setup
+# and stores them encrypted.
+#
+# Before rolling out to production:
+#   * confirm the frontend origin in CORS_ORIGINS,
+#   * confirm the Supabase connection strings (session pooler, port 5432),
+#   * decide whether migrations should move to a `preDeployCommand`.
+# Migrations are intentionally NOT wired to run on every deploy/startup.
+#
+# Alternatively, skip this Blueprint and create the service manually in the
+# Render dashboard using the same values (see the handoff guide).
+# =============================================================================
+
+services:
+  - type: web
+    name: werefa-backend-staging
+    runtime: node
+    rootDir: backend
+    # Matches the Supabase project region (eu-central-1) to minimise latency.
+    region: frankfurt
+    # A persistent disk requires a paid instance type; 0.5c-512mb is the
+    # smallest paid web-service plan that supports disks.
+    plan: 0.5c-512mb
+    # Keep auto-deploys off until environment variables are entered and the
+    # first deploy is verified. The product owner can switch this to `commit`.
+    autoDeployTrigger: off
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm run start:prod
+    healthCheckPath: /api/v1/system/health
+    disk:
+      # Durable storage for uploaded payment proofs. The backend writes to
+      # PROOF_STORAGE_DIR (below), which points inside this mount path so
+      # receipts survive restarts and redeploys.
+      name: werefa-proofs
+      mountPath: /var/data/werefa-proofs
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      # PORT is injected by Render; do not set it here.
+      - key: LOG_LEVEL
+        value: info
+      - key: LOG_PRETTY
+        value: 'false'
+      # Render terminates TLS and forwards client IPs via X-Forwarded-*.
+      - key: TRUST_PROXY
+        value: 'true'
+      # Durable proof storage inside the attached disk (absolute path).
+      - key: PROOF_STORAGE_DIR
+        value: /var/data/werefa-proofs
+      # Telegram stays disabled (fail-safe) until the product owner enables it.
+      - key: TELEGRAM_ENABLED
+        value: 'false'
+      # --- Secrets / owner-supplied values: prompted at Blueprint setup ------
+      # Comma-separated exact frontend origin(s); '*' is rejected by the app.
+      - key: CORS_ORIGINS
+        sync: false
+      # Runtime role connection (Supabase SESSION pooler, port 5432).
+      - key: DATABASE_URL
+        sync: false
+      # Migration role connection, only needed if migrations are run from a
+      # Render shell/one-off job. Never used by the web-service process.
+      - key: MIGRATOR_DATABASE_URL
+        sync: false
