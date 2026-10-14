@@ -61,7 +61,7 @@ function OwnerLayoutInner({ children }: { children?: ReactNode }) {
   const subscriptionPage = location.pathname === '/owner/subscription'
   const selectionRequired = businesses.length > 1 && !selectedBusiness
 
-  if (!principal) return <Navigate to="/signin" replace />
+  if (!principal) return <Navigate to="/owner/login" replace />
 
   return (
     <Box
