@@ -102,7 +102,7 @@ export class PrismaUserAuthRepository implements UserAuthRepository {
           recoveryEmail: args.recoveryEmail,
         },
       });
-    });
+    }, { maxWait: 15000, timeout: 30000 });
     return created as User | null;
   }
 

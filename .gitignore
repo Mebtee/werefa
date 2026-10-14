@@ -43,3 +43,8 @@ playwright-report/
 # working tree by `npm run acceptance:static` (scripts/acceptance.mjs), so they
 # must stay present on disk. They are intentionally NOT tracked.
 /docs/
+
+# External reference / local-only directories
+ethioxhub/
+materio-mui/
+screenshootsfromanotherbookingsite/

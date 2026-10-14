@@ -31,6 +31,15 @@ export const authApi = {
     })
   },
 
+  /** Owner sign-in / registration via Google One-Tap credential (from EthioxHub flow). */
+  googleLogin(credential: string) {
+    return apiRequest<LoginResponse>('/auth/google', {
+      method: 'POST',
+      body: { credential },
+      handleUnauthorized: false,
+    })
+  },
+
   /** Idempotent server-side session revocation. */
   logout() {
     return apiRequest<void>('/auth/logout', {

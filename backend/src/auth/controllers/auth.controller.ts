@@ -9,7 +9,7 @@ import { AdminManagementService } from '../../domain/services/admin-management.s
 import { sessionCookieOptions } from '../cookie-utils';
 import { clientInfoFrom } from '../client-info';
 import { Actor, ApiAuthGuard } from '../../api/auth/api-auth.guard';
-import { ChangePasswordDto, LoginDto, RegisterOwnerDto } from './auth.dto';
+import { ChangePasswordDto, GoogleAuthDto, LoginDto, RegisterOwnerDto } from './auth.dto';
 
 /**
  * Authentication endpoints (Prompt 43; REQ-035, REQ-191–193, REQ-218).
@@ -68,6 +68,27 @@ export class AuthController {
     );
     return {
       status: HttpStatus.CREATED,
+      expiresAt: outcome.expiresAt,
+      user: { id: outcome.userId, role: outcome.role },
+    };
+  }
+
+  @Post('google')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Authenticate or register with Google One-Tap / ID token.' })
+  async googleLogin(@Body() dto: GoogleAuthDto, @Req() req: ExpressRequest, @Res({ passthrough: true }) res: Response) {
+    const client: ClientInfo = clientInfoFrom(req);
+    const outcome: LoginOutcome = await this.authService.loginWithGoogle({
+      credential: dto.credential,
+      client,
+    });
+    res.cookie(
+      this.config.authCookieName,
+      outcome.sessionToken,
+      sessionCookieOptions(this.config.nodeEnv, this.config.authSessionTtlHours),
+    );
+    return {
+      status: HttpStatus.OK,
       expiresAt: outcome.expiresAt,
       user: { id: outcome.userId, role: outcome.role },
     };

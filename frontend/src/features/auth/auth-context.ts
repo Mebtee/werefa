@@ -41,6 +41,7 @@ export interface AuthContextValue extends AuthState {
    * present or store any credential client-side.
    */
   register(credentials: AuthCredentials): Promise<boolean>
+  loginWithGoogle(credential: string): Promise<boolean>
   logout(): Promise<void>
   refresh(): Promise<void>
 }

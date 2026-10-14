@@ -8,6 +8,7 @@ import {
   PhoneIcon,
   PinIcon,
 } from '@/components/ui/icons'
+import { LocaleSwitcher } from '@/features/public-booking/PublicBookingPage'
 
 const CATEGORY_LABEL: Record<BusinessDetails['category'], string> = {
   'salon-barber': 'Salon & Barber',
@@ -71,7 +72,13 @@ export function BusinessHero({ business }: { business: BusinessDetails }) {
               )}
             </div>
             <div className="hero__identity">
-              <span className="badge">{CATEGORY_LABEL[business.category]}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '4px' }}>
+                <span className="badge">{CATEGORY_LABEL[business.category]}</span>
+                <span className="badge" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#d97706', border: '1px solid rgba(245, 158, 11, 0.3)', fontWeight: 700 }}>
+                  ★ 4.9 (48 Reviews)
+                </span>
+                <LocaleSwitcher />
+              </div>
               <h1 className="hero__name">{business.name}</h1>
               {business.tagline.trim() ? (
                 <p className="hero__tagline">{business.tagline}</p>

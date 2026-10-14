@@ -14,6 +14,13 @@ export class LoginDto {
   password: string;
 }
 
+export class GoogleAuthDto {
+  @ApiProperty({ description: 'Google Identity Services credential (ID token)' })
+  @IsString()
+  @MinLength(1)
+  credential: string;
+}
+
 /** Owner self-service registration (Prompt 54; REQ-005/009/032). */
 export class RegisterOwnerDto {
   @ApiProperty({ example: 'new-owner@werefa.app' })

@@ -132,7 +132,7 @@ export class PrismaSubscriptionRepository implements SubscriptionRepository {
           reason,
         },
       });
-    });
+    }, { maxWait: 15000, timeout: 30000 });
     return true;
   }
 

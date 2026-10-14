@@ -11,6 +11,7 @@ import { formatMoney } from '@/lib/format'
 import { BookingSummary } from '@/features/public-booking/components/BookingSummary'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
+import { ShieldIcon } from '@/components/ui/icons'
 import { STEP_CUSTOMER, STEP_DATE_TIME, STEP_PAYMENT, STEP_SERVICES } from '@/features/public-booking/state/useBookingFlow'
 
 interface ReviewStepProps {
@@ -67,6 +68,16 @@ export function ReviewStep({
           can confirm the booking. You will pay it in the next step.
         </Alert>
       )}
+
+      <div className="policy-notice-card">
+        <div className="policy-notice-card__header">
+          <ShieldIcon size={16} />
+          <span>Appointment &amp; Arrival Policy</span>
+        </div>
+        <p className="policy-notice-card__body">
+          Please arrive 5 minutes before your scheduled appointment time. If you need to reschedule or cancel, you can manage it anytime via your booking status page.
+        </p>
+      </div>
 
       <nav className="wizard__nav" aria-label="Review step actions">
         <Button variant="outline" onClick={() => goTo(STEP_CUSTOMER)}>

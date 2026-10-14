@@ -59,8 +59,22 @@ export class TelegramConnectionService {
 
     // The phone must have a real booking in this business — nobody can start
     // a chat with a business unless they have an appointment there (REQ-056).
+    const phoneVariants = [customerPhone];
+    const cleaned = customerPhone.replace(/\s+/g, '');
+    if (!phoneVariants.includes(cleaned)) phoneVariants.push(cleaned);
+    if (cleaned.startsWith('+251')) {
+      const local = '0' + cleaned.slice(4);
+      if (!phoneVariants.includes(local)) phoneVariants.push(local);
+    } else if (cleaned.startsWith('0')) {
+      const intl = '+251' + cleaned.slice(1);
+      if (!phoneVariants.includes(intl)) phoneVariants.push(intl);
+    }
+
     const hasBooking = await this.prisma.booking.findFirst({
-      where: { businessId: business.id, customerPhone },
+      where: {
+        businessId: business.id,
+        customerPhone: { in: phoneVariants },
+      },
       select: { id: true },
     });
     if (!hasBooking) throw domainErrors.telegramTokenInvalid('No booking found for this phone.');
@@ -218,7 +232,7 @@ export class TelegramConnectionService {
       } catch (err) {
         throw connectionConflictOr(err); // P2002 = chat already bound elsewhere
       }
-    });
+    }, { maxWait: 15000, timeout: 30000 });
 
     return {
       businessId: connection.businessId ?? token.businessId,

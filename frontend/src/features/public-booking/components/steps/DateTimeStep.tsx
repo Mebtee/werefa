@@ -13,6 +13,8 @@ import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { CalendarIcon, InfoIcon } from '@/components/ui/icons'
 
+import { CalendarDialog } from '@/features/public-booking/components/CalendarDialog'
+
 interface DateTimeStepProps {
   business: BusinessDetails
   durationMinutes: number
@@ -75,6 +77,7 @@ export function DateTimeStep({
   onNext,
   onDeposit,
 }: DateTimeStepProps) {
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false)
   const [state, setState] = useState<DateTimeState>({
     dates: null,
     slots: null,
@@ -83,6 +86,13 @@ export function DateTimeStep({
     retryToken: 0,
     clearedReason: false,
   })
+
+  const formattedActiveDate = useMemo(() => {
+    if (!date) return 'Choose a date from calendar'
+    const parts = partsOf(date)
+    const year = date.slice(0, 4)
+    return `${parts.month} ${parts.day}, ${year}`
+  }, [date])
 
   // Wire selections match the backend body exactly (v1: no client duration —
   // the API computes the appointment's duration/price itself, REQ-074).
@@ -156,6 +166,27 @@ export function DateTimeStep({
 
   const retry = () => setState((s) => ({ ...s, retryToken: s.retryToken + 1 }))
 
+  const timePeriods = useMemo(() => {
+    if (!state.slots) return []
+    const morning = state.slots.filter((s) => {
+      const h = parseInt(s.split(':')[0], 10)
+      return !isNaN(h) && h < 12
+    })
+    const afternoon = state.slots.filter((s) => {
+      const h = parseInt(s.split(':')[0], 10)
+      return !isNaN(h) && h >= 12 && h < 17
+    })
+    const evening = state.slots.filter((s) => {
+      const h = parseInt(s.split(':')[0], 10)
+      return !isNaN(h) && h >= 17
+    })
+    return [
+      { key: 'morning', label: 'Morning', icon: '🌅', note: 'Before 12:00', slots: morning },
+      { key: 'afternoon', label: 'Afternoon', icon: '☀️', note: '12:00 – 17:00', slots: afternoon },
+      { key: 'evening', label: 'Evening', icon: '🌙', note: 'After 17:00', slots: evening },
+    ].filter((p) => p.slots.length > 0)
+  }, [state.slots])
+
   const timeValid =
     date !== null && time !== null && state.slots !== null && state.slots.includes(time)
 
@@ -173,8 +204,39 @@ export function DateTimeStep({
             size={16}
             style={{ display: 'inline', verticalAlign: '-2px' }}
           />{' '}
-          Date
+          Select Date
         </h3>
+
+        <div
+          className="date-input-trigger"
+          onClick={() => setIsCalendarOpen(true)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              setIsCalendarOpen(true)
+            }
+          }}
+          aria-label="Open full month calendar picker"
+        >
+          <div className="date-input-trigger__text">
+            <span className="date-input-trigger__label">Selected Appointment Date</span>
+            <span className="date-input-trigger__value">{formattedActiveDate}</span>
+          </div>
+          <div className="date-input-trigger__icon" aria-hidden="true">
+            📅
+          </div>
+        </div>
+
+        <CalendarDialog
+          isOpen={isCalendarOpen}
+          onClose={() => setIsCalendarOpen(false)}
+          selectedDate={date}
+          onSelectDate={(newDate) => selectDate(newDate as DateString)}
+          availableDates={state.dates ? state.dates.filter((d) => d.hasTimes).map((d) => d.date) : []}
+        />
+
         {state.datesError ? (
           <Alert tone="danger" title="Could not load the date list">
             <Button variant="outline" onClick={retry}>
@@ -237,20 +299,30 @@ export function DateTimeStep({
             </Alert>
           ) : (
             <>
-              <ul className="time-grid">
-                {state.slots.map((slot) => (
-                  <li key={slot} className="time-grid__item">
-                    <button
-                      type="button"
-                      className="chip"
-                      aria-pressed={slot === time}
-                      onClick={() => selectTime(slot)}
-                    >
-                      {slot}
-                    </button>
-                  </li>
-                ))}
-              </ul>
+              {timePeriods.map((period) => (
+                <div key={period.key} className="time-period-group">
+                  <div className="time-period-header">
+                    <span className="time-period-icon" aria-hidden="true">{period.icon}</span>
+                    <span className="time-period-label">{period.label}</span>
+                    <span className="time-period-note">{period.note}</span>
+                    <span className="time-period-count">{period.slots.length} available</span>
+                  </div>
+                  <ul className="time-grid">
+                    {period.slots.map((slot) => (
+                      <li key={slot} className="time-grid__item">
+                        <button
+                          type="button"
+                          className="chip"
+                          aria-pressed={slot === time}
+                          onClick={() => selectTime(slot)}
+                        >
+                          {slot}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
               <p className="field__hint">
                 <InfoIcon
                   size={15}

@@ -171,6 +171,76 @@ export class AuthService {
     return this.issueSession(created.id, 'OWNER', input.client);
   }
 
+  /**
+   * Google Sign-In authentication (adapted from EthioxHub).
+   * Verifies the Google ID token, finds or creates an OWNER user, and issues a session.
+   */
+  async loginWithGoogle(input: { credential: string; client: ClientInfo }): Promise<LoginOutcome> {
+    const { OAuth2Client } = await import('google-auth-library');
+    const googleClient = new OAuth2Client(this.config.googleClientId ?? undefined);
+    let payload;
+    try {
+      const ticket = await googleClient.verifyIdToken({
+        idToken: input.credential,
+        audience: this.config.googleClientId ?? undefined,
+      });
+      payload = ticket.getPayload();
+    } catch {
+      throw invalidCredentials();
+    }
+
+    if (!payload?.email) {
+      throw invalidCredentials();
+    }
+
+    const email = payload.email.toLowerCase().trim();
+    let user = await this.userRepo.findByEmail(email);
+
+    if (!user) {
+      const randomPassword = crypto.randomUUID() + crypto.randomUUID();
+      const passwordHash = await Argon2PasswordHasher.hash(randomPassword);
+      const created = await this.userRepo.createOwner({
+        id: crypto.randomUUID(),
+        email,
+        passwordHash,
+      });
+      if (!created) throw genericConflict();
+      user = await this.userRepo.findByEmail(email);
+      if (!user) throw genericConflict();
+
+      await this.securityRepo.create({
+        userId: user.id,
+        type: 'OWNER_REGISTERED',
+        ip: input.client.ip,
+        device: input.client.device,
+        browser: input.client.browser,
+        result: 'SUCCESS',
+      });
+    } else {
+      if (user.isDeactivated) {
+        await this.recordFailure(user.id, 'DEACTIVATED', input.client);
+        throw invalidCredentials();
+      }
+      if (user.isLockedUntil && user.isLockedUntil.getTime() > this.clock.now().getTime()) {
+        await this.recordFailure(user.id, 'ACCOUNT_LOCKED', input.client);
+        throw accountLocked();
+      }
+    }
+
+    await this.userRepo.recordSuccessfulLogin(user.id, this.clock.now());
+
+    await this.securityRepo.create({
+      userId: user.id,
+      type: 'LOGIN_SUCCESS',
+      ip: input.client.ip,
+      device: input.client.device,
+      browser: input.client.browser,
+      result: 'SUCCESS',
+    });
+
+    return this.issueSession(user.id, user.role, input.client);
+  }
+
   /** Create a server-side session row and return the opaque token. */
   async issueSession(userId: string, role: UserRole, client: ClientInfo): Promise<LoginOutcome> {
     const now = this.clock.now();

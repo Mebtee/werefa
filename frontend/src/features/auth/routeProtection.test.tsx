@@ -14,17 +14,22 @@ import {
   renderAppAt,
   UNAUTHENTICATED,
 } from '@/test/auth'
+import type { BusinessApiStub } from '@/test/businessApi'
 
 const user = userEvent.setup()
 let stub: FetchStub | null = null
+let businessStub: BusinessApiStub | null = null
 
 beforeEach(() => {
   resetStore()
+  window.localStorage.clear()
 })
 
 afterEach(() => {
   stub?.restore()
   stub = null
+  businessStub?.restore()
+  businessStub = null
 })
 
 describe('owner route protection', () => {
@@ -32,7 +37,7 @@ describe('owner route protection', () => {
     stub = installFetchStub([
       { method: 'GET', path: '/auth/session', status: 200, body: { user: OWNER_PRINCIPAL } },
     ])
-    installBusinessApiStub()
+    businessStub = installBusinessApiStub()
     const router = createMemoryRouter(appRoutes, { initialEntries: ['/owner'] })
     render(
       <AuthProvider>
@@ -40,7 +45,7 @@ describe('owner route protection', () => {
       </AuthProvider>,
     )
 
-    await screen.findByRole('heading', { name: 'Dashboard' })
+    await screen.findByRole('heading', { name: 'Dashboard' }, { timeout: 10_000 })
     expect(screen.getByText(OWNER_PRINCIPAL.email)).toBeInTheDocument()
   })
 

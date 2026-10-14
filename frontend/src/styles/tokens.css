@@ -1,33 +1,45 @@
 :root {
-  /* Neutral palette */
-  --color-bg: #f6f4f1;
-  --color-surface: #ffffff;
-  --color-surface-muted: #f0ede8;
-  --color-text: #221e1a;
-  --color-text-muted: #6b635b;
-  --color-border: #e3ddd5;
-  --color-border-strong: #c9c0b5;
+  /* --- Midnight Glass Canvas & Frosted Surfaces --- */
+  --color-bg: #090d16;
+  --color-surface: rgba(18, 26, 44, 0.72);
+  --color-surface-hover: rgba(28, 38, 64, 0.85);
+  --color-surface-muted: rgba(255, 255, 255, 0.05);
+  --color-surface-elevated: rgba(24, 34, 56, 0.88);
+  --color-text: #f8fafc;
+  --color-text-muted: #94a3b8;
+  --color-border: rgba(255, 255, 255, 0.1);
+  --color-border-strong: rgba(255, 255, 255, 0.2);
 
-  /* Brand accent — overridden per business on .page-root */
-  --accent: #b4457f;
-  --accent-strong: #9a3868;
-  --accent-soft: color-mix(in srgb, var(--accent) 12%, #ffffff);
+  /* --- Brand Accent (Modern Azure / Electric Indigo) --- */
+  --accent: #3b82f6;
+  --accent-strong: #60a5fa;
+  --accent-soft: rgba(59, 130, 246, 0.16);
+  --accent-glow: 0 0 24px rgba(59, 130, 246, 0.45);
 
-  /* Feedback tones */
-  --color-success: #1e7f4f;
-  --color-success-bg: #e9f6ef;
-  --color-warning: #9a6a12;
-  --color-warning-bg: #fdf3e1;
-  --color-danger: #c02f2f;
-  --color-danger-bg: #fcede9;
-  --color-info: #2f6db3;
-  --color-info-bg: #e9f1fb;
+  /* --- Glassmorphic Visual Tokens --- */
+  --glass-bg: rgba(18, 26, 44, 0.72);
+  --glass-bg-subtle: rgba(255, 255, 255, 0.04);
+  --glass-blur: blur(16px);
+  --glass-blur-lg: blur(24px);
+  --glass-border: 1px solid rgba(255, 255, 255, 0.1);
+  --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.38), inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+  --glass-shadow-lg: 0 16px 48px 0 rgba(0, 0, 0, 0.5), inset 0 1px 0 0 rgba(255, 255, 255, 0.15);
 
-  --focus-ring: color-mix(in srgb, var(--accent) 45%, transparent);
+  /* --- Feedback Tones (Vibrant, high-contrast on glass) --- */
+  --color-success: #10b981;
+  --color-success-bg: rgba(16, 185, 129, 0.16);
+  --color-warning: #f59e0b;
+  --color-warning-bg: rgba(245, 158, 11, 0.16);
+  --color-danger: #ef4444;
+  --color-danger-bg: rgba(239, 68, 68, 0.16);
+  --color-info: #0ea5e9;
+  --color-info-bg: rgba(14, 165, 233, 0.16);
 
-  /* Type */
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
-    Arial, sans-serif;
+  --focus-ring: rgba(59, 130, 246, 0.5);
+
+  /* --- Modern Google Fonts Typography --- */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-display: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --text-xs: 12px;
   --text-sm: 14px;
   --text-base: 16px;
@@ -35,7 +47,7 @@
   --text-xl: 24px;
   --text-2xl: 32px;
 
-  /* Spacing */
+  /* --- Spacing --- */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -45,15 +57,30 @@
   --space-7: 48px;
   --space-8: 64px;
 
-  /* Shape */
-  --radius-sm: 6px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
+  /* --- Radius --- */
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
   --radius-pill: 999px;
 
-  --shadow-sm: 0 1px 2px rgb(34 30 26 / 0.08);
-  --shadow-lg: 0 10px 28px rgb(34 30 26 / 0.12);
+  /* --- Shadows --- */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.25);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.45);
 
-  --container: 1060px;
-  --content-max: 720px;
+  --container: 1100px;
+  --content-max: 760px;
+}
+
+[data-theme="light"] {
+  --color-bg: #f4f5fa;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f8f9fd;
+  --color-surface-muted: rgba(46, 38, 61, 0.04);
+  --color-surface-elevated: #ffffff;
+  --color-text: #2e263d;
+  --color-text-muted: #6d6777;
+  --color-border: rgba(46, 38, 61, 0.12);
+  --color-border-strong: rgba(46, 38, 61, 0.22);
+  --glass-shadow: 0 2px 10px 0 rgba(46, 38, 61, 0.08);
+  --glass-shadow-lg: 0 6px 20px 0 rgba(46, 38, 61, 0.12);
 }

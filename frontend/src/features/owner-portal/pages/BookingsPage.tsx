@@ -256,12 +256,34 @@ export function BookingsPage() {
                     className="card card--padded booking-card"
                     to={`/owner/bookings/${booking.id}`}
                   >
-                    <span className="booking-card__main">
-                      <strong className="booking-card__name">
-                        {booking.customer.name}
-                      </strong>
-                      <span className="booking-card__meta">
-                        {booking.customer.phone}
+                    <span className="booking-card__main" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '14px' }}>
+                      <span
+                        className="booking-avatar"
+                        style={{
+                          width: '42px',
+                          height: '42px',
+                          borderRadius: '50%',
+                          background: 'linear-gradient(135deg, rgba(115, 103, 240, 0.2), rgba(115, 103, 240, 0.08))',
+                          color: 'var(--accent, #7367f0)',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontWeight: 700,
+                          fontSize: '14px',
+                          flexShrink: 0,
+                          border: '1px solid rgba(115, 103, 240, 0.25)',
+                        }}
+                        aria-hidden="true"
+                      >
+                        {booking.customer.name.slice(0, 2).toUpperCase()}
+                      </span>
+                      <span style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
+                        <strong className="booking-card__name">
+                          {booking.customer.name}
+                        </strong>
+                        <span className="booking-card__meta">
+                          {booking.customer.phone}
+                        </span>
                       </span>
                     </span>
                     <span className="booking-card__time">
