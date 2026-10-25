@@ -1,11 +1,13 @@
 /**
  * Minimal cookie utilities (Prompt 43).
  *
- * Session cookies are httpOnly + SameSite=Lax + Secure (in production).
+ * Session cookies are httpOnly + SameSite=Lax + Secure (in production) by default.
  * No external cookie-parser dependency: Express core's res.cookie() is used
  * for setting; this module provides a minimal internal parser to read the
  * Cookie header without adding a framework middleware.
  */
+
+export type SessionSameSite = 'lax' | 'strict' | 'none';
 
 /**
  * Parse a raw `Cookie` header string into a name→value map.
@@ -30,13 +32,39 @@ export function parseCookieHeader(raw: string | undefined): Record<string, strin
 
 /**
  * Resolve session cookie options based on the environment.
- * Secure=true only in production; SameSite=Lax for CSRF protection on
- * cross-origin navigations; HttpOnly prevents JS access.
+ * Secure defaults to true only in production; HttpOnly is always true.
+ * SameSite defaults to 'lax' for CSRF protection.
  */
-export function sessionCookieOptions(nodeEnv: string, ttlHours: number) {
+export function sessionCookieOptions(
+  nodeEnv: string,
+  ttlHours: number,
+  sameSite: SessionSameSite = 'lax',
+): {
+  httpOnly: true;
+  sameSite: 'lax' | 'strict' | 'none';
+  secure: boolean;
+  maxAge: number;
+  path: string;
+} {
+  const normalizedSameSite = sameSite === 'none' ? 'none' : sameSite === 'strict' ? 'strict' : 'lax';
+
+  // Browsers require Secure=true when SameSite=None.
+  if (normalizedSameSite === 'none') {
+    if (nodeEnv !== 'production') {
+      throw new Error('SameSite=None requires Secure=true; only allowed in production.');
+    }
+    return {
+      httpOnly: true as const,
+      sameSite: 'none' as const,
+      secure: true,
+      maxAge: ttlHours * 60 * 60 * 1000,
+      path: '/',
+    };
+  }
+
   return {
     httpOnly: true as const,
-    sameSite: 'lax' as const,
+    sameSite: normalizedSameSite,
     secure: nodeEnv === 'production',
     maxAge: ttlHours * 60 * 60 * 1000,
     path: '/',
