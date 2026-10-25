@@ -29,16 +29,42 @@ describe('parseCookieHeader', () => {
 });
 
 describe('sessionCookieOptions', () => {
-  it('sets secure to true in production', () => {
+  it('sets secure to true in production with default SameSite=Lax', () => {
     const opts = sessionCookieOptions('production', 12);
     expect(opts.secure).toBe(true);
     expect(opts.httpOnly).toBe(true);
     expect(opts.sameSite).toBe('lax');
     expect(opts.maxAge).toBe(12 * 60 * 60 * 1000);
+    expect(opts.path).toBe('/');
   });
 
-  it('sets secure to false in development', () => {
+  it('sets secure to false in development with default SameSite=Lax', () => {
     const opts = sessionCookieOptions('development', 1);
     expect(opts.secure).toBe(false);
+    expect(opts.sameSite).toBe('lax');
+    expect(opts.httpOnly).toBe(true);
+    expect(opts.path).toBe('/');
+  });
+
+  it('supports explicit SameSite=None only in production with Secure=true', () => {
+    const opts = sessionCookieOptions('production', 12, 'none');
+    expect(opts.sameSite).toBe('none');
+    expect(opts.secure).toBe(true);
+    expect(opts.httpOnly).toBe(true);
+    expect(opts.path).toBe('/');
+  });
+
+  it('supports SameSite=Strict when explicitly configured', () => {
+    const opts = sessionCookieOptions('production', 6, 'strict');
+    expect(opts.sameSite).toBe('strict');
+    expect(opts.secure).toBe(true);
+    expect(opts.httpOnly).toBe(true);
+  });
+
+  it('rejects SameSite=None in non-production environments', () => {
+    expect(() => sessionCookieOptions('development', 12, 'none')).toThrow(
+      /SameSite=None requires Secure=true/,
+    );
+    expect(() => sessionCookieOptions('test', 12, 'none')).toThrow(/SameSite=None requires Secure=true/);
   });
 });
