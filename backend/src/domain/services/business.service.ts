@@ -63,20 +63,23 @@ export class BusinessService {
     // Reads of the new row happen AFTER commit: rows written inside the
     // interactive transaction are not visible through the outer client.
     try {
-      const businessId = await this.prisma.$transaction(async (tx) => {
-        const business = await this.businessRepo.createForOwner(tx, {
-          publicSlug: slug,
-          categoryCode: input.categoryCode,
-          name: input.name,
-          description: input.description,
-          address: input.address,
-          phonePublic: input.phonePublic,
-          ownerId: ctx.actorUserId!,
-          bookingIntervalMinutes: interval,
-        });
-        await this.subscriptionRepo.ensureTrialAtCreation(tx, { businessId: business.id, now: this.clock.now() });
-        return business.id;
-      });
+      const businessId = await this.prisma.$transaction(
+        async (tx) => {
+          const business = await this.businessRepo.createForOwner(tx, {
+            publicSlug: slug,
+            categoryCode: input.categoryCode,
+            name: input.name,
+            description: input.description,
+            address: input.address,
+            phonePublic: input.phonePublic,
+            ownerId: ctx.actorUserId!,
+            bookingIntervalMinutes: interval,
+          });
+          await this.subscriptionRepo.ensureTrialAtCreation(tx, { businessId: business.id, now: this.clock.now() });
+          return business.id;
+        },
+        { maxWait: 15000, timeout: 30000 },
+      );
       const full = await this.businessRepo.findById(businessId);
       if (!full) throw domainErrors.businessNotFound();
       return full;

@@ -108,6 +108,27 @@ export function AuthProvider({ children, initialState }: AuthProviderProps) {
     }
   }, [])
 
+  const loginWithGoogle = useCallback(async (credential: string) => {
+    setState({ status: 'authenticating', principal: null, error: null })
+    try {
+      const { data } = await authApi.googleLogin(credential)
+      setState({
+        status: 'authenticated',
+        principal: {
+          id: data.user.id,
+          role: data.user.role,
+          email: '',
+        },
+        error: null,
+      })
+      void refresh()
+      return true
+    } catch (error) {
+      setState({ status: 'error', principal: null, error: toUserMessage(error) })
+      return false
+    }
+  }, [refresh])
+
   const logout = useCallback(async () => {
     try {
       await authApi.logout()
@@ -118,8 +139,8 @@ export function AuthProvider({ children, initialState }: AuthProviderProps) {
   }, [])
 
   const value = useMemo<AuthContextValue>(
-    () => ({ ...state, login, logout, register, refresh }),
-    [state, login, logout, register, refresh],
+    () => ({ ...state, login, logout, register, loginWithGoogle, refresh }),
+    [state, login, logout, register, loginWithGoogle, refresh],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

@@ -1,5 +1,7 @@
-import { Fragment, type ReactNode } from 'react'
-import { NavLink, Navigate, Outlet, useLocation } from 'react-router-dom'
+import { Fragment, useState, type ReactNode } from 'react'
+import { Navigate, Outlet, useLocation } from 'react-router-dom'
+import Box from '@mui/material/Box'
+import { ThemeModeProvider, useThemeMode } from '@/theme/ThemeModeContext'
 import { useAuth } from '@/features/auth/useAuth'
 import { OwnerBusinessProvider } from '@/features/owner-portal/state/OwnerBusinessProvider'
 import { useOwnerBusinessContext } from '@/features/owner-portal/state/OwnerBusinessContext'
@@ -7,6 +9,8 @@ import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { SubscriptionWarning } from './SubscriptionWarning'
+import { MaterioSidebar } from './materio/MaterioSidebar'
+import { MaterioNavbar } from './materio/MaterioNavbar'
 
 function BusinessSelection({ onSelect }: { onSelect: (businessId: string) => void }) {
   const { businesses } = useOwnerBusinessContext()
@@ -38,15 +42,7 @@ function BusinessSelection({ onSelect }: { onSelect: (businessId: string) => voi
   )
 }
 
-export function OwnerLayoutApp() {
-  return (
-    <OwnerBusinessProvider>
-      <OwnerLayout />
-    </OwnerBusinessProvider>
-  )
-}
-
-export function OwnerLayout({ children }: { children?: ReactNode }) {
+function OwnerLayoutInner({ children }: { children?: ReactNode }) {
   const { principal, logout } = useAuth()
   const {
     businesses,
@@ -57,143 +53,170 @@ export function OwnerLayout({ children }: { children?: ReactNode }) {
     reload,
   } = useOwnerBusinessContext()
   const location = useLocation()
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const { mode } = useThemeMode()
+  const isLight = mode === 'light'
+
   const creatingBusiness = location.pathname === '/owner/business/new'
   const subscriptionPage = location.pathname === '/owner/subscription'
   const selectionRequired = businesses.length > 1 && !selectedBusiness
 
-  if (!principal) return <Navigate to="/signin" replace />
+  if (!principal) return <Navigate to="/owner/login" replace />
 
   return (
-    <div className="owner-shell">
-      <header className="owner-header">
-        <div className="owner-header__inner">
-          <div className="owner-brand">
-            <span className="owner-brand__mark" aria-hidden="true">
-              W
-            </span>
-            <span className="owner-brand__text">
-              <span className="owner-brand__name">Werefa</span>
-              <span className="owner-brand__sub">Owner workspace</span>
-            </span>
-          </div>
+    <Box
+      className="owner-shell"
+      sx={{
+        display: 'flex',
+        minHeight: '100vh',
+        bgcolor: isLight ? '#F4F5FA' : '#28243D',
+        transition: 'background-color 0.2s ease',
+      }}
+    >
+      {/* Desktop Sidebar (Permanent, 260px) */}
+      <Box
+        sx={{
+          display: { xs: 'none', md: 'block' },
+          width: 260,
+          flexShrink: 0,
+          height: '100vh',
+          position: 'sticky',
+          top: 0,
+          zIndex: 1200,
+          bgcolor: isLight ? '#FFFFFF' : '#312D4B',
+          transition: 'background-color 0.2s ease',
+        }}
+      >
+        <MaterioSidebar selectedBusiness={selectedBusiness} />
+      </Box>
 
-          <nav className="owner-nav" aria-label="Owner portal">
-            <ul>
-              <li>
-                <NavLink className="owner-nav__link" to="/owner">
-                  Dashboard
-                </NavLink>
-              </li>
-              <li>
-                <NavLink className="owner-nav__link" to="/owner/services">
-                  Services
-                </NavLink>
-              </li>
-              <li>
-                <NavLink className="owner-nav__link" to="/owner/schedule">
-                  Schedule
-                </NavLink>
-              </li>
-              <li>
-                <NavLink className="owner-nav__link" to="/owner/bookings">
-                  Bookings
-                </NavLink>
-              </li>
-              <li>
-                <NavLink className="owner-nav__link" to="/owner/subscription">
-                  Subscription
-                </NavLink>
-              </li>
-              <li>
-                <NavLink className="owner-nav__link" to="/owner/business">
-                  Business
-                </NavLink>
-              </li>
-            </ul>
-          </nav>
+      {/* Mobile Sidebar (Slide-over Drawer) */}
+      {mobileOpen && (
+        <Box
+          sx={{
+            display: { xs: 'block', md: 'none' },
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1300,
+          }}
+        >
+          {/* Backdrop */}
+          <Box
+            onClick={() => setMobileOpen(false)}
+            sx={{
+              position: 'fixed',
+              inset: 0,
+              bgcolor: 'rgba(0, 0, 0, 0.65)',
+              backdropFilter: 'blur(4px)',
+            }}
+          />
+          {/* Slide drawer panel */}
+          <Box
+            sx={{
+              position: 'fixed',
+              top: 0,
+              bottom: 0,
+              left: 0,
+              width: 260,
+              bgcolor: isLight ? '#FFFFFF' : '#312D4B',
+              borderRight: isLight ? '1px solid rgba(46, 38, 61, 0.12)' : '1px solid rgba(231, 227, 252, 0.12)',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+              zIndex: 1301,
+            }}
+          >
+            <MaterioSidebar
+              selectedBusiness={selectedBusiness}
+              onCloseMobile={() => setMobileOpen(false)}
+            />
+          </Box>
+        </Box>
+      )}
 
-          {businesses.length > 0 && (
-            <label className="owner-business-switcher">
-              <span>Active business</span>
-              <select
-                value={selectedBusiness?.id ?? ''}
-                disabled={loading}
-                onChange={(event) => {
-                  if (event.target.value) selectBusiness(event.target.value)
-                }}
-              >
-                <option value="" disabled>
-                  Select a business
-                </option>
-                {businesses.map((business) => (
-                  <option key={business.id} value={business.id}>
-                    {business.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+      {/* Main Content Area */}
+      <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <MaterioNavbar
+          principal={principal}
+          businesses={businesses}
+          selectedBusiness={selectedBusiness}
+          loading={loading}
+          onSelectBusiness={selectBusiness}
+          onToggleMobileMenu={() => setMobileOpen((prev) => !prev)}
+          onLogout={logout}
+        />
+
+        <Box
+          component="main"
+          className="owner-main"
+          sx={{
+            flex: 1,
+            p: { xs: 2, sm: 3, md: 4 },
+            maxWidth: 1440,
+            width: '100%',
+            margin: '0 auto',
+          }}
+        >
+          {loading ? (
+            <div className="owner-load">
+              <Spinner label="Loading businesses…" />
+            </div>
+          ) : error ? (
+            <Alert tone="danger" title="Business workspace unavailable">
+              <p>{error}</p>
+              <p>Check your connection and try again.</p>
+              <Button type="button" onClick={() => void reload()}>
+                Retry
+              </Button>
+            </Alert>
+          ) : businesses.length === 0 && !creatingBusiness ? (
+            <Navigate to="/owner/business/new" replace />
+          ) : businesses.length === 0 && creatingBusiness ? (
+            <Outlet />
+          ) : selectionRequired ? (
+            <BusinessSelection onSelect={selectBusiness} />
+          ) : (
+            selectedBusiness && (
+              <Fragment key={selectedBusiness.id}>
+                {!subscriptionPage && <SubscriptionWarning businessId={selectedBusiness.id} />}
+                {children ?? <Outlet />}
+              </Fragment>
+            )
           )}
+        </Box>
 
-          <div className="owner-session">
-            <span className="owner-session__owner">{principal.email}</span>
-            {selectedBusiness && (
-              <a
-                className="owner-session__public"
-                href={`/p/${selectedBusiness.slug}`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                View public page
-              </a>
-            )}
-            <button
-              type="button"
-              className="owner-session__signout"
-              onClick={() => {
-                logout()
-              }}
-            >
-              Sign out
-            </button>
+        <Box
+          component="footer"
+          className="owner-footer"
+          sx={{
+            py: 2.5,
+            px: { xs: 2, md: 4 },
+            borderTop: isLight ? '1px solid rgba(46, 38, 61, 0.08)' : '1px solid rgba(231, 227, 252, 0.08)',
+            color: isLight ? 'rgba(46, 38, 61, 0.6)' : 'rgba(231, 227, 252, 0.5)',
+            fontSize: '0.8125rem',
+            transition: 'color 0.2s ease, border-color 0.2s ease',
+          }}
+        >
+          <div className="shell" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+            <p style={{ margin: 0 }}>Manage your business, schedule, bookings, and subscription in one place.</p>
+            <p style={{ margin: 0 }}>Werefa owner portal</p>
           </div>
-        </div>
-      </header>
+        </Box>
+      </Box>
+    </Box>
+  )
+}
 
-      <main className="owner-main">
-        {loading ? (
-          <div className="owner-load">
-            <Spinner label="Loading businesses…" />
-          </div>
-        ) : error ? (
-          <Alert tone="danger" title="Business workspace unavailable">
-            <p>{error}</p>
-            <p>Check your connection and try again.</p>
-            <Button type="button" onClick={() => void reload()}>
-              Retry
-            </Button>
-          </Alert>
-        ) : businesses.length === 0 && !creatingBusiness ? (
-          <Navigate to="/owner/business/new" replace />
-        ) : businesses.length === 0 && creatingBusiness ? (
-          <Outlet />
-        ) : selectionRequired ? (
-          <BusinessSelection onSelect={selectBusiness} />
-        ) : (
-          selectedBusiness && (
-            <Fragment key={selectedBusiness.id}>
-              {!subscriptionPage && <SubscriptionWarning businessId={selectedBusiness.id} />}
-              {children ?? <Outlet />}
-            </Fragment>
-          )
-        )}
-      </main>
+export function OwnerLayout({ children }: { children?: ReactNode }) {
+  return (
+    <ThemeModeProvider>
+      <OwnerLayoutInner>{children}</OwnerLayoutInner>
+    </ThemeModeProvider>
+  )
+}
 
-      <footer className="owner-footer">
-        <div className="shell">
-          <p>Manage your business, schedule, bookings, and subscription in one place.</p>
-          <p>Werefa owner portal</p>
-        </div>
-      </footer>
-    </div>
+export function OwnerLayoutApp() {
+  return (
+    <OwnerBusinessProvider>
+      <OwnerLayout />
+    </OwnerBusinessProvider>
   )
 }

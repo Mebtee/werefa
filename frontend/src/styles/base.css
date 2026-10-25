@@ -19,8 +19,29 @@ body {
   line-height: 1.5;
   color: var(--color-text);
   background: var(--color-bg);
+  background-image: 
+    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(59, 130, 246, 0.16), transparent 60%),
+    radial-gradient(circle at 10% 25%, rgba(139, 92, 246, 0.12), transparent 35%),
+    radial-gradient(circle at 90% 75%, rgba(236, 72, 153, 0.08), transparent 40%),
+    radial-gradient(circle at 50% 90%, rgba(16, 185, 129, 0.06), transparent 45%);
+  background-attachment: fixed;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
 }
 
 img,
@@ -53,14 +74,23 @@ ol {
 
 h1,
 h2,
-h3 {
+h3,
+h4 {
+  font-family: var(--font-display);
   line-height: 1.2;
   text-wrap: balance;
+  letter-spacing: -0.02em;
+  font-weight: 700;
 }
 
 a {
   color: var(--accent-strong);
   text-underline-offset: 3px;
+  transition: color 0.15s ease;
+}
+
+a:hover {
+  color: #93c5fd;
 }
 
 /* Visible keyboard focus everywhere (accessible) */

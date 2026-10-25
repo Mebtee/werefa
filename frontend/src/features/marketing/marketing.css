@@ -8,23 +8,23 @@
  * ------------------------------------------------------------------------- */
 
 .mkt {
-  --mkt-ink: #241d28;
-  --mkt-ink-soft: #56505c;
-  --mkt-ink-faint: #7c7483;
-  --mkt-bg: #faf8f6;
-  --mkt-bg-tint: #f4eff1;
-  --mkt-surface: #ffffff;
-  --mkt-border: #ece3e6;
-  --mkt-border-strong: #ddd0d5;
-  --mkt-accent: #b4457f;
-  --mkt-accent-strong: #9a3868;
-  --mkt-accent-soft: #fbeef5;
+  --mkt-ink: #f8fafc;
+  --mkt-ink-soft: #94a3b8;
+  --mkt-ink-faint: #64748b;
+  --mkt-bg: #090d16;
+  --mkt-bg-tint: rgba(18, 26, 44, 0.6);
+  --mkt-surface: rgba(18, 26, 44, 0.72);
+  --mkt-border: rgba(255, 255, 255, 0.1);
+  --mkt-border-strong: rgba(255, 255, 255, 0.2);
+  --mkt-accent: #3b82f6;
+  --mkt-accent-strong: #60a5fa;
+  --mkt-accent-soft: rgba(59, 130, 246, 0.16);
   --mkt-radius: 20px;
   --mkt-radius-sm: 12px;
   --mkt-radius-lg: 28px;
-  --mkt-shadow-sm: 0 1px 2px rgb(36 29 40 / 0.06);
-  --mkt-shadow-md: 0 18px 44px -26px rgb(36 29 40 / 0.32);
-  --mkt-shadow-lg: 0 30px 70px -34px rgb(36 29 40 / 0.42);
+  --mkt-shadow-sm: 0 4px 16px rgba(0, 0, 0, 0.25);
+  --mkt-shadow-md: 0 12px 32px rgba(0, 0, 0, 0.35);
+  --mkt-shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.5);
   --mkt-container: 1140px;
   --mkt-ease: cubic-bezier(0.22, 0.68, 0.24, 1);
 
@@ -32,7 +32,11 @@
   min-height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--mkt-bg);
+  background:
+    radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.14) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, rgba(139, 92, 246, 0.14) 0px, transparent 50%),
+    radial-gradient(at 50% 100%, rgba(14, 165, 233, 0.1) 0px, transparent 50%),
+    var(--mkt-bg);
   color: var(--mkt-ink);
   font-family: var(--font-sans);
   line-height: 1.6;
@@ -132,27 +136,31 @@
 }
 
 .mkt-btn--primary {
-  background: var(--mkt-accent);
+  background: linear-gradient(135deg, #2563eb, #4f46e5);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   color: #fff;
-  box-shadow: 0 10px 24px -12px rgb(180 69 127 / 0.7);
+  box-shadow: 0 8px 24px -6px rgba(37, 99, 235, 0.5);
 }
 
 .mkt-btn--primary:hover {
-  background: var(--mkt-accent-strong);
-  transform: translateY(-1px);
-  box-shadow: 0 16px 30px -12px rgb(180 69 127 / 0.7);
+  background: linear-gradient(135deg, #1d4ed8, #4338ca);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 30px -6px rgba(37, 99, 235, 0.65);
 }
 
 .mkt-btn--outline {
-  background: var(--mkt-surface);
-  border-color: var(--mkt-border-strong);
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-color: rgba(255, 255, 255, 0.15);
   color: var(--mkt-ink);
 }
 
 .mkt-btn--outline:hover {
-  border-color: var(--mkt-accent);
-  color: var(--mkt-accent-strong);
-  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #fff;
+  transform: translateY(-2px);
 }
 
 .mkt-btn--ghost {
@@ -393,10 +401,10 @@
   height: 520px;
   background: radial-gradient(
       42% 60% at 18% 30%,
-      rgb(180 69 127 / 0.16),
+      rgba(59, 130, 246, 0.22),
       transparent 70%
     ),
-    radial-gradient(38% 55% at 88% 12%, rgb(180 69 127 / 0.1), transparent 70%);
+    radial-gradient(38% 55% at 88% 12%, rgba(139, 92, 246, 0.18), transparent 70%);
   pointer-events: none;
 }
 
@@ -418,7 +426,9 @@
 }
 
 .mkt-hero__title-accent {
-  color: var(--mkt-accent);
+  background: linear-gradient(135deg, #60a5fa, #a78bfa);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .mkt-hero__lead {
@@ -469,9 +479,11 @@
   gap: 16px;
   padding: 22px;
   border-radius: var(--mkt-radius-lg);
-  background: linear-gradient(150deg, #ffffff, #fbf2f7 90%);
-  border: 1px solid var(--mkt-border);
-  box-shadow: var(--mkt-shadow-lg);
+  background: rgba(18, 26, 44, 0.65);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
 }
 
 .mkt-illustrative-tag {
@@ -480,8 +492,9 @@
   left: 22px;
   padding: 3px 10px;
   border-radius: 999px;
-  background: var(--mkt-ink);
-  color: #fff;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #93c5fd;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -489,11 +502,13 @@
 }
 
 .mkt-mock {
-  border: 1px solid var(--mkt-border);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: var(--mkt-radius-sm);
-  background: var(--mkt-surface);
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   padding: 16px;
-  box-shadow: var(--mkt-shadow-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
 }
 
 .mkt-mock--booking {
@@ -625,18 +640,21 @@
 }
 
 .mkt-mock__state--info {
-  background: #e9f1fb;
-  color: #2f6db3;
+  background: rgba(59, 130, 246, 0.18);
+  color: #93c5fd;
+  border: 1px solid rgba(59, 130, 246, 0.3);
 }
 
 .mkt-mock__state--warn {
-  background: #fdf3e1;
-  color: #9a6a12;
+  background: rgba(245, 158, 11, 0.18);
+  color: #fcd34d;
+  border: 1px solid rgba(245, 158, 11, 0.3);
 }
 
 .mkt-mock__state--ok {
-  background: #e9f6ef;
-  color: #1e7f4f;
+  background: rgba(16, 185, 129, 0.18);
+  color: #6ee7b7;
+  border: 1px solid rgba(16, 185, 129, 0.3);
 }
 
 /* ---------------------------------------------------------------------------
@@ -654,6 +672,8 @@
   border: 1px solid var(--mkt-border);
   border-radius: var(--mkt-radius);
   background: var(--mkt-surface);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   box-shadow: var(--mkt-shadow-sm);
 }
 
@@ -705,7 +725,7 @@
 }
 
 .mkt-section--dark {
-  background: linear-gradient(160deg, #241d28, #322330);
+  background: linear-gradient(160deg, #0b1120, #131b2e);
   color: #fff;
 }
 
@@ -718,7 +738,7 @@
 }
 
 .mkt-section--dark .mkt-eyebrow {
-  color: #f3b9d5;
+  color: #93c5fd;
 }
 
 /* Product flow */
@@ -1113,8 +1133,10 @@
   position: relative;
   padding: 24px;
   border-radius: var(--mkt-radius-lg);
-  background: linear-gradient(150deg, #ffffff, #fbf2f7 90%);
-  border: 1px solid var(--mkt-border);
+  background: rgba(18, 26, 44, 0.65);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow: var(--mkt-shadow-lg);
 }
 
@@ -1204,8 +1226,10 @@
   position: relative;
   padding: 22px;
   border-radius: var(--mkt-radius-lg);
-  background: linear-gradient(150deg, #ffffff, #eef6fb 90%);
-  border: 1px solid var(--mkt-border);
+  background: rgba(18, 26, 44, 0.65);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow: var(--mkt-shadow-lg);
 }
 
@@ -1339,8 +1363,10 @@
   gap: 32px;
   padding: clamp(28px, 4vw, 48px);
   border-radius: var(--mkt-radius-lg);
-  background: linear-gradient(150deg, #ffffff, #fbf2f7 92%);
-  border: 1px solid var(--mkt-border);
+  background: rgba(18, 26, 44, 0.65);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow: var(--mkt-shadow-lg);
   overflow: hidden;
 }
@@ -1397,9 +1423,10 @@
   width: 168px;
   height: 168px;
   border-radius: 50%;
-  background: var(--mkt-accent);
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  border: 2px solid rgba(255, 255, 255, 0.2);
   color: #fff;
-  box-shadow: 0 24px 50px -20px rgb(180 69 127 / 0.75);
+  box-shadow: 0 20px 40px -10px rgba(37, 99, 235, 0.6);
 }
 
 .mkt-pricing__badge-days {
@@ -1541,7 +1568,10 @@
   text-align: center;
   padding: clamp(36px, 6vw, 68px) clamp(24px, 4vw, 56px);
   border-radius: var(--mkt-radius-lg);
-  background: linear-gradient(160deg, #241d28, #3a2540);
+  background: linear-gradient(145deg, rgba(30, 41, 67, 0.8), rgba(15, 23, 42, 0.9));
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
   color: #fff;
   box-shadow: var(--mkt-shadow-lg);
 }
@@ -1586,7 +1616,8 @@
  * ------------------------------------------------------------------------- */
 
 .mkt-footer {
-  background: var(--mkt-ink);
+  background: #05080f;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
   color: rgb(255 255 255 / 0.75);
   padding-block: clamp(40px, 6vw, 64px) 24px;
 }

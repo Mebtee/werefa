@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type {
   BusinessDetails,
   Money,
@@ -15,6 +15,11 @@ import { Button } from '@/components/ui/Button'
 import { ProofPicker } from '@/components/proof/ProofPicker'
 import { cn } from '@/lib/cn'
 import { InfoIcon, ShieldIcon } from '@/components/ui/icons'
+import {
+  getBankByCode,
+  getEffectivePaymentAccounts,
+  type ConfiguredPaymentAccount,
+} from '@/lib/ethiopianBanks'
 
 interface PaymentStepProps {
   business: BusinessDetails
@@ -41,6 +46,20 @@ export function PaymentStep({
 }: PaymentStepProps) {
   const [touched, setTouched] = useState(false)
 
+  const [agreedPolicy, setAgreedPolicy] = useState(true)
+  const [copiedKey, setCopiedKey] = useState<string | null>(null)
+  const [configuredList, setConfiguredList] = useState<ConfiguredPaymentAccount[]>(() =>
+    getEffectivePaymentAccounts(business),
+  )
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      setConfiguredList(getEffectivePaymentAccounts(business))
+    }
+    window.addEventListener('werefa_payment_accounts_updated', handleUpdate)
+    return () => window.removeEventListener('werefa_payment_accounts_updated', handleUpdate)
+  }, [business])
+
   // The public business API (PublicBusinessView) carries no owner-published
   // payment instructions — there is no such field to read. So nothing is
   // invented here: the deposit AMOUNT is the backend-computed value from the
@@ -50,7 +69,7 @@ export function PaymentStep({
   // fabricated transfer details.
   const methods = PUBLISHABLE_METHOD_IDS.map((id) => ({ id, label: PAYMENT_METHOD_LABEL[id] }))
 
-  const ready = paymentMethod !== null && proof !== null
+  const ready = paymentMethod !== null && proof !== null && agreedPolicy
 
   const handleSubmit = () => {
     setTouched(true)
@@ -75,6 +94,63 @@ export function PaymentStep({
           This amount comes from {business.name} and is the same figure the
           booking request is checked against.
         </span>
+      </div>
+
+      <div className="local-payment-card">
+        <div className="local-payment-card__header">
+          Payment Instructions · የክፍያ መመሪያ
+        </div>
+        <p className="local-payment-card__amharic">
+          ቀጠሮ ለማስያዝ ቅድመ-ክፍያ በቴሌብር (Telebirr) ወይም በባንክ ሂሳብ ልክ እንደተጠቀሰው ያስገቡ እና ደረሰኙን ያያይዙ።
+        </p>
+        <div className="local-payment-accounts">
+          {configuredList.map((acc) => {
+            const bank = getBankByCode(acc.bankCode)
+            const isCopied = copiedKey === acc.id
+            return (
+              <div key={acc.id} className="account-row">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div
+                    style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '8px',
+                      backgroundColor: bank?.color || '#7c5cfc',
+                      color: '#ffffff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontWeight: 700,
+                      fontSize: '11px',
+                      flexShrink: 0,
+                    }}
+                  >
+                    {bank?.shortName.slice(0, 3).toUpperCase() || 'ETB'}
+                  </div>
+                  <div className="account-row__info">
+                    <span className="account-row__name">
+                      {bank?.name || acc.institutionName}
+                      {acc.holderName && ` — ${acc.holderName}`}
+                    </span>
+                    <span className="account-row__num">{acc.accountNum}</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn--sm btn--outline"
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(acc.accountNum)
+                    setCopiedKey(acc.id)
+                    setTimeout(() => setCopiedKey(null), 2000)
+                  }}
+                  aria-label={`Copy for ${bank?.shortName || 'payment'}`}
+                >
+                  {isCopied ? '✓ Copied' : 'Copy'}
+                </button>
+              </div>
+            )
+          })}
+        </div>
       </div>
 
       <section className="step-section" aria-labelledby="payment-method-title">
@@ -114,6 +190,25 @@ export function PaymentStep({
         </div>
       </section>
 
+      <div className="policy-alert-card">
+        <span className="policy-alert-card__icon" aria-hidden="true">⚠️</span>
+        <div>
+          <h4 className="policy-alert-card__title">Important payment policy</h4>
+          <p className="policy-alert-card__text">
+            Pre-payments are non-refundable. Once a pre-payment has been made, it cannot be refunded.
+          </p>
+        </div>
+      </div>
+
+      <label className="policy-checkbox-container">
+        <input
+          type="checkbox"
+          checked={agreedPolicy}
+          onChange={(e) => setAgreedPolicy(e.target.checked)}
+        />
+        <span>I understand and agree that pre-payments are non-refundable.</span>
+      </label>
+
       <section className="step-section" aria-labelledby="proof-title">
         <h3 className="option-group__title" id="proof-title">
           Attach payment proof
@@ -135,7 +230,8 @@ export function PaymentStep({
       {touched && !ready && (
         <Alert tone="warning" title="Almost there">
           {!paymentMethod && 'Choose a payment method. '}
-          {!proof && 'Attach your payment proof.'}
+          {!proof && 'Attach your payment proof. '}
+          {!agreedPolicy && 'Please acknowledge the non-refundable payment policy.'}
         </Alert>
       )}
 
@@ -147,7 +243,7 @@ export function PaymentStep({
           variant="primary"
           onClick={handleSubmit}
           loading={submitting}
-          disabled={submitting}
+          disabled={submitting || !agreedPolicy}
         >
           Confirm &amp; send booking request
         </Button>

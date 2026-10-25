@@ -125,7 +125,7 @@ export class SubscriptionBillingService {
       });
       if (!created) throw domainErrors.idempotencyConflict();
       return created;
-    });
+    }, { maxWait: 15000, timeout: 30000 });
 
     await this.eventBus.publish([this.submittedEvent(proof)]);
     return proof;

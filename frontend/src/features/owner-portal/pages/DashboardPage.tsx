@@ -1,122 +1,215 @@
-import { Link } from 'react-router-dom'
+import { useEffect, useState, useMemo } from 'react'
+import Grid from '@mui/material/Grid'
+import Box from '@mui/material/Box'
+import Typography from '@mui/material/Typography'
 import { useOwnedBusiness } from '@/features/owner-portal/state/useOwnedBusiness'
 import { LoadState } from '@/features/owner-portal/components/LoadState'
 import { PauseCard } from '@/features/owner-portal/components/PauseCard'
 import { TelegramOwnerCard } from '@/features/owner-portal/components/TelegramOwnerCard'
-import { CATEGORY_LABEL } from '@/features/owner-portal/lib/labels'
+import { listOwnerBookings } from '@/api/ownerBookings'
+import type { OwnerBookingView } from '@/api/types'
+import { ownerBookingFromWire } from '@/features/owner-portal/lib/ownerBooking'
+import type { Booking } from '@/types/models'
+import { MaterioAwardCard } from '@/features/owner-portal/components/materio/MaterioAwardCard'
+import { MaterioTransactionsCard } from '@/features/owner-portal/components/materio/MaterioTransactionsCard'
+import { MaterioWeeklyOverviewCard } from '@/features/owner-portal/components/materio/MaterioWeeklyOverviewCard'
+import { MaterioTotalEarningCard } from '@/features/owner-portal/components/materio/MaterioTotalEarningCard'
+import { MaterioQuickActionsCard } from '@/features/owner-portal/components/materio/MaterioQuickActionsCard'
+import { MaterioRecentBookingsTable } from '@/features/owner-portal/components/materio/MaterioRecentBookingsTable'
 
 export function DashboardPage() {
   const { business, businessId, services, bookingsToday, loading, error, reload } =
     useOwnedBusiness()
 
+  const [rawBookings, setRawBookings] = useState<OwnerBookingView[]>([])
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    if (!businessId) return
+    let cancelled = false
+    listOwnerBookings(businessId)
+      .then((data) => {
+        if (!cancelled) setRawBookings(data)
+      })
+      .catch(() => {
+        // Quiet fallback
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [businessId])
+
+  const bookings: Booking[] = useMemo(() => {
+    return rawBookings.map((b) => ownerBookingFromWire(b))
+  }, [rawBookings])
+
+  const stats = useMemo(() => {
+    const total = rawBookings.length
+    const confirmedCount = rawBookings.filter((b) => b.status === 'CONFIRMED').length
+    const confirmedRate = total > 0 ? Math.round((confirmedCount / total) * 100) : 100
+    const activeServices = services.filter((s) => s.isActive).length
+    const totalServices = services.length
+
+    const revenueCents = rawBookings
+      .filter((b) => b.status === 'CONFIRMED')
+      .reduce((acc, b) => acc + (b.totalPriceMinor || 0), 0)
+
+    // Breakdown by payment methods
+    let telebirrCents = 0
+    let cbeCents = 0
+    let venueCents = 0
+
+    for (const b of bookings) {
+      if (b.state === 'confirmed') {
+        const amt = b.total || 0
+        if (b.paymentMethod === 'telebirr') {
+          telebirrCents += amt
+        } else if (b.paymentMethod === 'bank-transfer') {
+          cbeCents += amt
+        } else {
+          venueCents += amt
+        }
+      }
+    }
+
+    // Hourly distribution
+    const hourly: Record<number, number> = {}
+    for (let i = 0; i < 24; i++) hourly[i] = 0
+
+    for (const b of rawBookings) {
+      if (b.startAt) {
+        try {
+          const h = new Date(b.startAt).getHours()
+          if (h >= 0 && h < 24) hourly[h] = (hourly[h] || 0) + 1
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    let peakH = 12
+    let maxC = 0
+    for (let i = 0; i < 24; i++) {
+      if ((hourly[i] || 0) > maxC) {
+        maxC = hourly[i] || 0
+        peakH = i
+      }
+    }
+
+    const peakHourStr = `${peakH % 12 === 0 ? 12 : peakH % 12}:00 ${peakH >= 12 ? 'PM' : 'AM'}`
+
+    return {
+      total,
+      confirmedCount,
+      confirmedRate,
+      activeServices,
+      totalServices,
+      revenueCents,
+      telebirrCents,
+      cbeCents,
+      venueCents,
+      hourly,
+      peakHourStr,
+    }
+  }, [rawBookings, bookings, services])
+
+  const handleCopyLink = () => {
+    if (!business) return
+    const publicUrl = `${window.location.origin}/p/${business.slug}`
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(publicUrl).then(() => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2500)
+      })
+    }
+  }
+
   return (
     <LoadState loading={loading} error={error} onRetry={reload}>
       {business && businessId && (
         <>
-          <h1 className="page-title">Dashboard</h1>
+          <Typography
+            variant="h4"
+            component="h1"
+            className="page-title"
+            sx={{
+              fontWeight: 700,
+              color: 'text.primary',
+              mb: 2,
+              mt: 0.5,
+              fontSize: { xs: '1.5rem', sm: '1.75rem' },
+            }}
+          >
+            Dashboard
+          </Typography>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, pb: 4 }}>
+            {/* Top row: Award/Greetings Card & Transactions KPI Badges */}
+            <Grid container spacing={3}>
+              <Grid size={{ xs: 12, md: 5, lg: 4 }}>
+                <MaterioAwardCard
+                  businessName={business.name}
+                  category={business.category}
+                  bookingsToday={bookingsToday}
+                  businessSlug={business.slug}
+                  isPaused={Boolean(business.pause)}
+                />
+              </Grid>
+              <Grid size={{ xs: 12, md: 7, lg: 8 }}>
+                <MaterioTransactionsCard
+                  totalBookings={stats.total}
+                  confirmedRate={stats.confirmedRate}
+                  activeServicesCount={stats.activeServices}
+                  totalServicesCount={stats.totalServices}
+                  revenueCents={stats.revenueCents}
+                  currency={business.currency}
+                />
+              </Grid>
+            </Grid>
 
-          <div className="owner-grid">
-            <section className="card card--padded" aria-labelledby="dash-business-title">
-              <h2 className="card__title" id="dash-business-title">
-                Your business
-              </h2>
-              <p className="card__subtitle">
-                <span className="badge">{CATEGORY_LABEL[business.category]}</span>
-              </p>
-              <p className="dashboard-name">{business.name}</p>
-              {business.pause ? (
-                <p className="dashboard-pause">
-                  New bookings are paused
-                  {business.pause.kind === 'until'
-                    ? ` until ${business.pause.reopenDate}`
-                    : ' indefinitely'}
-                  .
-                </p>
-              ) : (
-                <p className="dashboard-pause">Open for new bookings.</p>
-              )}
-              <div className="dashboard-actions">
-                <Link className="btn btn--outline" to="/owner/business">
-                  Edit profile
-                </Link>
-                <Link className="btn" to={`/p/${business.slug}`}>
-                  View public page
-                </Link>
-              </div>
-            </section>
+            {/* Middle row: Weekly Peak Chart, Total Earnings Breakdown, Quick Operations */}
+            <Grid container spacing={3}>
+              <Grid size={{ xs: 12, md: 6, lg: 4 }}>
+                <MaterioWeeklyOverviewCard
+                  hourlyDistribution={stats.hourly}
+                  totalBookings={stats.total}
+                  peakHourStr={stats.peakHourStr}
+                />
+              </Grid>
+              <Grid size={{ xs: 12, md: 6, lg: 4 }}>
+                <MaterioTotalEarningCard
+                  totalRevenueCents={stats.revenueCents}
+                  currency={business.currency}
+                  telebirrCents={stats.telebirrCents}
+                  cbeCents={stats.cbeCents}
+                  venueCents={stats.venueCents}
+                />
+              </Grid>
+              <Grid size={{ xs: 12, md: 12, lg: 4 }}>
+                <MaterioQuickActionsCard
+                  onCopyLink={handleCopyLink}
+                  copied={copied}
+                />
+              </Grid>
+            </Grid>
 
-            <section className="card card--padded" aria-labelledby="dash-services-title">
-              <h2 className="card__title" id="dash-services-title">
-                Services
-              </h2>
-              <p className="card__subtitle">
-                Published on your public page
-              </p>
-              <p className="stat">
-                {services.filter((service) => service.isActive).length}
-                <span className="stat__label"> active of {services.length} total</span>
-              </p>
-              <div className="dashboard-actions">
-                <Link className="btn btn--outline" to="/owner/services">
-                  Manage services
-                </Link>
-                <Link className="btn" to="/owner/services/new">
-                  Add service
-                </Link>
-              </div>
-            </section>
+            {/* Bottom row: Recent Bookings Table */}
+            <Box>
+              <MaterioRecentBookingsTable
+                bookings={bookings}
+                currency={business.currency}
+              />
+            </Box>
 
-            <section className="card card--padded" aria-labelledby="dash-today-title">
-              <h2 className="card__title" id="dash-today-title">
-                Today
-              </h2>
-              <p className="card__subtitle">Summary for this business</p>
-              <p className="stat">
-                {bookingsToday}
-                <span className="stat__label">
-                  {' '}
-                  {bookingsToday === 1 ? 'booking' : 'bookings'} today
-                </span>
-              </p>
-            </section>
-
-            <section className="card card--padded" aria-labelledby="dash-link-title">
-              <h2 className="card__title" id="dash-link-title">
-                Public booking link
-              </h2>
-              <p className="card__subtitle">
-                Share it so customers can book you
-              </p>
-              <p className="link-value">
-                werefa.app/p/{business.slug}
-              </p>
-              <div className="dashboard-actions">
-                <Link className="btn" to={`/p/${business.slug}`}>
-                  Open public page
-                </Link>
-              </div>
-            </section>
-
-            <TelegramOwnerCard businessId={businessId} />
-          </div>
-
-          <h2 className="page-subtitle">Quick actions</h2>
-          <nav className="shortcut-list" aria-label="Quick actions">
-            <Link className="shortcut" to="/owner/business">
-              Business profile
-            </Link>
-            <Link className="shortcut" to="/owner/services/new">
-              Add a service
-            </Link>
-            <Link className="shortcut" to="/owner/schedule">
-              Working hours
-            </Link>
-            <Link className="shortcut" to="/owner/subscription">
-              Subscription &amp; billing
-            </Link>
-          </nav>
-
-          <PauseCard businessId={businessId} business={business} onChanged={reload} />
+            {/* Telegram Notifications & Business Pause Controls */}
+            <Grid container spacing={3}>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <TelegramOwnerCard businessId={businessId} />
+              </Grid>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <PauseCard businessId={businessId} business={business} onChanged={reload} />
+              </Grid>
+            </Grid>
+          </Box>
         </>
       )}
     </LoadState>

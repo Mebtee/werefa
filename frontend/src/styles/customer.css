@@ -24,28 +24,23 @@
  * ------------------------------------------------------------------------- */
 
 .customer-shell {
-  /* --- Canvas & ink ---------------------------------------------------- */
-  --cs-canvas: #f7f4ef;
-  --cs-canvas-deep: #efeae1;
+  /* --- Clean White & Soft Lavender Aesthetics (Mobile-First Elegance) --- */
+  --cs-canvas: #f8f9fd;
+  --cs-canvas-deep: #eef1fa;
   --cs-surface: #ffffff;
-  --cs-surface-sunken: #fbf8f4;
-  --cs-ink: #241f1b;
-  --cs-ink-soft: #5c534a;
-  --cs-ink-faint: #8a7f73;
-  --cs-line: #e8e1d7;
-  --cs-line-strong: #d3c8ba;
+  --cs-surface-sunken: #f1f4fb;
+  --cs-ink: #1e293b;
+  --cs-ink-soft: #64748b;
+  --cs-ink-faint: #94a3b8;
+  --cs-line: rgba(71, 85, 105, 0.12);
+  --cs-line-strong: rgba(71, 85, 105, 0.22);
 
-  /* --- Accent: platform default is a restrained sage -------------------- *
-   * `PublicBusinessView` projects no business accent colour (only logo and
-   * cover URLs), so the customer pages deliberately bind nothing inline here
-   * and this is the accent they use. `tokens.css` keeps `--accent` pink for
-   * the Owner portal, Admin surface and auth screens, which this file must not
-   * reach. The derived tones are what the UI actually paints with. */
-  --accent: #4c6b52;
-  --accent-strong: color-mix(in srgb, var(--accent) 82%, #0f1611);
-  --accent-deep: color-mix(in srgb, var(--accent) 62%, #0d130f);
-  --accent-soft: color-mix(in srgb, var(--accent) 9%, #ffffff);
-  --accent-edge: color-mix(in srgb, var(--accent) 26%, #ffffff);
+  /* --- Brand Accent (Vibrant Violet / Indigo) --- */
+  --accent: #7c5cfc;
+  --accent-strong: #6846f6;
+  --accent-deep: #5433eb;
+  --accent-soft: rgba(124, 92, 252, 0.1);
+  --accent-edge: rgba(124, 92, 252, 0.25);
 
   /* Re-point the shared surface/ink tokens so components.css primitives
    * (`.card`, `.input`, `.alert`, `.chip`, `.field__error`, …) pick up the
@@ -57,9 +52,47 @@
   --color-text-muted: var(--cs-ink-soft);
   --color-border: var(--cs-line);
   --color-border-strong: var(--cs-line-strong);
-  --focus-ring: color-mix(in srgb, var(--accent-strong) 62%, transparent);
+  --focus-ring: rgba(124, 92, 252, 0.4);
 
   /* --- Feedback tones: warmer, still WCAG-AA legible on their own bg ---- */
+  --color-success: #059669;
+  --color-success-bg: #ecfdf5;
+  --color-warning: #d97706;
+  --color-warning-bg: #fffbeb;
+  --color-danger: #dc2626;
+  --color-danger-bg: #fef2f2;
+  --color-info: #2563eb;
+  --color-info-bg: #eff6ff;
+}
+
+.customer-shell[data-customer-theme="dark"] {
+  /* --- Midnight Glass Canvas & Frosted Surfaces --- */
+  --cs-canvas: #090d16;
+  --cs-canvas-deep: #05080f;
+  --cs-surface: rgba(18, 26, 44, 0.88);
+  --cs-surface-sunken: rgba(13, 19, 33, 0.75);
+  --cs-ink: #f8fafc;
+  --cs-ink-soft: #94a3b8;
+  --cs-ink-faint: #64748b;
+  --cs-line: rgba(255, 255, 255, 0.1);
+  --cs-line-strong: rgba(255, 255, 255, 0.2);
+
+  /* --- Brand Accent (Modern Amethyst / Indigo) --- */
+  --accent: #8c57ff;
+  --accent-strong: #9e6eff;
+  --accent-deep: #7a46ee;
+  --accent-soft: rgba(140, 87, 255, 0.16);
+  --accent-edge: rgba(140, 87, 255, 0.35);
+
+  --color-bg: var(--cs-canvas);
+  --color-surface: var(--cs-surface);
+  --color-surface-muted: var(--cs-surface-sunken);
+  --color-text: var(--cs-ink);
+  --color-text-muted: var(--cs-ink-soft);
+  --color-border: var(--cs-line);
+  --color-border-strong: var(--cs-line-strong);
+  --focus-ring: rgba(140, 87, 255, 0.5);
+
   --color-success: #1c6b45;
   --color-success-bg: #e7f3ec;
   --color-warning: #8a5d10;
@@ -68,6 +101,9 @@
   --color-danger-bg: #fbeae7;
   --color-info: #2b5f9c;
   --color-info-bg: #e9f0f8;
+}
+
+.customer-shell {
 
   /* --- Type ------------------------------------------------------------- */
   --cs-font: var(--font-sans);
@@ -168,9 +204,11 @@
   gap: var(--cs-2);
   min-height: 46px;
   padding: var(--cs-3) var(--cs-6);
-  border: 1px solid transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: var(--cs-radius-pill);
-  background: var(--cs-surface);
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   color: var(--cs-ink);
   font-size: var(--cs-text-sm);
   font-weight: 650;
@@ -178,32 +216,32 @@
   text-align: center;
   text-decoration: none;
   box-shadow: var(--cs-shadow-sm);
-  transition:
-    background 140ms var(--cs-ease),
-    border-color 140ms var(--cs-ease),
-    color 140ms var(--cs-ease),
-    box-shadow 140ms var(--cs-ease);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .customer-shell .btn:hover {
-  background: var(--cs-surface-sunken);
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #ffffff;
+  transform: translateY(-1px);
 }
 
 .customer-shell .btn--primary {
-  background: var(--accent-strong);
-  border-color: var(--accent-strong);
+  background: linear-gradient(135deg, #2563eb, #4f46e5);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   color: #fff;
-  box-shadow: var(--cs-shadow-md);
+  box-shadow: 0 4px 20px rgba(37, 99, 235, 0.4);
 }
 
 .customer-shell .btn--primary:hover {
-  background: var(--accent-deep);
-  border-color: var(--accent-deep);
+  background: linear-gradient(135deg, #1d4ed8, #4338ca);
+  box-shadow: 0 6px 26px rgba(37, 99, 235, 0.55);
+  transform: translateY(-1px);
 }
 
 .customer-shell .btn--outline {
-  background: var(--cs-surface);
-  border-color: var(--cs-line-strong);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.18);
   color: var(--cs-ink);
   box-shadow: none;
 }
@@ -254,9 +292,17 @@
 
 .customer-shell .card {
   background: var(--cs-surface);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--cs-line);
   border-radius: var(--cs-radius-lg);
-  box-shadow: var(--cs-shadow-sm);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.38), inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.25s ease;
+}
+
+.customer-shell .card:hover {
+  border-color: var(--cs-line-strong);
+  box-shadow: 0 16px 48px 0 rgba(0, 0, 0, 0.5), inset 0 1px 0 0 rgba(255, 255, 255, 0.15);
 }
 
 .customer-shell .card--padded {
@@ -1073,6 +1119,48 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--cs-ink-faint);
+}
+
+.customer-shell .time-period-group {
+  margin-top: var(--cs-4);
+  padding: var(--cs-3) var(--cs-3) var(--cs-4);
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 12px;
+}
+
+.customer-shell .time-period-header {
+  display: flex;
+  align-items: center;
+  gap: var(--cs-2);
+  margin-bottom: var(--cs-2);
+  flex-wrap: wrap;
+}
+
+.customer-shell .time-period-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.customer-shell .time-period-label {
+  font-weight: 700;
+  font-size: var(--cs-text-sm, 0.875rem);
+  color: var(--cs-ink, #0f172a);
+}
+
+.customer-shell .time-period-note {
+  font-size: var(--cs-text-xs, 0.75rem);
+  color: var(--cs-ink-muted, #64748b);
+  flex: 1;
+}
+
+.customer-shell .time-period-count {
+  font-size: var(--cs-text-xs, 0.75rem);
+  font-weight: 600;
+  color: var(--accent-strong, #4338ca);
+  background: var(--accent-soft, #e0e7ff);
+  padding: 2px 8px;
+  border-radius: 999px;
 }
 
 .customer-shell .time-grid {
@@ -2238,6 +2326,1034 @@
 }
 
 /* ---------------------------------------------------------------------------
+ * Ethiopian Booking Elegance & Mobile Experience Features
+ * ------------------------------------------------------------------------- */
+
+/* Quick Check-In QR Card & Ticket styling */
+.customer-shell .checkin-qr-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: var(--cs-5);
+  margin-block: var(--cs-5);
+  background: var(--cs-surface);
+  border: 1px dashed var(--accent);
+  border-radius: var(--cs-radius-lg);
+  box-shadow: var(--cs-shadow-sm);
+}
+
+.customer-shell .checkin-qr-card__badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: var(--cs-radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: var(--cs-text-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: var(--cs-3);
+}
+
+.customer-shell .checkin-qr-card__code {
+  background: #ffffff;
+  padding: 10px;
+  border-radius: var(--cs-radius-md);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.customer-shell .checkin-qr-card__img {
+  display: block;
+  border-radius: 4px;
+}
+
+.customer-shell .checkin-qr-card__ref {
+  margin-top: var(--cs-2);
+  font-size: var(--cs-text-xs);
+  color: var(--cs-ink-soft);
+}
+
+.customer-shell .checkin-qr-card__ref code {
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.customer-shell .checkin-qr-card__hint {
+  margin-top: var(--cs-2);
+  margin-bottom: 0;
+  font-size: var(--cs-text-xs);
+  color: var(--cs-ink-soft);
+  max-width: 36ch;
+}
+
+/* Receipt Cards (Booking info & Contact info) */
+.customer-shell .booking-receipt-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cs-4);
+  margin-block: var(--cs-4);
+}
+
+.customer-shell .receipt-card {
+  background: var(--cs-surface);
+  border: 1px solid var(--cs-line);
+  border-radius: var(--cs-radius-lg);
+  padding: var(--cs-4);
+  box-shadow: var(--cs-shadow-sm);
+}
+
+.customer-shell .receipt-card__header {
+  font-size: var(--cs-text-xs);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--cs-ink-soft);
+  border-bottom: 1.5px solid var(--accent);
+  padding-bottom: var(--cs-2);
+  margin-bottom: var(--cs-3);
+}
+
+.customer-shell .receipt-card__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-block: var(--cs-1);
+  font-size: var(--cs-text-sm);
+}
+
+.customer-shell .receipt-card__label {
+  color: var(--cs-ink-soft);
+  font-weight: 500;
+}
+
+.customer-shell .receipt-card__value {
+  color: var(--cs-ink);
+  font-weight: 600;
+  text-align: right;
+}
+
+.customer-shell .receipt-card__status {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--cs-radius-pill);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.customer-shell .receipt-card__status--pending {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.customer-shell .receipt-card__status--confirmed {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+/* Floating Reviews Badge */
+.customer-shell .floating-reviews-badge {
+  position: fixed;
+  bottom: 24px;
+  right: 20px;
+  z-index: 99;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  background: #1e1b38;
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: var(--cs-radius-pill);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25);
+  font-size: 13.5px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.customer-shell .floating-reviews-badge:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+}
+
+.customer-shell .floating-reviews-badge__star {
+  color: #facc15;
+  font-size: 15px;
+}
+
+.customer-shell .floating-reviews-badge__score {
+  font-weight: 750;
+}
+
+.customer-shell .floating-reviews-badge__count {
+  color: #cbd5e1;
+  font-size: 12.5px;
+}
+
+@media (max-width: 859px) {
+  .customer-shell .floating-reviews-badge {
+    bottom: 76px;
+  }
+}
+
+/* Reviews Modal */
+.customer-shell .reviews-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(4px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--cs-4);
+}
+
+.customer-shell .reviews-modal {
+  width: 100%;
+  max-width: 480px;
+  background: var(--cs-surface);
+  border: 1px solid var(--cs-line);
+  border-radius: var(--cs-radius-xl);
+  box-shadow: var(--cs-shadow-lg);
+  padding: var(--cs-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--cs-4);
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.customer-shell .reviews-modal__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.customer-shell .reviews-modal__title {
+  font-size: var(--cs-text-lg);
+  font-weight: 700;
+  margin: 0;
+}
+
+.customer-shell .reviews-modal__rating-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 13px;
+}
+
+.customer-shell .reviews-modal__stars {
+  color: #f59e0b;
+}
+
+.customer-shell .reviews-modal__avg {
+  font-weight: 700;
+}
+
+.customer-shell .reviews-modal__total {
+  color: var(--cs-ink-soft);
+}
+
+.customer-shell .reviews-modal__close {
+  background: none;
+  border: none;
+  font-size: 18px;
+  color: var(--cs-ink-soft);
+  cursor: pointer;
+  padding: 4px;
+}
+
+.customer-shell .reviews-modal__trust-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--cs-radius-md);
+  background: rgba(16, 185, 129, 0.1);
+  color: #059669;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.customer-shell .reviews-modal__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cs-3);
+}
+
+.customer-shell .review-card {
+  padding: var(--cs-3);
+  border: 1px solid var(--cs-line);
+  border-radius: var(--cs-radius-md);
+  background: var(--cs-surface-sunken);
+}
+
+.customer-shell .review-card__header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 650;
+  margin-bottom: 2px;
+}
+
+.customer-shell .review-card__date {
+  font-size: 11px;
+  color: var(--cs-ink-soft);
+  font-weight: 400;
+}
+
+.customer-shell .review-card__stars {
+  color: #f59e0b;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.customer-shell .review-card__comment {
+  font-size: 13px;
+  color: var(--cs-ink);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.customer-shell .reviews-modal__footer {
+  margin-top: var(--cs-2);
+}
+
+/* Phone input with +251 country prefix */
+.customer-shell .phone-input-wrapper {
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+
+.customer-shell .phone-input-prefix {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 12px;
+  height: 44px;
+  background: var(--cs-surface-sunken);
+  border: 1px solid var(--cs-line);
+  border-right: none;
+  border-radius: var(--cs-radius-md) 0 0 var(--cs-radius-md);
+  color: var(--cs-ink);
+  font-weight: 600;
+  font-size: var(--cs-text-sm);
+  user-select: none;
+}
+
+.customer-shell .phone-input-field {
+  border-top-left-radius: 0 !important;
+  border-bottom-left-radius: 0 !important;
+  flex: 1 1 auto;
+}
+
+/* Pre-payment policy alert card & checkbox */
+.customer-shell .policy-alert-card {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: var(--cs-radius-md);
+  padding: var(--cs-4);
+  margin-block: var(--cs-3);
+  display: flex;
+  gap: var(--cs-3);
+}
+
+.customer-shell[data-customer-theme="dark"] .policy-alert-card {
+  background: rgba(180, 83, 9, 0.15);
+  border-color: rgba(217, 119, 6, 0.4);
+}
+
+.customer-shell .policy-alert-card__icon {
+  flex: none;
+  font-size: 20px;
+  color: #d97706;
+}
+
+.customer-shell .policy-alert-card__title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #92400e;
+  margin: 0 0 4px;
+}
+
+.customer-shell[data-customer-theme="dark"] .policy-alert-card__title {
+  color: #fde68a;
+}
+
+.customer-shell .policy-alert-card__text {
+  font-size: 12.5px;
+  color: #78350f;
+  margin: 0;
+  line-height: 1.45;
+}
+
+.customer-shell[data-customer-theme="dark"] .policy-alert-card__text {
+  color: #fed7aa;
+}
+
+.customer-shell .policy-checkbox-container {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--cs-surface-sunken);
+  border: 1px solid var(--cs-line);
+  border-radius: var(--cs-radius-md);
+  margin-block: var(--cs-3);
+  cursor: pointer;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--cs-ink);
+}
+
+.customer-shell .policy-checkbox-container input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* Amharic + English Payment Instruction Cards */
+.customer-shell .local-payment-card {
+  background: var(--cs-surface-sunken);
+  border: 1px solid var(--cs-line);
+  border-radius: var(--cs-radius-lg);
+  padding: var(--cs-4);
+  margin-bottom: var(--cs-4);
+}
+
+.customer-shell .local-payment-card__header {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--cs-ink);
+  margin-bottom: var(--cs-2);
+}
+
+.customer-shell .local-payment-card__amharic {
+  font-size: 13px;
+  color: var(--cs-ink-soft);
+  margin-bottom: var(--cs-3);
+  line-height: 1.45;
+}
+
+.customer-shell .local-payment-accounts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cs-2);
+}
+
+.customer-shell .account-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--cs-surface);
+  border: 1px solid var(--cs-line);
+  border-radius: var(--cs-radius-md);
+}
+
+.customer-shell .account-row__info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.customer-shell .account-row__name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--cs-ink);
+}
+
+.customer-shell .account-row__num {
+  font-size: 13px;
+  font-family: monospace;
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+/* Live "YOUR BOOKING" summary chip on mobile */
+.customer-shell .your-booking-pill {
+  background: var(--cs-surface);
+  border: 1px solid var(--cs-line);
+  border-radius: var(--cs-radius-lg);
+  padding: var(--cs-3) var(--cs-4);
+  margin-bottom: var(--cs-4);
+  box-shadow: var(--cs-shadow-sm);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.customer-shell .your-booking-pill__label {
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--cs-ink-soft);
+}
+
+.customer-shell .your-booking-pill__title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--cs-ink);
+}
+
+.customer-shell .your-booking-pill__time {
+  font-size: 12.5px;
+  color: var(--cs-ink-soft);
+}
+
+.customer-shell .your-booking-pill__tag {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: var(--cs-radius-pill);
+  font-size: 11.5px;
+  font-weight: 700;
+  background: #fef3c7;
+  color: #92400e;
+}
+
+/* Public Page Theme Switcher Button */
+.customer-shell .public-theme-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--cs-surface);
+  border: 1px solid var(--cs-line);
+  border-radius: var(--cs-radius-pill);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--cs-ink);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.customer-shell .public-theme-btn:hover {
+  background: var(--cs-surface-sunken);
+  border-color: var(--accent);
+}
+
+/* Calendar Modal Dialog (Exact Material picker match) */
+.customer-shell .cal-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(5px);
+  z-index: 1050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--cs-4);
+}
+
+.customer-shell .cal-dialog {
+  width: 100%;
+  max-width: 340px;
+  background: #252528;
+  color: #f8fafc;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 24px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+  padding: 20px 20px 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.customer-shell .cal-dialog__header {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  padding-bottom: 14px;
+  margin-bottom: 14px;
+}
+
+.customer-shell .cal-dialog__subtitle {
+  font-size: 13px;
+  color: #94a3b8;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.customer-shell .cal-dialog__title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+
+.customer-shell .cal-dialog__title {
+  font-size: 28px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: -0.02em;
+}
+
+.customer-shell .cal-dialog__edit-icon {
+  font-size: 18px;
+  color: #94a3b8;
+}
+
+.customer-shell .cal-dialog__nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.customer-shell .cal-dialog__month-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 8px;
+}
+
+.customer-shell .cal-dialog__month-select:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.customer-shell .cal-dialog__chevron {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.customer-shell .cal-dialog__nav-arrows {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.customer-shell .cal-dialog__arrow-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: #cbd5e1;
+  font-size: 20px;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.customer-shell .cal-dialog__arrow-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.customer-shell .cal-dialog__weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.customer-shell .cal-dialog__weekday-cell {
+  font-size: 12px;
+  font-weight: 600;
+  color: #94a3b8;
+  padding-block: 4px;
+}
+
+.customer-shell .cal-dialog__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
+.customer-shell .cal-dialog__day-cell {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: 50%;
+  color: #e2e8f0;
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.15s ease;
+}
+
+.customer-shell .cal-dialog__day-cell:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.customer-shell .cal-dialog__day-cell--empty {
+  visibility: hidden;
+  cursor: default;
+}
+
+.customer-shell .cal-dialog__day-cell--selected {
+  background: #bac8ff !important;
+  color: #1a1926 !important;
+  font-weight: 750 !important;
+}
+
+.customer-shell .cal-dialog__day-cell--disabled {
+  color: #52525b;
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.customer-shell .cal-dialog__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding-top: 10px;
+}
+
+.customer-shell .cal-dialog__btn-cancel,
+.customer-shell .cal-dialog__btn-ok {
+  background: none;
+  border: none;
+  font-size: 14px;
+  font-weight: 650;
+  padding: 8px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.customer-shell .cal-dialog__btn-cancel {
+  color: #bac8ff;
+}
+
+.customer-shell .cal-dialog__btn-cancel:hover {
+  background: rgba(186, 200, 255, 0.1);
+}
+
+.customer-shell .cal-dialog__btn-ok {
+  color: #bac8ff;
+}
+
+.customer-shell .cal-dialog__btn-ok:hover {
+  background: rgba(186, 200, 255, 0.1);
+}
+
+/* Date input trigger widget (from Screenshot 4) */
+.customer-shell .date-input-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--cs-surface);
+  border: 1.5px solid var(--cs-line);
+  border-radius: var(--cs-radius-md);
+  margin-bottom: var(--cs-4);
+  cursor: pointer;
+  box-shadow: var(--cs-shadow-sm);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.customer-shell .date-input-trigger:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.customer-shell .date-input-trigger__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.customer-shell .date-input-trigger__label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--cs-ink-soft);
+}
+
+.customer-shell .date-input-trigger__value {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--cs-ink);
+}
+
+.customer-shell .date-input-trigger__icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+}
+
+/* ---------------------------------------------------------------------------
+ * PDF Receipt Download Card
+ * ------------------------------------------------------------------------- */
+.customer-shell .receipt-download-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cs-3);
+  padding: var(--cs-4);
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 14px;
+  margin-block: var(--cs-4);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.customer-shell .receipt-download-info {
+  display: flex;
+  align-items: center;
+  gap: var(--cs-3);
+}
+
+.customer-shell .receipt-download-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--accent-soft, #e0e7ff);
+  color: var(--accent-strong, #4338ca);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.customer-shell .receipt-download-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.customer-shell .receipt-download-title {
+  font-weight: 700;
+  font-size: var(--cs-text-base, 1rem);
+  color: var(--cs-ink, #0f172a);
+  line-height: 1.25;
+}
+
+.customer-shell .receipt-download-subtitle {
+  font-size: var(--cs-text-xs, 0.8125rem);
+  color: var(--cs-ink-muted, #64748b);
+  margin: 2px 0 0;
+  line-height: 1.4;
+}
+
+.customer-shell .receipt-download-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 18px;
+  background: linear-gradient(135deg, #1e293b, #0f172a);
+  color: #ffffff;
+  border: none;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: var(--cs-text-sm, 0.875rem);
+  cursor: pointer;
+  width: 100%;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+}
+
+.customer-shell .receipt-download-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.25);
+}
+
+.customer-shell .receipt-download-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.customer-shell .receipt-download-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+/* ---------------------------------------------------------------------------
+ * Policy & Arrival Notice Card
+ * ------------------------------------------------------------------------- */
+.customer-shell .policy-notice-card {
+  padding: var(--cs-4);
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 12px;
+  margin-block: var(--cs-4);
+}
+
+.customer-shell .policy-notice-card__header {
+  display: flex;
+  align-items: center;
+  gap: var(--cs-2);
+  font-weight: 700;
+  font-size: var(--cs-text-sm, 0.875rem);
+  color: var(--cs-ink, #0f172a);
+  margin-bottom: var(--cs-2);
+}
+
+.customer-shell .policy-notice-card__body {
+  font-size: var(--cs-text-xs, 0.8125rem);
+  color: var(--cs-ink-muted, #64748b);
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * Mobile Floating Sticky Summary Bar (Aspio UX pattern)
+ * ------------------------------------------------------------------------- */
+
+.customer-shell .mobile-sticky-bar {
+  position: fixed;
+  bottom: var(--cs-4, 16px);
+  left: var(--cs-4, 16px);
+  right: var(--cs-4, 16px);
+  z-index: 95;
+  max-width: 520px;
+  margin-inline: auto;
+}
+
+.customer-shell .mobile-sticky-bar__trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  background: var(--cs-surface, #ffffff);
+  color: var(--cs-text, #1e1b2e);
+  border: 1px solid var(--cs-border, #e2e8f0);
+  border-radius: var(--cs-radius-pill, 9999px);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  cursor: pointer;
+}
+
+.customer-shell .mobile-sticky-bar__content {
+  display: flex;
+  align-items: center;
+  gap: var(--cs-2, 8px);
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.customer-shell .mobile-sticky-bar__title {
+  color: var(--cs-muted, #64748b);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.customer-shell .mobile-sticky-bar__price {
+  color: var(--accent, #7367f0);
+  font-weight: 800;
+}
+
+.customer-shell .mobile-sticky-bar__slot {
+  color: var(--cs-text, #1e1b2e);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.customer-shell .mobile-sticky-bar__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--accent-soft, rgba(115, 103, 240, 0.12));
+  color: var(--accent, #7367f0);
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.customer-shell .mobile-sticky-bar__drawer {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 0;
+  right: 0;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: var(--cs-surface, #ffffff);
+  border: 1px solid var(--cs-border, #e2e8f0);
+  border-radius: var(--cs-radius-lg, 16px);
+  padding: var(--cs-4, 16px);
+  box-shadow: 0 20px 35px -5px rgba(0, 0, 0, 0.25);
+}
+
+.customer-shell .mobile-sticky-bar__drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: var(--cs-3, 12px);
+  margin-bottom: var(--cs-3, 12px);
+  border-bottom: 1px solid var(--cs-border, #e2e8f0);
+  font-size: 14px;
+}
+
+.customer-shell .mobile-sticky-bar__close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--cs-muted, #64748b);
+  padding: 4px;
+}
+
+@media (min-width: 860px) {
+  .customer-shell .mobile-sticky-bar {
+    display: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Locale Switcher (EN | አማርኛ)
+ * ------------------------------------------------------------------------- */
+
+.customer-shell .locale-switcher {
+  display: inline-flex;
+  align-items: center;
+  background: var(--cs-surface, #ffffff);
+  border: 1px solid var(--cs-border, #e2e8f0);
+  border-radius: var(--cs-radius-pill, 9999px);
+  padding: 3px;
+  gap: 3px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.customer-shell .locale-btn {
+  background: none;
+  border: none;
+  padding: 4px 10px;
+  border-radius: var(--cs-radius-pill, 9999px);
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--cs-muted, #64748b);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.customer-shell .locale-btn:hover {
+  color: var(--cs-text, #1e1b2e);
+}
+
+.customer-shell .locale-btn.is-active {
+  background: var(--accent, #7367f0);
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(115, 103, 240, 0.3);
+}
+
+/* ---------------------------------------------------------------------------
  * Reduced motion — transitions are decorative here, so drop them entirely.
  * ------------------------------------------------------------------------- */
 
@@ -2251,3 +3367,5 @@
     scroll-behavior: auto !important;
   }
 }
+
+

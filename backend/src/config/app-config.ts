@@ -107,6 +107,7 @@ export const appConfigSchema = z.object({
   authRecoveryCodeLength: z.coerce.number().int().min(6).max(8).default(6),
   authCookieName: z.string().min(1).max(64).default('werefa_session'),
   authCookieSameSite: z.enum(['lax', 'strict', 'none']).default('lax'),
+  googleClientId: z.string().nullable().default(null),
   /** Local directory for staged/proof object storage (Prompt 50, REQ-118). */
   proofStorageDir: z.string().min(1).default('./storage/proofs'),
   // ---- Telegram integration (Prompt 51; spec §18, REQ-056 … REQ-068) --------
@@ -207,6 +208,7 @@ function rawToParsed(env: Record<string, string | undefined>): z.infer<typeof ap
     authRecoveryCodeLength: env.AUTH_RECOVERY_CODE_LENGTH || undefined,
     authCookieName: env.AUTH_COOKIE_NAME || undefined,
     authCookieSameSite: env.AUTH_COOKIE_SAME_SITE || undefined,
+    googleClientId: env.GOOGLE_CLIENT_ID || null,
     proofStorageDir: env.PROOF_STORAGE_DIR || undefined,
     telegramEnabled: env.TELEGRAM_ENABLED || undefined,
     telegramBotToken: env.TELEGRAM_BOT_TOKEN || undefined,

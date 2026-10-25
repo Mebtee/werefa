@@ -55,17 +55,21 @@ export function CustomerStep({
         hint="We will call or message you about this booking."
         error={errors.phone}
         children={({ id, ariaDescribedBy }) => (
-          <input
-            id={id}
-            className="input"
-            type="tel"
-            autoComplete="tel"
-            inputMode="tel"
-            value={customer.phone}
-            onChange={(event) => setCustomerField('phone', event.target.value)}
-            aria-invalid={errors.phone ? true : undefined}
-            aria-describedby={ariaDescribedBy}
-          />
+          <div className="phone-input-wrapper">
+            <span className="phone-input-prefix" aria-hidden="true">🇪🇹 +251</span>
+            <input
+              id={id}
+              className="input phone-input-field"
+              type="tel"
+              autoComplete="tel"
+              inputMode="tel"
+              placeholder="912 34 56 78"
+              value={customer.phone}
+              onChange={(event) => setCustomerField('phone', event.target.value)}
+              aria-invalid={errors.phone ? true : undefined}
+              aria-describedby={ariaDescribedBy}
+            />
+          </div>
         )}
       />
 

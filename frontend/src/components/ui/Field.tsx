@@ -1,7 +1,7 @@
 import { useId, type ReactNode } from 'react'
 
 interface FieldProps {
-  label: string
+  label: ReactNode
   hint?: string
   error?: string
   /** Returns the props the control needs. Wire aria-describedby explicitly. */

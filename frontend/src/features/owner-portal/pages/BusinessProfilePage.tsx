@@ -11,6 +11,7 @@ import { useOwnedBusiness } from '@/features/owner-portal/state/useOwnedBusiness
 import { LoadState } from '@/features/owner-portal/components/LoadState'
 import { PauseCard } from '@/features/owner-portal/components/PauseCard'
 import { PrepaymentCard } from '@/features/owner-portal/components/PrepaymentCard'
+import { BankAccountConfigCard } from '@/features/owner-portal/components/BankAccountConfigCard'
 import { CATEGORY_LABEL } from '@/features/owner-portal/lib/labels'
 import { mapUrl } from '@/lib/format'
 import { Alert } from '@/components/ui/Alert'
@@ -98,6 +99,22 @@ export function BusinessProfilePage() {
   const [slugError, setSlugError] = useState<string | null>(null)
   const [slugSuccess, setSlugSuccess] = useState(false)
   const [savingSlug, setSavingSlug] = useState(false)
+
+  // Public booking page theme preference
+  const [publicThemeSetting, setPublicThemeSetting] = useState<'light' | 'dark'>(() => {
+    if (typeof window === 'undefined') return 'light'
+    return (localStorage.getItem(`werefa_public_theme_${business?.slug ?? 'sheger-lounge'}`) as 'light' | 'dark') || 'light'
+  })
+  const [themeSavedFeedback, setThemeSavedFeedback] = useState(false)
+
+  const handleSelectPublicTheme = (mode: 'light' | 'dark') => {
+    setPublicThemeSetting(mode)
+    if (business?.slug) {
+      localStorage.setItem(`werefa_public_theme_${business.slug}`, mode)
+    }
+    setThemeSavedFeedback(true)
+    setTimeout(() => setThemeSavedFeedback(false), 3000)
+  }
 
   // Branding (logo / cover photo) is read-only here: the backend projects
   // `logoUrl`/`coverUrl` (always null until the file-storage service lands)
@@ -487,8 +504,89 @@ export function BusinessProfilePage() {
         </div>
       </section>
 
+      <section className="card card--padded" style={{ marginTop: 'var(--space-4)' }}>
+        <div className="card__header">
+          <div>
+            <h2 className="card__title">Public Page Appearance &amp; Theme</h2>
+            <p className="card__subtitle">
+              Choose whether your customer booking page is displayed in clean white (recommended) or dark aesthetic.
+            </p>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginTop: '16px' }}>
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '12px',
+              padding: '16px',
+              borderRadius: '12px',
+              border: `2px solid ${publicThemeSetting === 'light' ? 'var(--accent)' : 'var(--color-border)'}`,
+              background: publicThemeSetting === 'light' ? 'rgba(124, 92, 252, 0.08)' : 'var(--color-surface)',
+              cursor: 'pointer',
+            }}
+          >
+            <input
+              type="radio"
+              name="public-theme"
+              value="light"
+              checked={publicThemeSetting === 'light'}
+              onChange={() => handleSelectPublicTheme('light')}
+              style={{ marginTop: '3px' }}
+            />
+            <div>
+              <div style={{ fontWeight: 700, fontSize: '15px' }}>☀️ Clean White (Light Theme)</div>
+              <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                Pure white cards with soft lavender canvas. Tailored for mobile bookings, high contrast, and maximum customer conversion.
+              </div>
+            </div>
+          </label>
+
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '12px',
+              padding: '16px',
+              borderRadius: '12px',
+              border: `2px solid ${publicThemeSetting === 'dark' ? 'var(--accent)' : 'var(--color-border)'}`,
+              background: publicThemeSetting === 'dark' ? 'rgba(124, 92, 252, 0.08)' : 'var(--color-surface)',
+              cursor: 'pointer',
+            }}
+          >
+            <input
+              type="radio"
+              name="public-theme"
+              value="dark"
+              checked={publicThemeSetting === 'dark'}
+              onChange={() => handleSelectPublicTheme('dark')}
+              style={{ marginTop: '3px' }}
+            />
+            <div>
+              <div style={{ fontWeight: 700, fontSize: '15px' }}>🌙 Dark Amethyst (Dark Theme)</div>
+              <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                Sleek midnight canvas with glowing amethyst accents.
+              </div>
+            </div>
+          </label>
+        </div>
+
+        {themeSavedFeedback && (
+          <div style={{ marginTop: '12px' }}>
+            <Alert tone="success" live="polite">
+              Public page theme updated to {publicThemeSetting === 'light' ? 'Clean White' : 'Dark Amethyst'}!
+            </Alert>
+          </div>
+        )}
+      </section>
+
       <div style={{ marginTop: 'var(--space-4)' }}>
         <PrepaymentCard businessId={businessId} business={business} onChanged={reload} />
+      </div>
+
+      <div style={{ marginTop: 'var(--space-4)' }}>
+        <BankAccountConfigCard businessId={businessId} business={business} />
       </div>
 
       <div style={{ marginTop: 'var(--space-4)' }}>

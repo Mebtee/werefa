@@ -140,3 +140,10 @@ export const SendIcon = icon(
     <path d="M21 3 10.5 13.5M21 3l-6.5 18-4-8-8-4Z" />
   </>,
 )
+
+export const DownloadIcon = icon(
+  <>
+    <path d="M12 15V3M7 10l5 5 5-5" />
+    <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+  </>,
+)

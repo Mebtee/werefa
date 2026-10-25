@@ -510,8 +510,35 @@ function BookingActions({
               onReject()
             }}
           >
+            <div style={{ marginTop: 'var(--space-3)', marginBottom: 'var(--space-1)' }}>
+              <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text-muted)', display: 'block', marginBottom: '6px' }}>
+                Quick reasons • ፈጣን ምክንያቶች:
+              </span>
+              <div className="reason-chips">
+                {[
+                  { label: 'Invalid Reference ID', text: 'Invalid transaction reference code. Please check and provide the correct Telebirr / CBE transaction number.' },
+                  { label: 'Amount Mismatch', text: 'The deposited amount does not match the required booking deposit amount.' },
+                  { label: 'Unreadable Slip', text: 'The uploaded screenshot is blurry or unreadable. Please upload a clear receipt.' },
+                  { label: 'Reused Transaction', text: 'This transaction reference has already been used for another booking.' },
+                ].map((preset) => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    className={`reason-chip ${rejection === preset.text ? 'is-active' : ''}`}
+                    onClick={() => onRejectionChange(preset.text)}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <Field
-              label="Rejection reason"
+              label={
+                <>
+                  Rejection reason <span className="amharic-sub">(የውድቅ ማድረጊያ ምክንያት)</span>
+                </>
+              }
               hint="Required if you reject — the customer sees it."
               error={rejectionError ?? undefined}
             >
@@ -532,27 +559,30 @@ function BookingActions({
                 type="submit"
                 variant="outline"
                 className="btn--danger"
+                aria-label="Reject booking"
                 loading={busy}
                 disabled={busy}
               >
-                Reject booking
+                Reject booking • ውድቅ አድርግ
               </Button>
               <Button
                 type="button"
                 variant="primary"
+                aria-label="Accept booking"
                 loading={busy}
                 disabled={busy}
                 onClick={onAccept}
               >
-                Accept booking
+                Accept booking • ክፍያ አጽድቅ
               </Button>
               <Button
                 type="button"
                 variant="outline"
+                aria-label="Cancel booking"
                 disabled={busy}
                 onClick={() => setConfirming('cancel-pending')}
               >
-                Cancel booking
+                Cancel booking • ሰርዝ
               </Button>
             </div>
           </form>

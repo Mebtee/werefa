@@ -14,6 +14,33 @@ import { BusinessHero } from '@/features/public-booking/components/BusinessHero'
 import { BookingWizard } from '@/features/public-booking/components/BookingWizard'
 import { ServicesReadOnly } from '@/features/public-booking/components/ServicesReadOnly'
 
+import { FloatingReviewsBadge } from '@/features/public-booking/components/FloatingReviewsBadge'
+import { CustomerLocaleProvider, useCustomerLocale } from '@/features/public-booking/locale/customerLocale'
+
+export function LocaleSwitcher() {
+  const { locale, setLocale } = useCustomerLocale()
+  return (
+    <div className="locale-switcher" role="group" aria-label="Language selection">
+      <button
+        type="button"
+        className={`locale-btn ${locale === 'en' ? 'is-active' : ''}`}
+        onClick={() => setLocale('en')}
+        aria-pressed={locale === 'en'}
+      >
+        🇺🇸 EN
+      </button>
+      <button
+        type="button"
+        className={`locale-btn ${locale === 'am' ? 'is-active' : ''}`}
+        onClick={() => setLocale('am')}
+        aria-pressed={locale === 'am'}
+      >
+        🇪🇹 አማ
+      </button>
+    </div>
+  )
+}
+
 type LoadState =
   | { status: 'loading' }
   | { status: 'ready'; page: BusinessPage }
@@ -42,13 +69,22 @@ const NO_SCHEDULE_YET: PublicScheduleView = {
  * Load order, empty states and error states are unchanged from the pre-redesign
  * implementation: the business lookup alone decides existence, the schedule 404
  * is tolerated, and availability is fetched per date by the wizard's real
- * availability clients. Only presentation changed — the page now mounts inside
- * the customer design scope (`.customer-shell`) and renders an honest empty
- * state when the business publishes no services at all.
+ * availability clients. Presentation defaults to clean white aesthetic with
+ * owner-configurable dark theme toggle.
  */
 export function PublicBookingPage() {
   const { slug } = useParams<{ slug: string }>()
   const [load, setLoad] = useState<LoadState>({ status: 'loading' })
+  const [publicTheme, setPublicTheme] = useState<'light' | 'dark'>(() => {
+    if (typeof window === 'undefined') return 'light'
+    return (localStorage.getItem(`werefa_public_theme_${slug}`) as 'light' | 'dark') || 'light'
+  })
+
+  const togglePublicTheme = () => {
+    const next = publicTheme === 'light' ? 'dark' : 'light'
+    setPublicTheme(next)
+    if (slug) localStorage.setItem(`werefa_public_theme_${slug}`, next)
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -112,96 +148,110 @@ export function PublicBookingPage() {
   const hasServices = ready !== null && ready.services.length > 0
 
   return (
-    <div className="page-root customer-shell">
-      <a className="skip-link" href="#main">
-        Skip to main content
-      </a>
+    <CustomerLocaleProvider>
+      <div className="page-root customer-shell" data-customer-theme={publicTheme}>
+        <a className="skip-link" href="#main">
+          Skip to main content
+        </a>
 
-      <main id="main" className="page-root__main">
-        {load.status === 'loading' && (
-          <div className="container">
-            <div className="loading-state" style={{ paddingBlock: 'var(--cs-9)' }}>
-              <Spinner label="Loading the business page" />
-              <p className="loading-state__label">Loading this business page…</p>
+        <main id="main" className="page-root__main">
+          {load.status === 'loading' && (
+            <div className="container">
+              <div className="loading-state" style={{ paddingBlock: 'var(--cs-9)' }}>
+                <Spinner label="Loading the business page" />
+                <p className="loading-state__label">Loading this business page…</p>
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {load.status === 'notfound' && (
-          <div className="container" style={{ paddingBlock: 'var(--cs-8)' }}>
-            <Alert tone="warning" title="Business not found">
-              No business was found at this address. Check the link you were
-              given, or ask the business for its correct booking link.
-            </Alert>
-          </div>
-        )}
+          {load.status === 'notfound' && (
+            <div className="container" style={{ paddingBlock: 'var(--cs-8)' }}>
+              <Alert tone="warning" title="Business not found">
+                No business was found at this address. Check the link you were
+                given, or ask the business for its correct booking link.
+              </Alert>
+            </div>
+          )}
 
-        {load.status === 'error' && (
-          <div className="container" style={{ paddingBlock: 'var(--cs-8)' }}>
-            <Alert tone="danger" title="Could not load this page">
-              We could not load this business page right now. Please try again.
-            </Alert>
-          </div>
-        )}
+          {load.status === 'error' && (
+            <div className="container" style={{ paddingBlock: 'var(--cs-8)' }}>
+              <Alert tone="danger" title="Could not load this page">
+                We could not load this business page right now. Please try again.
+              </Alert>
+            </div>
+          )}
 
-        {ready && (
-          <>
-            <BusinessHero business={ready.business} />
-            <div className="container customer-flow">
-              {!hasServices ? (
-                // Honest empty state: the catalogue really is empty (no active
-                // service is published). Nothing is offered in its place.
-                <section className="section-block" aria-labelledby="services-empty-title">
-                  <div className="empty-state">
-                    <span className="empty-state__icon">
-                      <ScissorsIcon size={24} />
-                    </span>
-                    <h2 className="empty-state__title" id="services-empty-title">
-                      No services published yet
-                    </h2>
-                    <p className="empty-state__body">
-                      {ready.business.name} has not published any services for
-                      booking yet. Please check back later, or contact the
-                      business directly to make an appointment.
-                    </p>
-                    {ready.business.phone.trim() ? (
+          {ready && (
+            <>
+              <BusinessHero business={ready.business} />
+              <div className="container customer-flow">
+                {!hasServices ? (
+                  // Honest empty state: the catalogue really is empty (no active
+                  // service is published). Nothing is offered in its place.
+                  <section className="section-block" aria-labelledby="services-empty-title">
+                    <div className="empty-state">
+                      <span className="empty-state__icon">
+                        <ScissorsIcon size={24} />
+                      </span>
+                      <h2 className="empty-state__title" id="services-empty-title">
+                        No services published yet
+                      </h2>
                       <p className="empty-state__body">
-                        <a href={`tel:${ready.business.phone.replace(/\s/g, '')}`}>
-                          Call {ready.business.phone}
-                        </a>
+                        {ready.business.name} has not published any services for
+                        booking yet. Please check back later, or contact the
+                        business directly to make an appointment.
                       </p>
-                    ) : null}
-                  </div>
-                </section>
-              ) : ready.business.pause ? (
-                <ServicesReadOnly
-                  business={ready.business}
-                  services={ready.services}
-                />
-              ) : (
-                <BookingWizard
-                  business={ready.business}
-                  services={ready.services}
-                />
-              )}
-            </div>
-          </>
-        )}
-      </main>
+                      {ready.business.phone.trim() ? (
+                        <p className="empty-state__body">
+                          <a href={`tel:${ready.business.phone.replace(/\s/g, '')}`}>
+                            Call {ready.business.phone}
+                          </a>
+                        </p>
+                      ) : null}
+                    </div>
+                  </section>
+                ) : ready.business.pause ? (
+                  <ServicesReadOnly
+                    business={ready.business}
+                    services={ready.services}
+                  />
+                ) : (
+                  <BookingWizard
+                    business={ready.business}
+                    services={ready.services}
+                  />
+                )}
+              </div>
+              <FloatingReviewsBadge businessName={ready.business.name} />
+            </>
+          )}
+        </main>
 
-      <footer className="page-footer">
-        <div className="container page-footer__inner">
-          <p style={{ margin: 0, maxWidth: '60ch' }}>
-            Booking on this page is handled by {ready?.business.name ?? 'this business'}.
-            Werefa stores the request and the payment proof you send; the business
-            confirms it.
-          </p>
-          <p style={{ margin: 0 }}>
-            <CalendarIcon size={16} style={{ display: 'inline', verticalAlign: '-3px' }} />{' '}
-            Times shown are 24-hour.
-          </p>
-        </div>
-      </footer>
-    </div>
+        <footer className="page-footer">
+          <div className="container page-footer__inner">
+            <p style={{ margin: 0, maxWidth: '60ch' }}>
+              Booking on this page is handled by {ready?.business.name ?? 'this business'}.
+              Werefa stores the request and the payment proof you send; the business
+              confirms it.
+            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+              <LocaleSwitcher />
+              <p style={{ margin: 0 }}>
+                <CalendarIcon size={16} style={{ display: 'inline', verticalAlign: '-3px' }} />{' '}
+                Times shown are 24-hour.
+              </p>
+              <button
+                type="button"
+                className="public-theme-btn"
+                onClick={togglePublicTheme}
+                aria-label="Toggle theme appearance"
+              >
+                {publicTheme === 'light' ? '🌙 Dark Mode' : '☀️ White / Light'}
+              </button>
+            </div>
+          </div>
+        </footer>
+      </div>
+    </CustomerLocaleProvider>
   )
 }

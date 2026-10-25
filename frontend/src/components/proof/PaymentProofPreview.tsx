@@ -70,6 +70,8 @@ export function PaymentProofPreview({
   const [file, setFile] = useState<PaymentProofFile | null>(null)
   const [objectUrl, setObjectUrl] = useState<string | null>(null)
   const [enlarged, setEnlarged] = useState(false)
+  const [zoom, setZoom] = useState(1)
+  const [rotation, setRotation] = useState(0)
   const [nonce, setNonce] = useState(0)
   const modalRef = useRef<HTMLDivElement | null>(null)
 
@@ -79,6 +81,43 @@ export function PaymentProofPreview({
   loadRef.current = load
 
   const retry = useCallback(() => setNonce((current) => current + 1), [])
+
+  const openEnlarged = () => {
+    setZoom(1)
+    setRotation(0)
+    setEnlarged(true)
+  }
+
+  const closeEnlarged = useCallback(() => {
+    setEnlarged(false)
+    setZoom(1)
+    setRotation(0)
+  }, [])
+
+  const handleRotate = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setRotation((prev) => (prev + 90) % 360)
+  }
+
+  const handleZoomIn = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setZoom((prev) => Math.min(prev + 0.3, 3))
+  }
+
+  const handleZoomOut = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setZoom((prev) => Math.max(prev - 0.3, 0.7))
+  }
+
+  const handleZoomReset = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setZoom(1)
+  }
+
+  const toggleImageZoom = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setZoom((prev) => (prev === 1 ? 1.8 : 1))
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -110,18 +149,19 @@ export function PaymentProofPreview({
     return () => revokeObjectUrl(objectUrl)
   }, [objectUrl])
 
-  // Keyboard-accessible enlarge dialog (Escape closes; focus moves to Close).
+  // Keyboard-accessible enlarge dialog (Escape closes; + / - zooms; R rotates).
   useEffect(() => {
     if (!enlarged) return
     modalRef.current?.focus()
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setEnlarged(false)
+      if (event.key === 'Escape') closeEnlarged()
+      if (event.key === '+' || event.key === '=') setZoom((prev) => Math.min(prev + 0.3, 3))
+      if (event.key === '-' || event.key === '_') setZoom((prev) => Math.max(prev - 0.3, 0.7))
+      if (event.key === 'r' || event.key === 'R') setRotation((prev) => (prev + 90) % 360)
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [enlarged])
-
-  const closeEnlarged = useCallback(() => setEnlarged(false), [])
+  }, [enlarged, closeEnlarged])
 
   const contentType = baseContentType(file?.contentType ?? mimeType)
   const isImage = contentType.startsWith('image/')
@@ -163,7 +203,7 @@ export function PaymentProofPreview({
               type="button"
               className="proof-preview__thumb"
               aria-label="Open payment receipt enlarged"
-              onClick={() => setEnlarged(true)}
+              onClick={openEnlarged}
             >
               <img className="proof-preview__image" src={objectUrl} alt={altText} />
             </button>
@@ -193,8 +233,8 @@ export function PaymentProofPreview({
 
           <div className="proof-preview__actions">
             {isImage && objectUrl && (
-              <Button type="button" variant="outline" onClick={() => setEnlarged(true)}>
-                Open / Enlarge
+              <Button type="button" variant="outline" aria-label="Open / Enlarge" onClick={openEnlarged}>
+                🔍 View Full Receipt • በሙሉ ይመልከቱ
               </Button>
             )}
             {!isImage && canOpenInNewTab && (
@@ -226,6 +266,21 @@ export function PaymentProofPreview({
           aria-label={altText}
           onClick={closeEnlarged}
         >
+          <div className="proof-preview__lightbox-header">
+            <div className="proof-preview__lightbox-title">
+              🧾 {fileName || 'Receipt Slip'} {typeof sizeBytes === 'number' ? `• ${formatBytes(sizeBytes)}` : ''}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className="proof-preview__close-round"
+            onClick={closeEnlarged}
+            aria-label="Close enlarged receipt"
+          >
+            ✕
+          </button>
+
           <div
             ref={modalRef}
             tabIndex={-1}
@@ -233,13 +288,75 @@ export function PaymentProofPreview({
             onClick={(event) => event.stopPropagation()}
           >
             <img
-              className={cn('proof-preview__image', 'proof-preview__image--large')}
+              className={cn(
+                'proof-preview__image',
+                'proof-preview__image--large',
+                zoom > 1 && 'is-zoomed'
+              )}
               src={objectUrl}
               alt={altText}
+              style={{
+                transform: `scale(${zoom}) rotate(${rotation}deg)`,
+              }}
+              onClick={toggleImageZoom}
+              title="Click to toggle zoom"
             />
-            <Button type="button" variant="outline" onClick={closeEnlarged}>
-              Close
-            </Button>
+          </div>
+
+          <div
+            className="proof-preview__lightbox-toolbar"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="proof-preview__tool-btn"
+              onClick={handleRotate}
+              title="Rotate 90 degrees (R)"
+            >
+              ⟳ Rotate
+            </button>
+            <button
+              type="button"
+              className="proof-preview__tool-btn"
+              onClick={handleZoomOut}
+              title="Zoom out (-)"
+            >
+              −
+            </button>
+            <button
+              type="button"
+              className="proof-preview__tool-btn"
+              onClick={handleZoomReset}
+              title="Reset zoom"
+            >
+              {Math.round(zoom * 100)}%
+            </button>
+            <button
+              type="button"
+              className="proof-preview__tool-btn"
+              onClick={handleZoomIn}
+              title="Zoom in (+)"
+            >
+              +
+            </button>
+            {file && (
+              <button
+                type="button"
+                className="proof-preview__tool-btn"
+                onClick={() => saveBlob(file.blob, file.fileName ?? fileName ?? null)}
+                title="Download file"
+              >
+                ⬇ Download
+              </button>
+            )}
+            <button
+              type="button"
+              className="proof-preview__tool-btn"
+              onClick={closeEnlarged}
+              title="Close modal (Esc)"
+            >
+              ✕ Close
+            </button>
           </div>
         </div>
       )}

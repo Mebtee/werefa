@@ -74,8 +74,29 @@ export function ServicesPage() {
             <ul className="service-list">
               {services.map((service) => (
                 <li key={service.id} className="card card--padded service-row">
-                  <div className="service-row__main">
-                    <h2 className="service-row__name">{service.name}</h2>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '16px', minWidth: 0 }}>
+                    <div
+                      style={{
+                        width: '42px',
+                        height: '42px',
+                        borderRadius: '10px',
+                        background: service.isActive
+                          ? 'linear-gradient(135deg, rgba(115, 103, 240, 0.2), rgba(115, 103, 240, 0.08))'
+                          : 'rgba(148, 163, 184, 0.12)',
+                        color: service.isActive ? 'var(--accent, #7367f0)' : 'var(--color-text-muted)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '20px',
+                        flexShrink: 0,
+                        border: '1px solid rgba(115, 103, 240, 0.2)',
+                      }}
+                      aria-hidden="true"
+                    >
+                      <i className="ri-scissors-2-line" />
+                    </div>
+                    <div className="service-row__main">
+                      <h2 className="service-row__name">{service.name}</h2>
                     <ul className="service-row__facts">
                       <li>{formatMoney(service.basePriceMinor, business.currency)}</li>
                       <li>{service.baseDurationMinutes} min</li>
@@ -89,7 +110,8 @@ export function ServicesPage() {
                       </li>
                     </ul>
                   </div>
-                  <div className="service-row__side">
+                </div>
+                <div className="service-row__side">
                     <span
                       className={service.isActive ? 'status-pill status-pill--on' : 'status-pill'}
                     >

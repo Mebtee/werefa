@@ -41,6 +41,7 @@
     "argon2": "^0.45.1",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
+    "google-auth-library": "^11.2.0",
     "helmet": "^8.1.0",
     "pino": "^9.6.0",
     "pino-http": "^10.5.0",

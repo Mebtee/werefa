@@ -15,8 +15,11 @@ export async function withBusinessAdvisoryLock<T>(
   businessId: string,
   fn: (tx: Prisma.TransactionClient) => Promise<T>,
 ): Promise<T> {
-  return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${businessId}))`;
-    return fn(tx);
-  });
+  return prisma.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${businessId}))`;
+      return fn(tx);
+    },
+    { maxWait: 15000, timeout: 30000 },
+  );
 }
