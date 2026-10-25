@@ -6,7 +6,7 @@ import { CONFIG } from '../../config/config.constants';
 import { ActorContext } from '../../domain/authorization/actor-context';
 import { AuthService, ClientInfo, LoginOutcome } from '../../domain/services/auth.service';
 import { AdminManagementService } from '../../domain/services/admin-management.service';
-import { sessionCookieOptions } from '../cookie-utils';
+import { SessionSameSite, sessionCookieOptions } from '../cookie-utils';
 import { clientInfoFrom } from '../client-info';
 import { Actor, ApiAuthGuard } from '../../api/auth/api-auth.guard';
 import { ChangePasswordDto, LoginDto, RegisterOwnerDto } from './auth.dto';
@@ -41,7 +41,11 @@ export class AuthController {
     res.cookie(
       this.config.authCookieName,
       outcome.sessionToken,
-      sessionCookieOptions(this.config.nodeEnv, this.config.authSessionTtlHours),
+      sessionCookieOptions(
+        this.config.nodeEnv,
+        this.config.authSessionTtlHours,
+        this.config.authCookieSameSite as SessionSameSite,
+      ),
     );
     return {
       expiresAt: outcome.expiresAt,
@@ -64,7 +68,11 @@ export class AuthController {
     res.cookie(
       this.config.authCookieName,
       outcome.sessionToken,
-      sessionCookieOptions(this.config.nodeEnv, this.config.authSessionTtlHours),
+      sessionCookieOptions(
+        this.config.nodeEnv,
+        this.config.authSessionTtlHours,
+        this.config.authCookieSameSite as SessionSameSite,
+      ),
     );
     return {
       status: HttpStatus.CREATED,
@@ -79,7 +87,18 @@ export class AuthController {
   async logout(@Req() req: ExpressRequest, @Res({ passthrough: true }) res: Response): Promise<void> {
     const cookies = parseCookies(req.headers.cookie);
     await this.authService.logout(cookies[this.config.authCookieName]);
-    res.clearCookie(this.config.authCookieName);
+    const clearOpts = sessionCookieOptions(
+      this.config.nodeEnv,
+      this.config.authSessionTtlHours,
+      this.config.authCookieSameSite as SessionSameSite,
+    );
+    // Express clearCookie needs matching attributes for cross-site cookies
+    res.clearCookie(this.config.authCookieName, {
+      httpOnly: clearOpts.httpOnly,
+      sameSite: clearOpts.sameSite,
+      secure: clearOpts.secure,
+      path: clearOpts.path,
+    });
   }
 
   @Post('password/change')
