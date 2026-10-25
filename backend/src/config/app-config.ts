@@ -106,6 +106,7 @@ export const appConfigSchema = z.object({
   authRecoveryMaxAttempts: z.coerce.number().int().min(1).max(10).default(5),
   authRecoveryCodeLength: z.coerce.number().int().min(6).max(8).default(6),
   authCookieName: z.string().min(1).max(64).default('werefa_session'),
+  authCookieSameSite: z.enum(['lax', 'strict', 'none']).default('lax'),
   /** Local directory for staged/proof object storage (Prompt 50, REQ-118). */
   proofStorageDir: z.string().min(1).default('./storage/proofs'),
   // ---- Telegram integration (Prompt 51; spec §18, REQ-056 … REQ-068) --------
@@ -205,6 +206,7 @@ function rawToParsed(env: Record<string, string | undefined>): z.infer<typeof ap
     authRecoveryMaxAttempts: env.AUTH_RECOVERY_MAX_ATTEMPTS || undefined,
     authRecoveryCodeLength: env.AUTH_RECOVERY_CODE_LENGTH || undefined,
     authCookieName: env.AUTH_COOKIE_NAME || undefined,
+    authCookieSameSite: env.AUTH_COOKIE_SAME_SITE || undefined,
     proofStorageDir: env.PROOF_STORAGE_DIR || undefined,
     telegramEnabled: env.TELEGRAM_ENABLED || undefined,
     telegramBotToken: env.TELEGRAM_BOT_TOKEN || undefined,
@@ -280,6 +282,16 @@ export function assertConfigInvariants(config: AppConfig): void {
     if (!config.telegramBotToken) issues.push('TELEGRAM_BOT_TOKEN is required when TELEGRAM_ENABLED=true');
     if (!config.telegramBotHandle) issues.push('TELEGRAM_BOT_HANDLE is required when TELEGRAM_ENABLED=true');
     if (!config.telegramBotWebhookSecret) issues.push('TELEGRAM_BOT_WEBHOOK_SECRET is required when TELEGRAM_ENABLED=true');
+  }
+
+  // SameSite=None requires Secure=true (HTTPS) and is not safe in non-production contexts.
+  if (config.authCookieSameSite === 'none') {
+    if (config.nodeEnv !== 'production') {
+      issues.push('AUTH_COOKIE_SAME_SITE=none is only allowed when NODE_ENV=production');
+    }
+    if (config.authTestEnabled) {
+      issues.push('AUTH_COOKIE_SAME_SITE=none cannot be used when AUTH_TEST_ENABLED=true');
+    }
   }
 
   if (issues.length > 0) {
