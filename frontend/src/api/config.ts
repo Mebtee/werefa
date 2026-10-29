@@ -6,6 +6,10 @@
  * production build MUST configure the value explicitly: we never ship a
  * hard-coded localhost origin, so an unset production base URL throws rather
  * than silently pointing at a developer machine.
+ *
+ * A root-relative value such as `/api/v1` is supported so split deployments
+ * (e.g. Vercel + Render) can proxy the API through the frontend origin. That
+ * makes the session cookie first-party and keeps the safer SameSite=Lax policy.
  */
 export const DEVELOPMENT_API_BASE_URL = 'http://localhost:3000/api/v1'
 

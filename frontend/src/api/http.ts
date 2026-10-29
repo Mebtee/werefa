@@ -83,7 +83,11 @@ function createRequestId(): string {
 function buildUrl(path: string, query: ApiRequestOptions['query']): string {
   const base = resolveApiBaseUrl()
   const normalizedPath = path.startsWith('/') ? path : `/${path}`
-  const url = new URL(`${base}${normalizedPath}`)
+  // An absolute base (dev or a dedicated API origin) ignores the second
+  // argument. A root-relative base (`/api/v1`, same-origin proxy) resolves
+  // against the page origin. The fallback keeps non-browser callers working.
+  const origin = globalThis.location?.origin ?? 'http://localhost'
+  const url = new URL(`${base}${normalizedPath}`, origin)
   if (query) {
     for (const [key, value] of Object.entries(query)) {
       if (value === undefined || value === null) continue

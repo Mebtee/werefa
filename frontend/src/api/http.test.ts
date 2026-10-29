@@ -44,6 +44,10 @@ describe('resolveApiBaseUrl', () => {
   it('ignores a blank configured value and uses the dev fallback', () => {
     expect(resolveApiBaseUrl('   ', true)).toBe(DEVELOPMENT_API_BASE_URL)
   })
+
+  it('keeps a root-relative base URL for same-origin proxies', () => {
+    expect(resolveApiBaseUrl('/api/v1/', false)).toBe('/api/v1')
+  })
 })
 
 describe('apiRequest', () => {
@@ -59,6 +63,18 @@ describe('apiRequest', () => {
     const headers = init.headers as Record<string, string>
     expect(headers['X-Request-Id']).toBeTruthy()
     expect(headers.Accept).toBe('application/json')
+  })
+
+  it('resolves a root-relative base against the page origin', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', '/api/v1')
+    try {
+      const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(200, {}))
+      await apiRequest('/auth/session', { fetchImpl })
+      const [url] = fetchImpl.mock.calls[0] as [string, RequestInit]
+      expect(url).toBe(`${window.location.origin}/api/v1/auth/session`)
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it('serializes a JSON body and sets Content-Type on POST', async () => {
