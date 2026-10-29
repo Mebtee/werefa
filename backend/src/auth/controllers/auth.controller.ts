@@ -93,7 +93,11 @@ export class AuthController {
     res.cookie(
       this.config.authCookieName,
       outcome.sessionToken,
-      sessionCookieOptions(this.config.nodeEnv, this.config.authSessionTtlHours),
+      sessionCookieOptions(
+        this.config.nodeEnv,
+        this.config.authSessionTtlHours,
+        this.config.authCookieSameSite as SessionSameSite,
+      ),
     );
     return {
       status: HttpStatus.OK,
