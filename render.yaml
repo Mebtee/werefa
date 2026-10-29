@@ -62,6 +62,12 @@ services:
       # Telegram stays disabled (fail-safe) until the product owner enables it.
       - key: TELEGRAM_ENABLED
         value: 'false'
+      # The Vercel frontend proxies /api/* to this service (frontend/vercel.json),
+      # so the browser sees the API on the frontend origin and the session
+      # cookie stays first-party. The safer SameSite=Lax default is therefore
+      # kept. If that proxy is ever removed and the frontend calls Render
+      # directly, set AUTH_COOKIE_SAME_SITE=none (production only) instead.
+      # AUTH_COOKIE_SAME_SITE=lax
       # --- Secrets / owner-supplied values: prompted at Blueprint setup ------
       # Comma-separated exact frontend origin(s); '*' is rejected by the app.
       - key: CORS_ORIGINS

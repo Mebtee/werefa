@@ -90,6 +90,10 @@ Key rules:
 
 - `DATABASE_URL` is **required** when `NODE_ENV=production`.
 - `CORS_ORIGINS` must list explicit origins; `*` is rejected.
+- For split deployments (Vercel + Render), the frontend proxies `/api/*` to Render
+  and sets `VITE_API_BASE_URL=/api/v1`, so the API is same-origin and the session
+  cookie stays first-party. Without that proxy, set `AUTH_COOKIE_SAME_SITE=none`
+  (production only); the default `lax` is not sent on cross-site API calls.
 - `AUTH_TEST_ENABLED=true` is rejected in production (the header-based test actor
   bridge is otherwise unreachable in production regardless).
 - `TELEGRAM_ENABLED=true` requires `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_HANDLE` and
@@ -229,8 +233,11 @@ Supplying these is an operations decision and is intentionally **not** hard-code
 - Production PostgreSQL instance + `DATABASE_URL` / `MIGRATOR_DATABASE_URL`.
 - Deployment packaging (Dockerfiles / process manager) and TLS/reverse-proxy
   topology; set `TRUST_PROXY` accordingly.
-- The production frontend origin in `CORS_ORIGINS` and its matching
-  `VITE_API_BASE_URL`.
+- The production frontend origin in `CORS_ORIGINS` (not needed for the same-origin
+  `/api` proxy, but harmless and required if the frontend ever calls Render
+  directly) and the matching `VITE_API_BASE_URL` (`/api/v1` for the proxy).
+- `AUTH_COOKIE_SAME_SITE=none` only if the frontend calls Render directly across
+  sites. The proxy keeps the safer `lax` default.
 - Durable storage for `PROOF_STORAGE_DIR`.
 - An approved external `EmailProvider` implementation and credentials.
 - Telegram bot credentials + public webhook URL (only if the Telegram channel is
