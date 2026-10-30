@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import jsPDF from 'jspdf'
 import { DownloadIcon, ReceiptIcon } from '@/components/ui/icons'
 
 interface BookingReceiptDownloadProps {
@@ -34,6 +33,7 @@ export function BookingReceiptDownload({
   const handleDownload = async () => {
     setGenerating(true)
     try {
+      const { default: jsPDF } = await import('jspdf')
       const doc = new jsPDF({
         orientation: 'portrait',
         unit: 'mm',
